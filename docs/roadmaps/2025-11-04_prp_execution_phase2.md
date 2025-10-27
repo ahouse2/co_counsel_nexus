@@ -1,0 +1,56 @@
+# PRP Execution Run — Phase 2 Ingestion Expansion
+
+- ## Vision: Elevate ingestion to multi-source, auditable, and observable pipeline aligning with PRP Phase 2 exit criteria.
+  - ### Objectives
+    - #### O1: Harden storage & lifecycle scaffolding inherited from Phase 1.
+      - ##### Tasks
+        - Implement identifier normalisation + traversal guards across file-backed stores.
+        - Introduce ingestion job lifecycle manifest with timestamps, status transitions, and structured error capture.
+        - Emit structured logs around ingestion milestones for observability.
+    - #### O2: Expand ingestion connectors and document normalisation fidelity.
+      - ##### Tasks
+        - Materialise connector framework supporting `local`, `s3`, and `sharepoint` sources with credential resolution.
+        - Stage remote sources into deterministic workspace directories keyed by job ID.
+        - Enrich document metadata (size, checksum, MIME, origin URI) before persistence and downstream indexing.
+    - #### O3: Surface lifecycle telemetry via API contracts & tests.
+      - ##### Tasks
+        - Implement `GET /ingest/{job_id}` returning `IngestionStatusResponse` per spec (status enums, timestamps, errors).
+        - Update `/ingest` response semantics to reflect queued → running → succeeded states within manifest.
+        - Extend backend tests validating lifecycle endpoint, manifest shape, and status detail counters.
+
+- ## Decision Tree Snapshot
+  - ### Connector Strategy
+    - #### Option A: Keep Phase 1 local-only ingestion (rejected — fails PRP Phase 2 requirements).
+    - #### Option B: Implement synchronous remote fetchers using boto3/Office365 clients (**selected** for production parity with manageable complexity).
+    - #### Option C: Proxy remote ingestion via async worker queue (postponed until Phase 4 orchestration).
+  - ### Credential Resolution
+    - #### Option A: Hard-code secrets in environment (rejected — insecure & unscalable).
+    - #### Option B: JSON-backed credential registry resolved at runtime (**selected** for deterministic tests + easy rotation hooks).
+    - #### Option C: External secret manager integration (future extension once infra team provisions vault bridge).
+  - ### Job Lifecycle Persistence
+    - #### Option A: Append-only JSONL stream (difficult to query per job) — rejected.
+    - #### Option B: Single manifest per job with rewrites on state transitions (**selected** for clarity + compatibility with polling endpoint).
+    - #### Option C: Embedded SQLite job tracker (deferred to scalability milestone).
+
+- ## Risk Ledger
+  - ### R1: Remote connector dependencies unavailable in minimal env.
+    - #### Mitigation: Lazy-import connectors, raise actionable HTTP 503 with remediation notes, document optional dependencies.
+  - ### R2: Path normalisation regressions breaking existing manifests/tests.
+    - #### Mitigation: Preserve hashed IDs, add regression tests asserting manifest accessibility, run pytest after refactor.
+  - ### R3: Workspace growth due to retained remote downloads.
+    - #### Mitigation: Namespace workspace per job; add TODO for retention policy integration Phase 4.
+
+- ## Execution Checklist
+  - ### Phase Delta — Storage & Security Hardening
+    - Author `backend/app/utils/storage.py` helpers for identifier sanitisation and safe writes.
+    - Refactor `DocumentStore` & `JobStore` to enforce guards and expose `update` semantics.
+    - Thread structured logging into ingestion workflow.
+  - ### Phase Epsilon — Connector Framework & Metadata Enrichment
+    - Add credential registry utility + connector implementations (`local`, `s3`, `sharepoint`).
+    - Extend settings for registry/workspace directories; ensure directory bootstrap.
+    - Enrich ingestion metadata + forensics linkage, updating job manifest schema accordingly.
+  - ### Phase Zeta — API & Test Surface
+    - Define new Pydantic models for ingestion status payload.
+    - Wire FastAPI route `/ingest/{job_id}` → service accessor.
+    - Update/extend pytest suite covering manifest counters, status enums, and job polling contract.
+    - Refresh build log + ACE memory + stewardship log after verification.

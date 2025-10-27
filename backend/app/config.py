@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     timeline_path: Path = Field(default=Path("storage/timeline.jsonl"))
     job_store_dir: Path = Field(default=Path("storage/jobs"))
     document_store_dir: Path = Field(default=Path("storage/documents"))
+    ingestion_workspace_dir: Path = Field(default=Path("storage/workspaces"))
+    credentials_registry_path: Path | None = Field(default=None)
 
     qdrant_collection: str = Field(default="cocounsel_documents")
     qdrant_vector_size: int = Field(default=128)
@@ -42,6 +44,7 @@ class Settings(BaseSettings):
         self.timeline_path.parent.mkdir(parents=True, exist_ok=True)
         self.job_store_dir.mkdir(parents=True, exist_ok=True)
         self.document_store_dir.mkdir(parents=True, exist_ok=True)
+        self.ingestion_workspace_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
