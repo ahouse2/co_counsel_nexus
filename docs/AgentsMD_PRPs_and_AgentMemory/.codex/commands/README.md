@@ -23,3 +23,7 @@ The helper script `tools/run_command.sh` is expected to:
 4. Persist declared artifacts.
 
 > _Note_: The helper script is not yet implemented in this repository. Until it exists, run the `steps` entries manually.
+
+## Rapid-Development Experiments
+
+- [`rapid-development/experimental/prp-analyze-run.md`](rapid-development/experimental/prp-analyze-run.md) — structured notes template for logging outcomes after executing rapid-development commands or ACE validation runs.

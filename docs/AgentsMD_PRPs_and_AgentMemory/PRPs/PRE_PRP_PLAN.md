@@ -1,5 +1,7 @@
 # Pre‑PRP Plan — Co‑Counsel Commercial Build
 
+> **PRP Navigation:** [Base](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_base.md) · [Planning](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_planning.md) · [Spec](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_spec.md) · [Tasks](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_tasks.md) · [Pre-PRP Plan](PRE_PRP_PLAN.md) · [ACE Execution Guide](EXECUTION_GUIDE_ACE.md) · [Task List Master](TASK_LIST_MASTER.md) · [PRP Templates](templates/README.md) · [Rapid Dev Commands](../.codex/commands/README.md)
+
 Purpose: Establish shared context and an execution playbook before coding. Aligns prior blueprints (previous builds/docs) with the target stack: Microsoft Agents Framework SDK, LlamaIndex + LlamaHub, Swarms, Neo4j, Qdrant/Chroma, React UI, Whisper/Coqui.
 
 ## Vision & Bar

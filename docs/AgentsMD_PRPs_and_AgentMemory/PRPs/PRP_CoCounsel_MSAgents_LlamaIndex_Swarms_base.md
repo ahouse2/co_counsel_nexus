@@ -4,6 +4,8 @@ owners:
   - "Product/Eng: andrew house"
 status: draft
 
+> **PRP Navigation:** [Base](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_base.md) · [Planning](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_planning.md) · [Spec](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_spec.md) · [Tasks](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_tasks.md) · [Pre-PRP Plan](PRE_PRP_PLAN.md) · [ACE Execution Guide](EXECUTION_GUIDE_ACE.md) · [Task List Master](TASK_LIST_MASTER.md) · [PRP Templates](templates/README.md)
+
 ## Goal / Why / What
 - Goal: Ship a vertical slice of an AI legal co-counsel capable of ingesting documents, building vector + graph indexes, and answering questions with citations via a multi-agent system.
 - Why: Enable reliable, explainable legal discovery assistance that scales to enterprise needs with strong observability and low-cost, local-first options.

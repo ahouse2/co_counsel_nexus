@@ -2,6 +2,8 @@ name: "Planning — Co-Counsel (MS Agents + LlamaIndex + Swarms)"
 description: |
   Generate a concrete PRD/plan for the legal co-counsel MVP using local-first vector+graph RAG, Microsoft Agents Framework workflows, and Swarms role schemas.
 
+> **PRP Navigation:** [Base](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_base.md) · [Planning](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_planning.md) · [Spec](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_spec.md) · [Tasks](PRP_CoCounsel_MSAgents_LlamaIndex_Swarms_tasks.md) · [Pre-PRP Plan](PRE_PRP_PLAN.md) · [ACE Execution Guide](EXECUTION_GUIDE_ACE.md) · [Task List Master](TASK_LIST_MASTER.md) · [PRP Templates](templates/README.md)
+
 ## Initial Concept
 Build an enterprise-ready legal discovery assistant (MVP) that ingests a small corpus, builds vector + graph indexes, answers questions with citations, and renders a basic timeline.
 

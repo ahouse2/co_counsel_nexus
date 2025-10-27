@@ -7,7 +7,8 @@
 
 ## 2) Repository Structure
 - `AgentsMD_PRPs_and_AgentMemory/` — PRPs, guides, and agent process docs
-- `AgentsMD_PRPs_and_AgentMemory/.codex/commands/` — declarative automation manifests (sync, validation, etc.)
+- `AgentsMD_PRPs_and_AgentMemory/PRPs/templates/` — canonical templates for drafting base, planning, spec, and tasks packets
+- `AgentsMD_PRPs_and_AgentMemory/.codex/commands/` — declarative automation manifests (sync, validation, rapid-development experiments)
 - `Reference Code/` — automation + catalog for downloading upstream SDKs (`vendor/` is populated locally)
 - `swarms-master/` — swarms orchestration library (reference)
 - `.gitattributes` — LFS rules for media (note: currently contains junk bytes to clean later)
@@ -67,8 +68,8 @@ Run
 - Large reference repos — commit selectively; use LFS for assets
 
 ## 9) Docs & Resources
-- PRPs templates under `AgentsMD_PRPs_and_AgentMemory/PRPs/templates/`
-- Process commands under `AgentsMD_PRPs_and_AgentMemory/.codex/commands/` (e.g., `validate-doc-links`, `sync-reference-assets`)
+- PRP templates under `AgentsMD_PRPs_and_AgentMemory/PRPs/templates/`
+- Process commands under `AgentsMD_PRPs_and_AgentMemory/.codex/commands/` (e.g., `validate-doc-links`, `sync-reference-assets`; see `rapid-development/experimental/prp-analyze-run.md` for the analysis log template)
 
 ## 10) Next Steps Checklist
 1. Read PRP base/spec/planning/tasks
