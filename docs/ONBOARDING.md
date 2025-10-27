@@ -7,7 +7,8 @@
 
 ## 2) Repository Structure
 - `AgentsMD_PRPs_and_AgentMemory/` — PRPs, guides, and agent process docs
-- `Reference Code/` — upstream codebases to integrate (e.g., Microsoft agent framework, llama-hub)
+- `AgentsMD_PRPs_and_AgentMemory/.codex/commands/` — declarative automation manifests (sync, validation, etc.)
+- `Reference Code/` — automation + catalog for downloading upstream SDKs (`vendor/` is populated locally)
 - `swarms-master/` — swarms orchestration library (reference)
 - `.gitattributes` — LFS rules for media (note: currently contains junk bytes to clean later)
 
@@ -21,6 +22,23 @@ Environment
 Install (suggested commands)
 - Python: create venv, install backend deps (to be defined in project setup)
 - Node: install UI deps when UI folder is added
+
+Reference SDK acquisition
+1. Ensure Git and Python 3.11+ are installed; install PyYAML for catalog parsing:
+   ```bash
+   pip install --upgrade pyyaml
+   ```
+2. Synchronise all catalogued upstream repositories into `Reference Code/vendor/`:
+   ```bash
+   python Reference\ Code/sync_reference_code.py --dest "Reference Code/vendor"
+   ```
+3. (Optional) Clone a single dependency manually if the automation cannot reach GitHub:
+   ```bash
+   git clone --depth 1 --branch v0.2.27 https://github.com/microsoft/autogen.git "Reference Code/vendor/agent-framework-main"
+   git clone --depth 1 https://github.com/run-llama/llama-hub.git "Reference Code/vendor/llama-hub"
+   git clone --depth 1 https://github.com/kyegomez/swarms.git "Reference Code/vendor/swarms-master"
+   ```
+4. Confirm `Reference Code/vendor/` is excluded from Git (see `Reference Code/.gitignore`).
 
 Run
 - Use Docker Compose (to be added) to bring up api, Neo4j, and vector DB
@@ -50,7 +68,7 @@ Run
 
 ## 9) Docs & Resources
 - PRPs templates under `AgentsMD_PRPs_and_AgentMemory/PRPs/templates/`
-- Process commands under `AgentsMD_PRPs_and_AgentMemory/.codex/commands/`
+- Process commands under `AgentsMD_PRPs_and_AgentMemory/.codex/commands/` (e.g., `validate-doc-links`, `sync-reference-assets`)
 
 ## 10) Next Steps Checklist
 1. Read PRP base/spec/planning/tasks
