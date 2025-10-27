@@ -298,9 +298,14 @@ Context propagation: each node receives `case_id`, `run_id`, and `user_id`, pers
 | 4 | Enforce cite-or-silence guardrails and emit structured answer |
 
 ## Non-Functional Requirements
-| Category | Expectation |
-| --- | --- |
-| Availability | Core flows operate offline-first |
-| Reproducibility | Deterministic seeds for repeatable runs |
-| Performance | Responsive on laptop-scale corpora |
-| Provider Policy | Default `Gemini-2.5-Flash`; configurable `GPT-5.0` option |
+| Category | SLO | Validation |
+| --- | --- | --- |
+| Availability & Offline Continuity | \>=99.5% API uptime measured monthly; ingest queue must buffer 12 hours of backlog at 150 documents/hour (1,800 documents) without data loss. | Continuous health polling via `tools/monitoring/uptime_probe.py` and offline drain rehearsal documented in [docs/validation/nfr_validation_matrix.md#offline-tolerance](../../validation/nfr_validation_matrix.md#offline-tolerance). |
+| Reproducibility | \<=0.5% drift tolerance across job manifests, timeline events, and forensics hashes when replaying the same workspace three times; cryptographic hashes must match exactly. | Deterministic replay harness `tools/perf/reproducibility_check.py`. |
+| Performance | `/query` p95 latency \<=1,800 ms under Baseline Query load profile; sustained ingest throughput \>=150 documents/hour for three-file workspaces on reference hardware. | Synthetic workload driver `tools/perf/query_latency_probe.py` executed with the Baseline Query and Batch Ingest profiles in [docs/validation/nfr_validation_matrix.md#load-profiles](../../validation/nfr_validation_matrix.md#load-profiles). |
+| Provider Policy | \>=95% of LLM calls routed to `gemini-2.5-flash`; fallback providers collectively \<=1% error rate over any rolling 7-day window. | Invocation ledger audit using `tools/monitoring/provider_mix_check.py` against the `build_logs/llm_invocations.jsonl` export. |
+
+### Validation Hardware & Load Profiles
+- Reference hardware: 8 vCPU (3.0 GHz Ryzen 7840HS class), 32 GB RAM, NVMe SSD (3.2 GB/s sequential read), no discrete GPU required.
+- Network: \<=40 ms RTT to vector and graph stores during validation, 1 Gbps LAN.
+- Detailed load profiles and execution guidance are catalogued in [docs/validation/nfr_validation_matrix.md](../../validation/nfr_validation_matrix.md).
