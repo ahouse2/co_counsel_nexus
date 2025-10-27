@@ -289,6 +289,158 @@ version: 0.2
 
 Context propagation: each node receives `case_id`, `run_id`, and `user_id`, persisting to shared memory. Telemetry: OTel spans emitted per node; logs must capture retrieval context and token usage.
 
+### Canonical Agent States
+- `idle`: awaiting work; resources may be warm.
+- `pending`: job accepted, prerequisites (credentials, routing) validating.
+- `active`: executing primary workload.
+- `waiting`: blocked on upstream artifact or external callback; timer guards enforced.
+- `succeeded`: work finished; downstream notifications emitted.
+- `soft_failed`: transient issue encountered; eligible for retry budget.
+- `hard_failed`: unrecoverable error; pipeline halts or reroutes to human review.
+- `cancelled`: run intentionally aborted; emit compensating actions if needed.
+
+### State Transitions, Failure Handling, and Retry Logic
+
+#### Ingestion Node
+| From State | Event / Condition | To State | Failure Handling | Retry Logic |
+| --- | --- | --- | --- | --- |
+| `idle` | Job dequeued | `pending` | Validate source schema; emit `ingestion.accepted` span event | n/a |
+| `pending` | Connectors resolved & credentials fetched | `active` | Missing credential ➜ mark `soft_failed` | Retry up to 3 times, exp backoff (2^n * 15s) with jitter |
+| `pending` | Validation error (schema, path) | `hard_failed` | Emit `ingestion.validation_error`; publish to human review queue | No retry; requires payload correction |
+| `active` | All sources loaded, chunks persisted | `succeeded` | Emit `ingestion.completed` metric; notify GraphBuilder | n/a |
+| `active` | Connector timeout / throttling | `soft_failed` | Record `ingestion.transient_failure` with connector id | Retry remaining budget with exponential backoff |
+| `soft_failed` | Retry budget exhausted | `hard_failed` | Emit `case_handoff_required` signal | No further attempts |
+| any | Cancellation request | `cancelled` | Issue delete for partially persisted artifacts | No retry |
+
+#### GraphBuilder Node
+| From State | Event / Condition | To State | Failure Handling | Retry Logic |
+| --- | --- | --- | --- | --- |
+| `idle` | Receives `ingestion.completed` event | `pending` | Validate artifact manifest presence | n/a |
+| `pending` | Neo4j session established, ontology cached | `active` | Missing ontology ➜ `soft_failed` with cache refresh | 2 retries, backoff 30s then 60s |
+| `pending` | Manifest missing / corrupt | `hard_failed` | Emit `graphbuilder.artifact_missing`; request re-ingest | Requires upstream remediation |
+| `active` | Triples committed & indexes refreshed | `succeeded` | Emit `graphbuilder.completed`; trigger Research | n/a |
+| `active` | Neo4j commit failure / deadlock | `soft_failed` | Rollback transaction; log `graphbuilder.retry` | Retry with randomized delay 20–45s |
+| `active` | Schema mismatch (fatal) | `hard_failed` | Raise `graphbuilder.schema_violation`; stop downstream | Manual migration required |
+| any | Cancellation request | `cancelled` | Abort session; delete partial nodes via compensating Cypher | No retry |
+
+#### Research Node
+| From State | Event / Condition | To State | Failure Handling | Retry Logic |
+| --- | --- | --- | --- | --- |
+| `idle` | Receives `graphbuilder.completed` | `pending` | Load retrieval context; warm LLM session | n/a |
+| `pending` | Vector + graph context ready | `active` | Missing vector context ➜ `soft_failed` and request replay | 3 retries, 10s base backoff |
+| `pending` | Prompt safety policy violation | `hard_failed` | Emit `research.policy_blocked`; escalate | Manual override only |
+| `active` | LLM response received, citations validated | `succeeded` | Emit `research.answer_ready`; notify Timeline | n/a |
+| `active` | LLM timeout / provider outage | `soft_failed` | Record `research.provider_timeout`; rotate model if configured | Retry with provider failover list |
+| `active` | Citation validation fails repeatedly | `hard_failed` | Emit `research.citation_failure`; trigger curator intervention | No further retries |
+| any | Cancellation request | `cancelled` | Drop conversation memory; release tokens | No retry |
+
+#### Timeline Node
+| From State | Event / Condition | To State | Failure Handling | Retry Logic |
+| --- | --- | --- | --- | --- |
+| `idle` | Receives `research.answer_ready` | `pending` | Fetch structured events & embeddings | n/a |
+| `pending` | Event store reachable | `active` | Event store lag ➜ `soft_failed` | Retry twice, 20s base backoff |
+| `pending` | Event store unreachable > 5 min | `hard_failed` | Emit `timeline.store_unavailable`; raise alert | Manual recovery |
+| `active` | Timeline assembled, pagination metadata computed | `succeeded` | Emit `timeline.published`; fan-out to subscribers | n/a |
+| `active` | Ordering conflict (timestamp gaps) | `soft_failed` | Apply clock skew correction; re-run build | Retry remaining budget |
+| `active` | Data corruption detected | `hard_failed` | Emit `timeline.data_corruption`; freeze run | Requires upstream fix |
+| any | Cancellation request | `cancelled` | Remove partial timeline artifacts | No retry |
+
+#### Forensics Nodes
+| Node | From State | Event / Condition | To State | Failure Handling | Retry Logic |
+| --- | --- | --- | --- | --- | --- |
+| DocumentForensicsAgent | `idle` | Receives `timeline.published` | `pending` | Validate document manifest | n/a |
+| DocumentForensicsAgent | `pending` | Storage accessible | `active` | Storage throttle ➜ `soft_failed` | Retry 3x, 25s base backoff |
+| DocumentForensicsAgent | `active` | Hashing + structure extraction done | `succeeded` | Emit `forensics.document_ready` | n/a |
+| DocumentForensicsAgent | `active` | Parser fatal error | `hard_failed` | Emit `forensics.document_error`; attach stack trace | Manual tool patch |
+| ImageForensicsAgent | `idle` | Receives `timeline.published` | `pending` | Locate media set | n/a |
+| ImageForensicsAgent | `pending` | Media available | `active` | Missing media ➜ `soft_failed` | Retry twice, 30s base backoff |
+| ImageForensicsAgent | `active` | Analysis complete (EXIF/ELA/PRNU) | `succeeded` | Emit `forensics.image_ready` | n/a |
+| ImageForensicsAgent | `active` | GPU accelerator unavailable | `soft_failed` | Queue on CPU fallback | Retry with degraded profile once |
+| ImageForensicsAgent | `soft_failed` | Fallback exhausted | `hard_failed` | Emit `forensics.image_unavailable`; escalate | n/a |
+| FinancialForensicsAgent | `idle` | Receives `timeline.published` | `pending` | Load ledger extracts | n/a |
+| FinancialForensicsAgent | `pending` | Schema validated | `active` | Schema mismatch ➜ `soft_failed` | Retry once after schema refresh |
+| FinancialForensicsAgent | `active` | Metrics computed & anomalies tagged | `succeeded` | Emit `forensics.financial_ready` | n/a |
+| FinancialForensicsAgent | `active` | Ledger schema mismatch persists | `hard_failed` | Emit `forensics.financial_blocked`; notify finance SME | No retry |
+| any Forensics Node | Cancellation request | `cancelled` | Cleanup temp artifacts; record cancellation reason | No retry |
+
+### Failure Escalation Principles
+- Transient issues (`soft_failed`) must emit structured telemetry events with `error.class = transient` and attach retry count.
+- Hard failures trigger `case_handoff_required` events with enriched context (agent, run_id, diagnostics URI) for human triage.
+- Cancellation produces compensating actions: remove scratch artifacts, release locks, and log audit trail for compliance.
+
+### Agent Contracts (Inputs • Outputs • Telemetry • Memory)
+| Agent | Required Inputs | Outputs / Side Effects | Telemetry & Metrics | Memory Footprint |
+| --- | --- | --- | --- | --- |
+| Ingestion | `case_id`, source manifest, credential refs, `run_id` | Persisted chunks (blob store), vector embeddings queued, `ingestion.completed` event | Spans: `ingestion.queue`, `ingestion.load`<br>Metrics: processed bytes, chunk count<br>Logs: connector latency | Ephemeral staging buffers ≤ 2 GB<br>Persistent storage lives in blob/Qdrant |
+| GraphBuilder | `case_id`, chunk handles, ontology version, `run_id` | Neo4j nodes/edges, `graphbuilder.completed` event, updated ontology cache timestamp | Spans: `graphbuilder.extract`, `graphbuilder.commit`<br>Metrics: nodes/edges upserted, Cypher latency<br>Logs: ontology drift events | In-memory graph batch window ≤ 1 GB<br>Persistent layer: Neo4j cluster |
+| Research | Query intents, vector hits, graph triples, guardrail config | Synthesized answer, citation bundle, `research.answer_ready` event | Spans: `research.retrieve`, `research.generate`<br>Metrics: token usage, model latency<br>Logs: safety filters applied | Conversation scratchpad ≤ 256 MB<br>Ephemeral vector cache only |
+| Timeline | Event candidates, answer context, pagination policy | Ordered timeline payload, `timeline.published` event | Spans: `timeline.assemble`<br>Metrics: events emitted, time normalization adjustments<br>Logs: conflict resolution actions | Working set ≤ 512 MB for event sorting<br>Persistent timeline cache (Redis/Postgres) |
+| DocumentForensicsAgent | Document manifest, blob handles, checksum policy | Hash digests, structural metadata, `forensics.document_ready` event | Spans: `forensics.document.hash`<br>Metrics: documents processed, average parse time<br>Logs: integrity anomalies | Temp disk ≤ 1 GB for PDF/image conversions<br>Artifacts stored in forensics vault |
+| ImageForensicsAgent | Media manifest, GPU/CPU profile, anomaly thresholds | EXIF payload, ELA/PRNU scores, `forensics.image_ready` event | Spans: `forensics.image.analysis`<br>Metrics: GPU utilization, anomalies flagged<br>Logs: model confidence summaries | GPU VRAM ≤ 2 GB<br>CPU buffers ≤ 512 MB<br>Artifacts persisted to vault |
+| FinancialForensicsAgent | Ledger extracts, currency config, anomaly rules | Trend charts, anomaly list, `forensics.financial_ready` event | Spans: `forensics.financial.evaluate`<br>Metrics: transactions processed, anomaly rate<br>Logs: rule triggers | Memory pool ≤ 768 MB for ledger aggregation<br>Metrics persisted to warehouse |
+
+### Sequence Diagrams — Handoff Visibility
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Ingestion
+    participant GraphBuilder
+    participant Research
+
+    Client->>Ingestion: submit sources (case_id, run_id)
+    activate Ingestion
+    Ingestion-->>Client: job accepted (job_id)
+    Ingestion->>GraphBuilder: emit ingestion.completed
+    deactivate Ingestion
+    activate GraphBuilder
+    GraphBuilder->>GraphBuilder: upsert entities/relations
+    GraphBuilder->>Research: emit graphbuilder.completed
+    deactivate GraphBuilder
+    activate Research
+    Research->>Research: retrieve & synthesize answer
+    Research-->>Client: answer (via /query)
+    deactivate Research
+```
+
+```mermaid
+sequenceDiagram
+    participant Research
+    participant Timeline
+    participant Subscriber
+
+    Research->>Timeline: emit research.answer_ready
+    activate Timeline
+    Timeline->>Timeline: assemble chronological events
+    Timeline-->>Research: ack timeline.published
+    Timeline-->>Subscriber: deliver timeline payload
+    deactivate Timeline
+```
+
+```mermaid
+sequenceDiagram
+    participant Timeline
+    participant DocumentForensics
+    participant ImageForensics
+    participant FinancialForensics
+    participant Ops
+
+    Timeline->>DocumentForensics: fan-out timeline.published
+    Timeline->>ImageForensics: fan-out timeline.published
+    Timeline->>FinancialForensics: fan-out timeline.published
+    activate DocumentForensics
+    activate ImageForensics
+    activate FinancialForensics
+    DocumentForensics-->>Timeline: forensics.document_ready
+    ImageForensics-->>Timeline: forensics.image_ready
+    FinancialForensics-->>Timeline: forensics.financial_ready
+    DocumentForensics-->>Ops: emit case_handoff_required (on hard_fail)
+    ImageForensics-->>Ops: emit case_handoff_required (on hard_fail)
+    FinancialForensics-->>Ops: emit case_handoff_required (on hard_fail)
+    deactivate DocumentForensics
+    deactivate ImageForensics
+    deactivate FinancialForensics
+```
+
 ## Retrieval Logic
 | Step | Operation |
 | --- | --- |
