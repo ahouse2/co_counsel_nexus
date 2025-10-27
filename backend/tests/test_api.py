@@ -43,7 +43,7 @@ def sample_workspace(tmp_path) -> Path:
     root.mkdir()
     text = root / "case_notes.txt"
     text.write_text(
-        "Acme Corporation reached a settlement on 2024-10-01 after the initial filing on 2024-09-15."
+        "Acme Corporation acquired Beta LLC on 2024-10-01 after the initial filing on 2024-09-15."
     )
     image = root / "evidence.png"
     img = Image.new("RGB", (16, 16), color=(123, 45, 67))
@@ -76,6 +76,10 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert ingestion_details["documents"] == 3
     assert not ingestion_details["skipped"]
     assert job_manifest["status_details"]["timeline"]["events"] >= 1
+    graph_details = job_manifest["status_details"]["graph"]
+    assert graph_details["nodes"] == 5
+    assert graph_details["edges"] == 3
+    assert graph_details["triples"] == 1
     for doc in documents:
         metadata = doc["metadata"]
         assert metadata["checksum_sha256"]
@@ -85,18 +89,21 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert query_response.status_code == 200
     payload = query_response.json()
     assert "Acme" in payload["answer"]
+    assert "Graph analysis highlights" in payload["answer"]
     assert payload["citations"]
+    graph_edges = payload["traces"]["graph"]["edges"]
+    assert any(edge["type"] == "ACQUIRED" for edge in graph_edges)
 
     timeline_response = client.get("/timeline")
     assert timeline_response.status_code == 200
     events = timeline_response.json()["events"]
     assert events and any("2024-10-01" in event["summary"] for event in events)
 
-    graph_response = client.get("/graph/neighbor", params={"id": "entity::Acme"})
+    graph_response = client.get("/graph/neighbor", params={"id": "entity::acme_corporation"})
     assert graph_response.status_code == 200
     graph_payload = graph_response.json()
     assert graph_payload["nodes"]
-    assert graph_payload["edges"]
+    assert any(edge["type"] == "ACQUIRED" for edge in graph_payload["edges"])
 
     doc_id = doc_map["text"]["id"]
     doc_forensics = client.get("/forensics/document", params={"id": doc_id})

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -18,12 +18,13 @@ from ..storage.document_store import DocumentStore
 from ..storage.job_store import JobStore
 from ..storage.timeline_store import TimelineEvent, TimelineStore
 from ..utils.credentials import CredentialRegistry
-from ..utils.text import (
-    chunk_text,
-    extract_capitalized_entities,
-    find_dates,
-    hashed_embedding,
-    read_text,
+from ..utils.text import chunk_text, find_dates, hashed_embedding, read_text
+from ..utils.triples import (
+    EntitySpan,
+    Triple,
+    extract_entities,
+    extract_triples,
+    normalise_entity_id,
 )
 from .forensics import ForensicsService
 from .graph import GraphService, get_graph_service
@@ -53,6 +54,26 @@ class IngestedDocument:
             "title": self.title,
             "metadata": self.metadata,
         }
+
+
+@dataclass
+class GraphMutation:
+    nodes: Set[str] = field(default_factory=set)
+    edges: Set[Tuple[str, str, str, str | None]] = field(default_factory=set)
+    triples: int = 0
+
+    def record_node(self, node_id: str) -> None:
+        self.nodes.add(node_id)
+
+    def record_edge(
+        self, source: str, relation: str, target: str, doc_id: str | None
+    ) -> None:
+        self.edges.add((source, relation, target, doc_id))
+
+    def merge(self, other: "GraphMutation") -> None:
+        self.nodes.update(other.nodes)
+        self.edges.update(other.edges)
+        self.triples += other.triples
 
 
 class IngestionService:
@@ -90,6 +111,9 @@ class IngestionService:
 
         all_documents: List[IngestedDocument] = []
         all_events: List[TimelineEvent] = []
+        graph_nodes: Set[str] = set()
+        graph_edges: Set[Tuple[str, str, str, str | None]] = set()
+        triple_count = 0
         current_source_type: str | None = None
 
         try:
@@ -101,9 +125,12 @@ class IngestionService:
                 )
                 connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
                 materialized = connector.materialize(job_id, index, source)
-                documents, events, skipped = self._ingest_materialized_source(materialized)
+                documents, events, skipped, mutation = self._ingest_materialized_source(materialized)
                 all_documents.extend(documents)
                 all_events.extend(events)
+                graph_nodes.update(mutation.nodes)
+                graph_edges.update(mutation.edges)
+                triple_count += mutation.triples
 
                 job_record["documents"].extend(doc.to_dict() for doc in documents)
                 job_record["status_details"]["ingestion"]["documents"] += len(documents)
@@ -112,6 +139,9 @@ class IngestionService:
                 job_record["status_details"]["forensics"]["artifacts"].extend(
                     {"document_id": doc.id, "type": doc.type} for doc in documents
                 )
+                job_record["status_details"]["graph"]["nodes"] = len(graph_nodes)
+                job_record["status_details"]["graph"]["edges"] = len(graph_edges)
+                job_record["status_details"]["graph"]["triples"] = triple_count
                 self._touch_job(job_record)
                 self.job_store.write_job(job_id, job_record)
         except HTTPException as exc:
@@ -166,40 +196,56 @@ class IngestionService:
 
     def _ingest_materialized_source(
         self, materialized: MaterializedSource
-    ) -> Tuple[List[IngestedDocument], List[TimelineEvent], List[Dict[str, str]]]:
+    ) -> Tuple[
+        List[IngestedDocument],
+        List[TimelineEvent],
+        List[Dict[str, str]],
+        GraphMutation,
+    ]:
         root = materialized.root
         if not root.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Source path {root} not found")
         documents: List[IngestedDocument] = []
         events: List[TimelineEvent] = []
         skipped: List[Dict[str, str]] = []
+        graph_mutation = GraphMutation()
         origin = materialized.origin or str(root)
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
             suffix = path.suffix.lower()
             if suffix in _TEXT_EXTENSIONS:
-                result = self._ingest_text(path, origin)
-                documents.append(result["document"])
-                events.extend(result["timeline"])
+                document, timeline_events, mutation = self._ingest_text(path, origin)
+                documents.append(document)
+                events.extend(timeline_events)
+                graph_mutation.merge(mutation)
             elif suffix in _IMAGE_EXTENSIONS:
                 doc_meta = self._register_document(path, doc_type="image", origin=origin)
                 self.forensics_service.build_image_artifact(doc_meta.id, path)
                 documents.append(doc_meta)
+                mutation = GraphMutation()
+                mutation.record_node(doc_meta.id)
+                graph_mutation.merge(mutation)
             elif suffix in _FINANCIAL_EXTENSIONS:
                 doc_meta = self._register_document(path, doc_type="financial", origin=origin)
                 self.forensics_service.build_financial_artifact(doc_meta.id, path)
                 documents.append(doc_meta)
+                mutation = GraphMutation()
+                mutation.record_node(doc_meta.id)
+                graph_mutation.merge(mutation)
             else:
                 skipped.append({"path": str(path), "reason": "unsupported_extension"})
                 self.logger.debug(
                     "Skipping unsupported file",
                     extra={"job_source": materialized.source.type, "path": str(path)},
                 )
-        return documents, events, skipped
+        return documents, events, skipped, graph_mutation
 
-    def _ingest_text(self, path: Path, origin: str) -> Dict[str, object]:
+    def _ingest_text(self, path: Path, origin: str) -> Tuple[IngestedDocument, List[TimelineEvent], GraphMutation]:
         document = self._register_document(path, doc_type="text", origin=origin)
+        mutation = GraphMutation()
+        mutation.record_node(document.id)
+
         text = read_text(path)
         chunks = chunk_text(text, self.settings.ingestion_chunk_size, self.settings.ingestion_chunk_overlap)
         points: List[qmodels.PointStruct] = []
@@ -219,12 +265,79 @@ class IngestionService:
                     payload=payload,
                 )
             )
-            self._index_entities(document.id, chunk)
         if points:
             self.vector_service.upsert(points)
+
+        entity_spans = extract_entities(text)
+        for span in entity_spans:
+            self._commit_entity(document.id, span, mutation)
+
+        triples = extract_triples(text)
+        if triples:
+            self._commit_triples(document.id, triples, mutation)
+
         timeline_events = self._build_timeline_events(document.id, text)
         self.forensics_service.build_document_artifact(document.id, path)
-        return {"document": document, "timeline": timeline_events}
+        return document, timeline_events, mutation
+
+    def _commit_entity(self, doc_id: str, span: EntitySpan, mutation: GraphMutation) -> None:
+        entity_id = normalise_entity_id(span.label)
+        properties: Dict[str, object] = {
+            "label": span.label,
+            "type": span.entity_type,
+        }
+        self.graph_service.upsert_entity(entity_id, span.entity_type, properties)
+        self.graph_service.merge_relation(
+            doc_id,
+            "MENTIONS",
+            entity_id,
+            {
+                "doc_id": doc_id,
+                "label": span.label,
+                "type": span.entity_type,
+            },
+        )
+        mutation.record_node(entity_id)
+        mutation.record_edge(doc_id, "MENTIONS", entity_id, doc_id)
+
+    def _commit_triples(
+        self, doc_id: str, triples: List[Triple], mutation: GraphMutation
+    ) -> None:
+        for triple in triples:
+            subject_id = normalise_entity_id(triple.subject.label)
+            object_id = normalise_entity_id(triple.obj.label)
+            self.graph_service.upsert_entity(
+                subject_id,
+                triple.subject.entity_type,
+                {
+                    "label": triple.subject.label,
+                    "type": triple.subject.entity_type,
+                },
+            )
+            self.graph_service.upsert_entity(
+                object_id,
+                triple.obj.entity_type,
+                {
+                    "label": triple.obj.label,
+                    "type": triple.obj.entity_type,
+                },
+            )
+            self.graph_service.merge_relation(
+                subject_id,
+                triple.predicate,
+                object_id,
+                {
+                    "doc_id": doc_id,
+                    "predicate": triple.predicate_text,
+                    "relation": triple.predicate,
+                    "evidence": [triple.evidence],
+                    "sentence_index": triple.sentence_index,
+                },
+            )
+            mutation.record_node(subject_id)
+            mutation.record_node(object_id)
+            mutation.record_edge(subject_id, triple.predicate, object_id, doc_id)
+            mutation.triples += 1
 
     def _register_document(self, path: Path, doc_type: str, origin: str) -> IngestedDocument:
         doc_id = sha256_id(path)
@@ -252,18 +365,6 @@ class IngestionService:
             },
         )
         return IngestedDocument(id=doc_id, uri=uri, type=doc_type, title=title, metadata=metadata)
-
-    def _index_entities(self, doc_id: str, text: str) -> None:
-        labels = extract_capitalized_entities(text)
-        for label in labels:
-            entity_id = f"entity::{label}"
-            self.graph_service.upsert_entity(entity_id, "Entity", {"label": label})
-            self.graph_service.merge_relation(
-                doc_id,
-                "MENTIONS",
-                entity_id,
-                {"evidence": label},
-            )
 
     def _build_timeline_events(self, doc_id: str, text: str) -> List[TimelineEvent]:
         events: List[TimelineEvent] = []
@@ -301,6 +402,7 @@ class IngestionService:
                 "ingestion": {"documents": 0, "skipped": []},
                 "timeline": {"events": 0},
                 "forensics": {"artifacts": []},
+                "graph": {"nodes": 0, "edges": 0, "triples": 0},
             },
         }
 

@@ -1,0 +1,55 @@
+# PRP Execution Run — Phase 3 GraphRAG Integration
+
+- ## Vision: Deliver hybrid retrieval with graph-aware context that satisfies PRP Phase 3 exit criteria.
+  - ### Objectives
+    - #### O1: Automate triple extraction and ontology seeding for graph persistence.
+      - ##### Tasks
+        - Implement deterministic triple extractor converting sentences to `(subject, predicate, object)` tuples with provenance.
+        - Normalise entity identifiers and persist ontology scaffolding for `Organization`, `Person`, `Location`, and `Event` classes.
+        - Expose graph upsert helpers that deduplicate nodes/edges and annotate relation metadata with document references.
+    - #### O2: Enrich ingestion pipeline with graph commits and ID normalisation.
+      - ##### Tasks
+        - Thread triple extraction through ingestion text handling, synchronising document/vector identifiers with graph nodes.
+        - Persist subject/object relations alongside existing `MENTIONS` edges, attaching evidence spans and timestamps.
+        - Extend job manifest bookkeeping to record graph mutations for auditing hooks in Phase 4.
+    - #### O3: Ship hybrid retrieval that fuses vector + graph context in `/query` responses.
+      - ##### Tasks
+        - Add graph search utilities that surface entity neighborhoods relevant to the question prompt.
+        - Compose answers that blend vector snippets with graph relationship summaries when available.
+        - Extend trace payloads and tests verifying combined vector/graph coverage and ontology presence.
+
+- ## Decision Tree Snapshot
+  - ### Triple Extraction Strategy
+    - #### Option A: Stub triple extractor with regex placeholders (rejected — violates non-mock directive and fails CI goals).
+    - #### Option B: Implement rule-based parser tuned for legal prose (**selected** for deterministic behaviour and zero external dependencies).
+    - #### Option C: Integrate external NLP library like spaCy (deferred — increases footprint and complicates sandbox execution).
+  - ### Ontology Seeding
+    - #### Option A: Manual migration scripts outside service lifecycle (rejected — brittle for tests and local runs).
+    - #### Option B: Idempotent bootstrap within `GraphService` (**selected** to guarantee availability across backends).
+    - #### Option C: Runtime fetch from remote catalog (future enhancement once ontology registry is online).
+  - ### Hybrid Retrieval Fusion
+    - #### Option A: Vector-only retrieval with graph post-processing (rejected — fails Phase 3 exit criteria).
+    - #### Option B: Query-time graph search merged with vector hits (**selected** to deliver combined traces and answer enrichment).
+    - #### Option C: Graph-only fallback summariser (kept as contingency if vector store unavailable).
+
+- ## Risk Ledger
+  - ### R1: Rule-based extractor may miss complex sentence structures.
+    - #### Mitigation: Optimise heuristics for conjunctions/common legal verbs and document limitations in build log.
+  - ### R2: Duplicate edges inflate in-memory graph traces.
+    - #### Mitigation: Implement deterministic deduplication keyed by `(source, target, type, doc_id)`.
+  - ### R3: Answer synthesis may overfit to graph relations.
+    - #### Mitigation: Combine vector excerpt + graph statement, gating graph summary behind availability checks.
+
+- ## Execution Checklist
+  - ### Phase Gamma — Triple Extraction & Ontology
+    - Author `backend/app/utils/triples.py` with dataclasses + parser heuristics.
+    - Enhance `backend/app/services/graph.py` to seed ontology, normalise entity IDs, and provide relation upsert utilities.
+    - Expand unit coverage verifying extractor + ontology behaviour.
+  - ### Phase Delta — Ingestion Graph Commit
+    - Wire triple extraction into ingestion text path, persisting subject/object relations with provenance metadata.
+    - Update job manifest schema to record graph node/edge counts for observability.
+    - Regenerate fixtures/tests ensuring graph neighbor API exposes relation edges.
+  - ### Phase Sigma — Hybrid Retrieval & QA
+    - Extend `RetrievalService` to execute graph searches keyed by question entities and union with vector results.
+    - Compose answers blending vector snippets with graph relationship statements.
+    - Run `pytest backend/tests/test_api.py -q` plus new graph extractor unit tests; capture results in build log and ACE memory.

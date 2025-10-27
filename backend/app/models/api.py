@@ -50,10 +50,17 @@ class IngestionForensicsDetailsModel(BaseModel):
     artifacts: List[dict] = Field(default_factory=list)
 
 
+class IngestionGraphDetailsModel(BaseModel):
+    nodes: int
+    edges: int
+    triples: int
+
+
 class IngestionStatusDetailsModel(BaseModel):
     ingestion: IngestionIngestionDetailsModel
     timeline: IngestionTimelineDetailsModel
     forensics: IngestionForensicsDetailsModel
+    graph: IngestionGraphDetailsModel
 
 
 class IngestionStatusResponse(BaseModel):

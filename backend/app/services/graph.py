@@ -33,9 +33,11 @@ class GraphService:
                 auth=(self.settings.neo4j_user, self.settings.neo4j_password),
             )
             self._ensure_constraints()
+            self._seed_ontology()
         else:
             self._nodes: Dict[str, GraphNode] = {}
-            self._edges: List[GraphEdge] = []
+            self._edges: Dict[Tuple[str, str, str, str | None], GraphEdge] = {}
+            self._seed_ontology()
 
     # region Schema management
     def _ensure_constraints(self) -> None:
@@ -46,6 +48,54 @@ class GraphService:
             session.execute_write(run)
 
     # endregion
+
+    def _seed_ontology(self) -> None:
+        classes = (
+            ("ontology::root", "OntologyRoot", {"name": "root"}),
+            ("ontology::organization", "OntologyClass", {"name": "Organization"}),
+            ("ontology::person", "OntologyClass", {"name": "Person"}),
+            ("ontology::location", "OntologyClass", {"name": "Location"}),
+            ("ontology::event", "OntologyClass", {"name": "Event"}),
+        )
+        if self.mode == "neo4j":
+            query = (
+                "MERGE (root:OntologyRoot {id: $root_id}) SET root.name = $root_name "
+                "MERGE (child:OntologyClass {id: $child_id}) "
+                "SET child.name = $child_name, child.type = $child_type "
+                "MERGE (root)-[:ONTOLOGY_CHILD]->(child)"
+            )
+            with self.driver.session() as session:
+                for child_id, child_type, properties in classes[1:]:
+                    session.execute_write(
+                        lambda tx, cid=child_id, cname=properties["name"], ctype=child_type: tx.run(
+                            query,
+                            root_id=classes[0][0],
+                            root_name=classes[0][2]["name"],
+                            child_id=cid,
+                            child_name=cname,
+                            child_type=ctype,
+                        )
+                    )
+        else:
+            root_id, root_type, root_props = classes[0]
+            self._nodes.setdefault(root_id, GraphNode(id=root_id, type=root_type, properties=root_props))
+            for child_id, child_type, properties in classes[1:]:
+                self._nodes.setdefault(
+                    child_id,
+                    GraphNode(
+                        id=child_id,
+                        type=child_type,
+                        properties=properties,
+                    ),
+                )
+                key = (root_id, "ONTOLOGY_CHILD", child_id, None)
+                if key not in self._edges:
+                    self._edges[key] = GraphEdge(
+                        source=root_id,
+                        target=child_id,
+                        type="ONTOLOGY_CHILD",
+                        properties={},
+                    )
 
     # region Upserts
     def upsert_document(self, doc_id: str, title: str, metadata: Dict[str, object]) -> None:
@@ -95,9 +145,22 @@ class GraphService:
                     )
                 )
         else:
-            self._edges.append(
-                GraphEdge(source=source_id, target=target_id, type=relation_type, properties=properties)
-            )
+            key = self._edge_key(source_id, relation_type, target_id, properties)
+            if key in self._edges:
+                merged = self._merge_properties(self._edges[key].properties, properties)
+                self._edges[key] = GraphEdge(
+                    source=source_id,
+                    target=target_id,
+                    type=relation_type,
+                    properties=merged,
+                )
+            else:
+                self._edges[key] = GraphEdge(
+                    source=source_id,
+                    target=target_id,
+                    type=relation_type,
+                    properties=properties,
+                )
 
     # endregion
 
@@ -133,11 +196,74 @@ class GraphService:
         if node_id not in self._nodes:
             raise KeyError(node_id)
         neighbor_nodes = {node_id: self._nodes[node_id]}
-        edges = [edge for edge in self._edges if edge.source == node_id or edge.target == node_id]
+        edges = [
+            edge
+            for edge in self._edges.values()
+            if edge.source == node_id or edge.target == node_id
+        ]
         for edge in edges:
             neighbor_nodes.setdefault(edge.source, self._nodes.get(edge.source, GraphNode(edge.source, "Unknown", {})))
             neighbor_nodes.setdefault(edge.target, self._nodes.get(edge.target, GraphNode(edge.target, "Unknown", {})))
         return list(neighbor_nodes.values()), edges
+
+    def search_entities(self, query: str, limit: int = 5) -> List[GraphNode]:
+        if not query:
+            return []
+        term = query.lower()
+        if self.mode == "neo4j":
+            stmt = (
+                "MATCH (e:Entity) WHERE toLower(e.label) CONTAINS $term "
+                "RETURN e LIMIT $limit"
+            )
+            with self.driver.session() as session:
+                result = session.execute_read(
+                    lambda tx: list(tx.run(stmt, term=term, limit=limit))
+                )
+            nodes: List[GraphNode] = []
+            for record in result:
+                node = record["e"]
+                nodes.append(
+                    GraphNode(
+                        id=node["id"],
+                        type=node.get("type", "Entity"),
+                        properties=dict(node),
+                    )
+                )
+            return nodes
+        matches: List[GraphNode] = []
+        for node in self._nodes.values():
+            if node.type not in {"Entity", "Organization", "Person", "Location", "Event"}:
+                continue
+            label = str(node.properties.get("label", "")).lower()
+            if term in label:
+                matches.append(node)
+        matches.sort(key=lambda node: node.properties.get("label", ""))
+        return matches[:limit]
+
+    def _edge_key(
+        self, source_id: str, relation_type: str, target_id: str, properties: Dict[str, object]
+    ) -> Tuple[str, str, str, str | None]:
+        doc_id = properties.get("doc_id")
+        return (source_id, relation_type, target_id, str(doc_id) if doc_id is not None else None)
+
+    @staticmethod
+    def _merge_properties(
+        existing: Dict[str, object], new_values: Dict[str, object]
+    ) -> Dict[str, object]:
+        merged = dict(existing)
+        for key, value in new_values.items():
+            if key == "evidence":
+                current = merged.setdefault("evidence", [])
+                if isinstance(value, list):
+                    for item in value:
+                        if item not in current:
+                            current.append(item)
+                else:
+                    if value not in current:
+                        current.append(value)
+            else:
+                merged[key] = value
+        return merged
 
     # endregion
 
