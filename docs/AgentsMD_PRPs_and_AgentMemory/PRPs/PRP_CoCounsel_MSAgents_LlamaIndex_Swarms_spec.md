@@ -3,6 +3,24 @@ version: 0.2
 
 ## APIs
 
+### Access Control Overview
+- **Authentication Stack**: All Co-Counsel HTTP surfaces require mutual TLS (client certificates issued by the LegalOps private
+  PKI) plus OAuth 2.0 client-credential grants minted by the Platform Identity Service. Tokens carry a `aud` claim of
+  `co-counsel.api` and expire after 10 minutes; refresh is achieved through signed workload identities. Certificate rotation is
+  automated every 90 days with 24-hour overlap windows.
+- **Authorization Engine**: Policy decisions are enforced through Oso embedded in the API gateway with role metadata derived
+  from the token `roles` claim. Runtime enforcement supports deny-overrides with explicit approval journaling.
+- **Canonical Roles**:
+  - `CaseCoordinator` — Orchestrates case intake, ingestion schedules, and downstream publishing.
+  - `ResearchAnalyst` — Performs interactive querying and narrative construction; read-only against ingestion state.
+  - `ForensicsOperator` — Manages forensic workloads and reviews signal outputs; read/write on forensic reruns.
+  - `ComplianceAuditor` — Read-only visibility into every artifact plus privileged access to audit trails.
+  - `PlatformEngineer` — Maintains infrastructure, handles emergency retries/cancellations, and can assume other roles through
+    break-glass approvals.
+  - `AutomationService` — System-to-system integrations (scheduled refresh, CI) with tightly scoped service principals.
+- **Emergency Elevation**: Break-glass access escalates to `PlatformEngineer` with one-time approval codes; actions must be
+  reconciled within 24 hours in the audit ledger.
+
 ### POST /ingest
 **Summary**: Queue document sources for processing. Implemented via `backend.app.models.api.IngestionRequest` ➜ `IngestionResponse`.
 
@@ -10,7 +28,8 @@ version: 0.2
 | --- | --- |
 | Method | POST |
 | Path | `/ingest` |
-| Authentication | TBD (service token) |
+| Authentication | Mutual TLS + OAuth2 client credentials (`aud=co-counsel.ingest`, 10 min TTL) |
+| Authorization | RBAC via Oso — `CaseCoordinator`, `PlatformEngineer`, `AutomationService` may enqueue; `ComplianceAuditor` read-only |
 | Synchronous Response | `202 Accepted` with `IngestionResponse` payload |
 | Long-running Behaviour | Jobs processed asynchronously; clients poll `/ingest/{job_id}` |
 
@@ -48,6 +67,21 @@ version: 0.2
 }
 ```
 
+#### Authentication & Authorization
+- **Token Scopes**: `ingest:enqueue`, `ingest:status`. Tokens without both scopes receive `403` even with valid TLS.
+- **Mutual TLS Mapping**: Client certificate Common Name must match registered service principal; rotation logged via
+  `identity.certificate_rotated` audit event.
+- **Role Matrix**:
+
+  | Role | POST `/ingest` | Notes |
+  | --- | --- | --- |
+  | `CaseCoordinator` | ✅ | Default for orchestration service; may attach `case_id` constraints. |
+  | `PlatformEngineer` | ✅ (with break-glass flag) | Requires incident ticket reference in request metadata. |
+  | `AutomationService` | ✅ | Limited to scheduled backfill contexts defined by `run_profile`. |
+  | `ResearchAnalyst` | ❌ | Denied; analytics flows must request ingestion through coordinator. |
+  | `ForensicsOperator` | ❌ | Denied to prevent privilege creep. |
+  | `ComplianceAuditor` | 🔍 Read metadata via `/ingest/{job_id}` only | Cannot enqueue new work. |
+
 #### Error Envelope — `HTTPValidationError`
 | Code | Body |
 | --- | --- |
@@ -62,6 +96,8 @@ version: 0.2
 | --- | --- |
 | Method | GET |
 | Path | `/ingest/{job_id}` |
+| Authentication | Mutual TLS + OAuth2 client credentials (`aud=co-counsel.ingest`) |
+| Authorization | RBAC via Oso — `CaseCoordinator`, `PlatformEngineer`, `ComplianceAuditor`, `ForensicsOperator` |
 | Path Parameters | `job_id` (UUID) |
 | Success Codes | `200 OK` when terminal state reached, `202 Accepted` when still processing |
 | Error Codes | `404 Not Found` if job unknown, `410 Gone` if history expired |
@@ -85,6 +121,20 @@ version: 0.2
 }
 ```
 
+#### Authentication & Authorization
+- **Token Scopes**: Require `ingest:status`. Requests missing `case_id` claim aligned with job metadata are rejected with
+  `403` and audit event `ingest.scope_mismatch`.
+- **Role Matrix**:
+
+  | Role | GET `/ingest/{job_id}` | Notes |
+  | --- | --- | --- |
+  | `CaseCoordinator` | ✅ | Full visibility; may cancel via separate control plane. |
+  | `PlatformEngineer` | ✅ | Access restricted to active incident window; trace ID required. |
+  | `ComplianceAuditor` | ✅ (read-only) | Response augmented with audit annotations. |
+  | `ForensicsOperator` | ✅ (read-only) | Only for artifacts assigned to operator's tenant; enforced via ABAC attribute `tenant_id`. |
+  | `ResearchAnalyst` | 🔍 Limited | May access once ingestion status transitions to `succeeded`; otherwise `403` with `ingest.analyst_blocked`. |
+  | `AutomationService` | ✅ | Observability bots poll for job completion; rate limit 6 RPM per job. |
+
 #### Lifecycle Semantics
 | Stage | Description |
 | --- | --- |
@@ -99,6 +149,8 @@ version: 0.2
 | --- | --- |
 | Method | GET |
 | Path | `/query` |
+| Authentication | Mutual TLS + OAuth2 client credentials (`aud=co-counsel.query`) |
+| Authorization | RBAC via Oso — `ResearchAnalyst`, `CaseCoordinator`, `ComplianceAuditor` |
 | Required Query Parameters | `q` (string, minLength=3) |
 | Optional Query Parameters | `page` (integer ≥ 1, default 1), `page_size` (integer 1–50, default 10), `filters[source]` (string enum matching ingestion source types), `filters[entity]` (string), `rerank` (boolean) |
 | Success Codes | `200 OK` |
@@ -148,6 +200,20 @@ version: 0.2
 }
 ```
 
+#### Authentication & Authorization
+- **Token Scopes**: `query:read` mandatory; optional `query:trace` adds diagnostics fields. Tokens are rate-limited to 60 RPM per
+  principal with adaptive throttling when guardrail policies trigger.
+- **Role Matrix**:
+
+  | Role | GET `/query` | Diagnostics Access | Notes |
+  | --- | --- | --- | --- |
+  | `ResearchAnalyst` | ✅ | ✅ (requires `query:trace`) | Primary consumer; may request rerank with `rerank=true`. |
+  | `CaseCoordinator` | ✅ | 🔍 Summary only | Detailed traces hidden unless `query:trace` scope added for postmortems. |
+  | `ComplianceAuditor` | ✅ | ✅ | Audit token includes immutable correlation ID `audit_session_id`. |
+  | `PlatformEngineer` | ✅ (break-glass) | ✅ | Must cite incident ID; requests mirrored to audit sink. |
+  | `ForensicsOperator` | 🔍 Limited | Access gated to queries referencing forensic artifacts; ABAC ensures `artifact_scope` claim match. |
+  | `AutomationService` | ❌ | ❌ | Automated querying prohibited to prevent data mining. |
+
 ### GET /timeline
 **Summary**: Return chronological events. Implemented via `backend.app.models.api.TimelineResponse` and `TimelineEventModel`. Pagination extension will reuse planned `TimelinePagination` model.
 
@@ -155,6 +221,8 @@ version: 0.2
 | --- | --- |
 | Method | GET |
 | Path | `/timeline` |
+| Authentication | Mutual TLS + OAuth2 client credentials (`aud=co-counsel.timeline`) |
+| Authorization | RBAC via Oso — `ResearchAnalyst`, `CaseCoordinator`, `ComplianceAuditor` |
 | Optional Query Parameters | `cursor` (opaque string), `limit` (integer 1–100, default 20), `from_ts` & `to_ts` (ISO 8601 timestamps), `entity` (string) |
 | Success Codes | `200 OK` |
 | Empty Result Handling | Returns `events: []` with corresponding pagination metadata |
@@ -199,6 +267,21 @@ version: 0.2
 }
 ```
 
+#### Authentication & Authorization
+- **Token Scopes**: `timeline:read` is required, with optional `timeline:forensics` enabling inline forensic signal previews.
+- **Row-Level Filtering**: Attribute-based rules align `case_id`, `entity_scope`, and `tenant_id` claims to event metadata before
+  release; mismatches yield `404` to avoid information disclosure.
+- **Role Matrix**:
+
+  | Role | GET `/timeline` | Extended Metadata | Notes |
+  | --- | --- | --- | --- |
+  | `ResearchAnalyst` | ✅ | ✅ | Receives event provenance and pagination hints. |
+  | `CaseCoordinator` | ✅ | 🔍 Summary | Extended metadata hidden unless `case_admin=true`. |
+  | `ComplianceAuditor` | ✅ | ✅ | Gains immutable audit references and hash chains. |
+  | `PlatformEngineer` | ✅ (break-glass) | ✅ | Access logged with `access.reason` justification. |
+  | `ForensicsOperator` | 🔍 Limited | May request events tied to assigned artifacts only. |
+  | `AutomationService` | ✅ | ❌ | Allowed for scheduled dossier exports; metadata trimmed to case_id only. |
+
 ### GET /graph/neighbor
 **Summary**: Retrieve neighboring nodes around an entity. Implemented via `backend.app.models.api.GraphNeighborResponse`.
 
@@ -206,6 +289,8 @@ version: 0.2
 | --- | --- |
 | Method | GET |
 | Path | `/graph/neighbor` |
+| Authentication | Mutual TLS + OAuth2 client credentials (`aud=co-counsel.graph`) |
+| Authorization | RBAC via Oso — `ResearchAnalyst`, `CaseCoordinator`, `ComplianceAuditor`, `PlatformEngineer` |
 | Required Query Parameters | `id` (string) |
 | Success Codes | `200 OK` |
 | Error Codes | `404 Not Found` when node absent |
@@ -232,6 +317,22 @@ version: 0.2
 }
 ```
 
+#### Authentication & Authorization
+- **Token Scopes**: `graph:read` with optional `graph:debug` enabling schema metadata. Denied scopes return `403` with
+  `graph.scope_violation` audit log.
+- **Graph Visibility Filters**: Entities tagged `privileged=true` require `case_privilege_override` attribute from the compliance
+  approval workflow.
+- **Role Matrix**:
+
+  | Role | GET `/graph/neighbor` | Schema Metadata | Notes |
+  | --- | --- | --- | --- |
+  | `ResearchAnalyst` | ✅ | 🔍 Attribute filtered | Receives sanitized node properties (PII redacted). |
+  | `CaseCoordinator` | ✅ | ✅ | Allowed to view relationship provenance when `case_admin=true`. |
+  | `ComplianceAuditor` | ✅ | ✅ | Full schema visibility with audit watermarking. |
+  | `PlatformEngineer` | ✅ (break-glass) | ✅ | Access mirrored to on-call channel. |
+  | `ForensicsOperator` | 🔍 Limited | Only permitted when graph node references forensic artifact. |
+  | `AutomationService` | ❌ | ❌ | Graph introspection blocked for bots. |
+
 ### GET /forensics/document | /forensics/image | /forensics/financial
 **Summary**: Fetch artifact-specific forensic analysis. Implemented via `backend.app.models.api.ForensicsResponse`.
 
@@ -239,6 +340,8 @@ version: 0.2
 | --- | --- |
 | Methods | GET |
 | Paths | `/forensics/document`, `/forensics/image`, `/forensics/financial` |
+| Authentication | Mutual TLS + OAuth2 client credentials (`aud=co-counsel.forensics`) |
+| Authorization | RBAC via Oso — `ForensicsOperator`, `ComplianceAuditor`, `CaseCoordinator` (read-only) |
 | Required Query Parameters | `id` (string) |
 | Success Codes | `200 OK` |
 | Error Codes | `404 Not Found` when artifact missing, `415 Unsupported Media Type` when no fallback available |
@@ -274,6 +377,22 @@ version: 0.2
   }
 }
 ```
+
+#### Authentication & Authorization
+- **Token Scopes**: `forensics:read` plus type-specific scope (`forensics:document`, `forensics:image`, or `forensics:financial`).
+  Scope mismatches return `403` with `forensics.scope_violation` payload.
+- **Attribute Binding**: Responses enforce match on `artifact_scope`, `case_id`, and `tenant_id` attributes. Artifacts flagged
+  `privileged=true` additionally require `case_privilege_override` approval referencing ticket ID.
+- **Role Matrix**:
+
+  | Role | GET `/forensics/*` | Writeback / Rerun Triggers | Notes |
+  | --- | --- | --- | --- |
+  | `ForensicsOperator` | ✅ | ✅ (via control plane) | Full payload plus raw analyzer output. |
+  | `ComplianceAuditor` | ✅ | ❌ | Receives immutable hash chains and provenance metadata. |
+  | `CaseCoordinator` | ✅ (summary only) | ❌ | Raw signal arrays redacted; only `summary`, `hashes`, `status`. |
+  | `PlatformEngineer` | ✅ (break-glass) | ✅ | Requires incident reference; responses mirrored to audit queue. |
+  | `ResearchAnalyst` | 🔍 Limited | ❌ | Must include `reason=case_analysis` and `citation_id` referencing query evidence. |
+  | `AutomationService` | ❌ | ❌ | Forensic payload automation forbidden. |
 
 ### Forensics Toolbox Execution Blueprint
 1. **Canonicalization Pass** — normalize path/URI, stream bytes, and compute hashes (`sha256`, optional `md5`, `tlsh`) using `hashlib`/`tlsh`.
@@ -510,6 +629,57 @@ sequenceDiagram
 | 2 | `graph_context = GraphNeighborhood(entities_from(vector_results), radius=2)` |
 | 3 | Prompt LLM with query, vector snippets, and graph triples |
 | 4 | Enforce cite-or-silence guardrails and emit structured answer |
+
+## Security Governance & Compliance
+
+### Secret Management & Encryption Controls
+| Secret Class | Storage Location | Rotation SLA | Owner | Verification |
+| --- | --- | --- | --- | --- |
+| Ingestion connector credentials (SharePoint, S3, OneDrive) | Azure Key Vault `kv-co-counsel/ingestion/*` | 45 days (rolling) | Platform Security — S. Malik | Monthly `scripts/audit/vault_rotation_report.py` export reviewed by owner + ComplianceAuditor signature. |
+| LLM provider API keys | HashiCorp Vault `secret/data/llm/providers/*` with Transit engine wrapping | 30 days (automated) | Research Platform — J. Ortega | Rotation webhook captured in `audit_logs/identity.jsonl`; verified via `tools/monitoring/llm_key_age.py` (pass threshold \<= 25 days). |
+| Forensics GPU access tokens | AWS Secrets Manager `forensics/gpu-runtime` | 24 hours (ephemeral) | Forensics Ops — L. Zhang | Daily cron job `infra/cron/check_gpu_tokens.sh` ensures tokens expire; failure raises PagerDuty. |
+| OAuth client secrets (service-to-service) | AWS Parameter Store `co-counsel/oauth/*` encrypted with KMS CMK `arn:aws:kms:...:co-counsel-core` | 90 days | Platform Identity — R. Patel | Quarterly review recorded in `runbooks/identity/rotation_log.md`; diff audited by ComplianceAuditor. |
+
+- **Encryption-in-Transit**: Enforce TLS 1.3 across API Gateway and internal gRPC calls; ciphers limited to `TLS_AES_256_GCM_SHA384`.
+- **Encryption-at-Rest**: Blob, vector, and graph stores leverage envelope encryption with AWS KMS CMK `co-counsel-core`; field-level AES-256-GCM applied to PII columns in Postgres.
+- **Key Custodianship**: Dual-control enforced for CMK operations; `PlatformEngineer` plus `ComplianceAuditor` approvals logged via AWS CloudTrail.
+
+### Data Retention Policy Matrix
+| Artifact Class | Retention Window | Purge Mechanism | Owner | Verification |
+| --- | --- | --- | --- | --- |
+| Raw ingestion uploads | 90 days | `tools/ops/purge_raw_ingest.py` (dry-run + destructive modes) | Ingestion Lead — M. Rivera | Weekly purge report stored in `build_logs/purge_raw_ingest_*.jsonl`; spot-checked monthly by ComplianceAuditor. |
+| Chunk embeddings & vector metadata | 180 days (unless legal hold) | Qdrant TTL sweeper `infra/jobs/vector_expiry.yaml` | Research Platform — J. Ortega | Automated Grafana alert `vector-retention-drift` must stay <2%. |
+| Graph projections | 365 days | Neo4j archive script `infra/cron/graph_snapshot.sh` with checksum verification | Graph Engineering — P. Desai | Snapshot hash compared via `tools/ops/verify_graph_checksum.py` quarterly. |
+| Forensics reports & hashes | 7 years (chain-of-custody) | Glacier vault policy `infra/compliance/forensics_vault.tf` | Forensics Ops — L. Zhang | Annual restore drill documented in `build_logs/forensics_restore.log`. |
+| Audit logs (identity, access, pipeline events) | 10 years | Centralized SIEM (Elastic) cold-tier policy | Compliance Office — A. Bennett | Semi-annual attestations `docs/compliance/attestations/*.md` referencing SIEM retention proof. |
+
+### Audit Logging Responsibilities
+| Stream | Minimum Fields | Owner | Tasking & Verification |
+| --- | --- | --- | --- |
+| API Gateway access logs | `timestamp`, `client_cn`, `principal_id`, `roles`, `endpoint`, `case_id`, `trace_id`, `status`, `latency_ms` | Platform Identity — R. Patel | Daily automated diff `tools/monitoring/access_diff.py`; anomalies >3σ escalate to SOC. |
+| Authorization decisions (Oso) | `policy_id`, `decision`, `role`, `scopes`, `resource`, `explainability_blob`, `correlation_id` | Platform Security — S. Malik | Weekly review meeting; metrics pushed to `metrics/authz_denied_total`. |
+| Forensics toolbox actions | `artifact_id`, `operator_id`, `tool_name`, `version`, `hash`, `result`, `case_id`, `chain_hash` | Forensics Ops — L. Zhang | Chain-of-custody ledger `forensics_chain.jsonl` hashed nightly; verify with `scripts/audit/verify_chain_hash.py`. |
+| Break-glass access | `approver_id`, `ticket_ref`, `expiration`, `actions`, `revocation_ts` | Compliance Office — A. Bennett | Every break-glass event requires closure report stored in `docs/compliance/break_glass/*.md`. |
+
+### Compliance Checklists
+
+#### Privilege Detection Checklist
+- [ ] **Scope Alignment Audit** — Run `scripts/audit/check_scope_alignment.py --window 24h`; ensure \<=1% of requests trigger
+  `403` due to missing `case_id` attributes. Owner: Platform Security — S. Malik (daily, 09:00 UTC).
+- [ ] **Role Drift Detection** — Execute `tools/monitoring/role_drift_dashboard` and export compliance snapshot; deviations >0
+  require incident ticket (Owner: Compliance Office — A. Bennett).
+- [ ] **Least-Privilege Verification** — Quarterly tabletop where `ComplianceAuditor` attempts to access restricted graph nodes
+  without override; success must be `0/10` attempts. Document findings in `docs/compliance/privilege_test_<YYYYMMDD>.md`.
+
+#### Chain-of-Custody Checklist
+- [ ] **Hash Continuity** — Verify `forensics_chain.jsonl` nightly hash using `scripts/audit/verify_chain_hash.py`; acceptable drift = 0.
+  Owner: Forensics Ops — L. Zhang.
+- [ ] **Artifact Restore Drill** — Run `tools/ops/forensics_restore_validation.py --sample 3` monthly; success criteria: 100% of
+  sampled artifacts restored with matching SHA-256. Owner: Forensics Ops — L. Zhang; results filed in `build_logs/forensics_restore.log`.
+- [ ] **Evidence Access Review** — Compliance Office executes `scripts/audit/evidence_access_report.py --window 7d`; confirm all
+  access events include ticket references. Non-compliant entries escalate within 4 hours.
+- [ ] **Tamper Detection Metrics** — Platform Security monitors `metrics/chain_tamper_attempt_total`; threshold >0 triggers runbook
+  `runbooks/forensics/chain_tamper_response.md` with timestamped acknowledgement.
 
 ## Non-Functional Requirements
 | Category | SLO | Validation |
