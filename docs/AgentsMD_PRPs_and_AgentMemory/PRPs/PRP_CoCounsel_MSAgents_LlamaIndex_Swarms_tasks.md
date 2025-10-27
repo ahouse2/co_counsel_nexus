@@ -18,11 +18,37 @@ status: draft
 - [ ] Ontology seed; id normalization
 
 ## Phase 4 — Forensics Core (Non‑Negotiable)
-- [ ] Hashing (SHA‑256) and metadata extraction for all files
-- [ ] PDF structure and email header analysis
-- [ ] Image authenticity: EXIF, ELA, PRNU/clone detection (where feasible)
-- [ ] Financial forensics baseline: totals checks, anomalies, entity extraction
-- [ ] Forensics artifact outputs per file + API endpoints
+### 4.1 Toolbox Orchestration & Storage
+- [ ] Implement canonicalization → metadata → analyzer orchestration respecting spec execution order.  
+  **Deliverable**: `tests/forensics/test_pipeline_order.py` validates stage sequencing via deterministic fixtures.
+- [ ] Persist reports to `./storage/forensics/{fileId}/report.json` with versioned schema.
+  **Deliverable**: CLI `python -m backend.tools.forensics dump --id sample-doc` emits JSON matching spec contract.
+
+### 4.2 Document Forensics
+- [ ] Hashing (SHA‑256 + TLSH) and PDF/DOCX/MSG metadata extraction using `hashlib`, `tlsh`, `python-magic`, `pypdf`, `python-docx`, `extract-msg`.
+  **Deliverable**: Unit tests cover PDF, DOCX, and MSG fixtures with expected hashes + metadata snapshots.
+- [ ] Structure + authenticity analysis (TOC, signatures, header diffs) via `unstructured`, `pikepdf`, `mailparser`.
+  **Deliverable**: Golden JSON in `build_logs/forensics/document/sample_report.json` demonstrating populated `signals` and `summary`.
+
+### 4.3 Image Forensics
+- [ ] EXIF harvesting with `Pillow`/`piexif` plus ELA and clone detection via `opencv-python`, `numpy`, `imagededup`, `pyprnu`.
+  **Deliverable**: Regression notebook `notebooks/forensics/image_qa.ipynb` (executed to HTML) evidences detection of tampered sample.
+- [ ] Implement fallback path for unsupported/low-resolution imagery, surfacing `fallback_applied` + coverage signal.
+  **Deliverable**: Integration test triggers fallback and asserts API returns HTTP `415` when analyzer unavailable.
+
+### 4.4 Financial Forensics
+- [ ] Tabular ingestion with `pandas`/`pyarrow`, totals reconciliation using `decimal`.
+  **Deliverable**: Automated check verifying accounting identities on synthetic ledger fixture.
+- [ ] Isolation Forest anomaly detection with `scikit-learn` and z-score fallback for small datasets.
+  **Deliverable**: Stored artifact `build_logs/forensics/financial/anomaly_run.json` summarizing flagged transactions.
+
+### 4.5 API & Telemetry Wiring
+- [ ] Enrich `/ingest/{job_id}` status with `status_details.forensics` timestamps.
+  **Deliverable**: FastAPI contract test asserting presence of timestamps after mocked run.
+- [ ] Expose `/forensics/{type}` responses with summary, signals, raw payload + fallback flag as defined in spec.
+  **Deliverable**: OpenAPI schema diff captured in `build_logs/forensics/api_contract.md` documenting additions.
+- [ ] Publish `traces.forensics` hook within `/query` responses linking to artifacts.
+  **Deliverable**: Retrieval integration test verifying trace snippet references stored forensic report.
 
 ## Phase 5 — Retrieval
 - [ ] Hybrid retriever; citation extraction
