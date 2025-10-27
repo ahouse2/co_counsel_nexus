@@ -8,7 +8,7 @@ from qdrant_client.http import models as qmodels
 from ..config import get_settings
 from ..storage.document_store import DocumentStore
 from ..utils.text import extract_capitalized_entities, hashed_embedding
-from .graph import GraphService, GraphNode, GraphEdge, get_graph_service
+from .graph import GraphEdge, GraphNode, GraphService, get_graph_service
 from .vector import VectorService, get_vector_service
 
 

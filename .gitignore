@@ -13,6 +13,8 @@ dist/
 .env
 .env.*
 storage/
+!backend/app/storage/
+backend/app/storage/__pycache__/
 
 # Logs
 *.log

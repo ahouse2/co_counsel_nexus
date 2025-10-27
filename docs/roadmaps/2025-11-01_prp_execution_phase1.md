@@ -1,0 +1,51 @@
+# PRP Execution Run — Phase 1 Infrastructure Hardening
+
+- ## Vision: Deliver operational ingestion & retrieval foundation aligned with PRP Co-Counsel MVP Phase 1 exit criteria.
+  - ### Objectives
+    - #### O1: Materialise durable storage shims (documents, jobs, timeline) backing ingestion lifecycle for API conformance.
+      - ##### Tasks
+        - Implement `DocumentStore` with read/write/list semantics backed by JSON files.
+        - Implement `JobStore` providing manifest persistence and retrieval utilities.
+        - Implement `TimelineStore` with append/read operations over JSONL, ensuring deterministic ordering.
+        - Wire storage package initialiser for export convenience.
+    - #### O2: Stabilise service layer dependencies to leverage new storage shims and satisfy contract tests.
+      - ##### Tasks
+        - Fix missing imports in service/model modules to restore runtime integrity.
+        - Harden `VectorService` with in-memory fallback for test harness (`QDRANT_PATH=':memory:'`).
+        - Ensure retrieval traces and citations operate with document metadata from new store implementation.
+    - #### O3: Validate implementation quality and traceability artefacts.
+      - ##### Tasks
+        - Execute `pytest backend/tests/test_api.py -q`.
+        - Record execution summary in `build_logs` with pass/fail + observations.
+        - Append ACE loop entry documenting Retriever → Planner → Critic decisions.
+        - Update repository `AGENTS.md` chain-of-stewardship log entry.
+
+- ## Decision Tree Snapshot
+  - ### Storage Layer
+    - #### Option A: Pure in-memory stubs (discarded — violates persistence expectations & spec).
+    - #### Option B: SQLite-backed stores (overkill for Phase 1, added complexity).
+    - #### Option C: JSON file-backed stores with deterministic schema (**selected** for portability & transparency).
+  - ### Vector Backend
+    - #### Option A: Require live Qdrant instance (fragile in CI, not aligned with tests) — rejected.
+    - #### Option B: Hybrid: prefer Qdrant when configured, otherwise deterministic cosine-sim fallback (**selected**).
+    - #### Option C: Custom embedding DB (future exploration once PRP Phase 5 begins).
+
+- ## Risk Ledger
+  - ### R1: File I/O race conditions under concurrent ingestion.
+    - #### Mitigation: atomic `Path.write_text` usage & directory `mkdir(..., exist_ok=True)`; acceptable for Phase 1 single-process scope.
+  - ### R2: Cosine similarity fallback deviating from Qdrant ranking.
+    - #### Mitigation: embeddings normalised → dot product equals cosine; small document set minimises divergence.
+  - ### R3: JSONL corruption due to partial writes.
+    - #### Mitigation: append mode writes line-per-event; wrap in try/except if future concurrency emerges.
+
+- ## Execution Checklist
+  - ### Phase Alpha — Storage scaffolding
+    - Create `backend/app/storage/__init__.py` exporting stores.
+    - Author `document_store.py`, `job_store.py`, `timeline_store.py` per tasks.
+  - ### Phase Beta — Service integration polish
+    - Amend imports + dataclasses in services/models/utils modules.
+    - Upgrade `VectorService` for fallback logic.
+  - ### Phase Gamma — Validation & logging
+    - Run tests, capture outputs.
+    - Update build log & ACE memory entry.
+    - Append AGENTS stewardship record.
