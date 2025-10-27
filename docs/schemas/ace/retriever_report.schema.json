@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ACERetrieverReport",
+  "type": "object",
+  "required": [
+    "metadata",
+    "changed_files",
+    "dependency_snapshot",
+    "static_analysis",
+    "context_bundle",
+    "risks",
+    "generated_at"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["pr_number", "head_ref", "repository"],
+      "properties": {
+        "pr_number": {"type": "string"},
+        "base_ref": {"type": ["string", "null"]},
+        "head_ref": {"type": "string"},
+        "repository": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "dependency_snapshot": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/dependencyRecord"}
+    },
+    "static_analysis": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/commandResult"}
+    },
+    "context_bundle": {
+      "type": "object",
+      "required": ["root", "files"],
+      "properties": {
+        "root": {"type": "string"},
+        "files": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "risks": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "dependencyRecord": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "commandResult": {
+      "type": "object",
+      "required": [
+        "name",
+        "command",
+        "cwd",
+        "status",
+        "exit_code",
+        "started_at",
+        "finished_at",
+        "duration_seconds",
+        "stdout",
+        "stderr"
+      ],
+      "properties": {
+        "name": {"type": "string"},
+        "command": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "cwd": {"type": "string"},
+        "status": {
+          "type": "string",
+          "enum": ["success", "failure", "skipped"]
+        },
+        "exit_code": {"type": "integer"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "duration_seconds": {"type": "number", "minimum": 0},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

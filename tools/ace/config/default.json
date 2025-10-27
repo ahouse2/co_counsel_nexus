@@ -1,0 +1,61 @@
+{
+  "thresholds": {
+    "average_min": 8.0,
+    "category_min": 7.0
+  },
+  "rubric_categories": [
+    "Technical Accuracy",
+    "Modularity",
+    "Performance",
+    "Security",
+    "Scalability",
+    "Robustness",
+    "Maintainability",
+    "Innovation",
+    "UX/UI",
+    "Explainability",
+    "Coordination",
+    "DevOps",
+    "Documentation",
+    "Compliance",
+    "Enterprise Value"
+  ],
+  "static_analysis": [
+    {
+      "name": "ruff",
+      "command": ["ruff", "check", "."],
+      "optional": true
+    },
+    {
+      "name": "mypy",
+      "command": ["mypy", "backend", "tools"],
+      "optional": true
+    },
+    {
+      "name": "bandit",
+      "command": ["bandit", "-r", "backend", "tools"],
+      "optional": true
+    }
+  ],
+  "planner_commands": [
+    {
+      "name": "pytest-core",
+      "description": "Execute fast unit tests to guard core behaviours",
+      "command": ["pytest", "-q"],
+      "rubric_categories": ["Technical Accuracy", "Robustness", "Maintainability", "DevOps"]
+    },
+    {
+      "name": "documentation-integrity",
+      "description": "Validate hyperlinks across documentation set",
+      "command": ["python", "tools/docs/validate_links.py"],
+      "rubric_categories": ["Documentation", "Compliance", "Coordination"]
+    },
+    {
+      "name": "reproducibility-regression",
+      "description": "Replay ingestion workflow to ensure deterministic outputs",
+      "command": ["python", "tools/perf/reproducibility_check.py"],
+      "rubric_categories": ["Performance", "Robustness", "Security", "Enterprise Value"],
+      "continue_on_error": false
+    }
+  ]
+}

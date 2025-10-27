@@ -1,0 +1,63 @@
+name: ACE Planner Stage
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: string
+      head-ref:
+        required: true
+        type: string
+      retriever-artifact:
+        required: true
+        type: string
+    secrets:
+      github-token:
+        required: true
+
+jobs:
+  planner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.github-token }}
+          ref: ${{ inputs.head-ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install jsonschema pipdeptree ruff mypy bandit pytest
+
+      - name: Download retriever artefacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.retriever-artifact }}
+          path: artefacts/retriever
+
+      - name: Run ACE planner
+        run: |
+          REPORT_PATH=$(find artefacts/retriever -name "retriever_report.json" | head -n 1)
+          if [ -z "$REPORT_PATH" ]; then
+            echo "retriever_report.json not found" >&2
+            exit 1
+          fi
+          python -m tools.ace.planner \
+            --pr-number "${{ inputs.pr-number }}" \
+            --retriever-report "$REPORT_PATH"
+
+      - name: Upload planner artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ace-planner-${{ inputs.pr-number }}
+          path: |
+            build_logs/*/ace/${{ inputs.pr-number }}/planner/
+          if-no-files-found: error

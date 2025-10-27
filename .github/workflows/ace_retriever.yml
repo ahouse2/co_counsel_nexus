@@ -1,0 +1,57 @@
+name: ACE Retriever Stage
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: string
+      base-ref:
+        required: true
+        type: string
+      head-ref:
+        required: true
+        type: string
+    secrets:
+      github-token:
+        required: true
+
+jobs:
+  retriever:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.github-token }}
+          ref: ${{ inputs.head-ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install jsonschema pipdeptree ruff mypy bandit pytest
+
+      - name: Run ACE retriever
+        env:
+          GIT_AUTHOR_NAME: ace-bot
+          GIT_AUTHOR_EMAIL: ace-bot@example.com
+        run: |
+          python -m tools.ace.retriever \
+            --pr-number "${{ inputs.pr-number }}" \
+            --base-ref "${{ inputs.base-ref }}" \
+            --head-ref "${{ inputs.head-ref }}"
+
+      - name: Upload retriever artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ace-retriever-${{ inputs.pr-number }}
+          path: |
+            build_logs/*/ace/${{ inputs.pr-number }}/retriever/
+            build_logs/*/ace/${{ inputs.pr-number }}/context/
+          if-no-files-found: error

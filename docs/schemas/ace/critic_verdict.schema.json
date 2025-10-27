@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ACECriticVerdict",
+  "type": "object",
+  "required": [
+    "status",
+    "average_score",
+    "minimum_score",
+    "rubric",
+    "command_results",
+    "recommendations",
+    "metadata",
+    "generated_at"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["pass", "block"]
+    },
+    "average_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "minimum_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "rubric": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/rubricEntry"},
+      "minItems": 1
+    },
+    "command_results": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/commandResult"}
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["pr_number", "summary"],
+      "properties": {
+        "pr_number": {"type": "string"},
+        "summary": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "rubricEntry": {
+      "type": "object",
+      "required": ["category", "score", "rationale"],
+      "properties": {
+        "category": {"type": "string"},
+        "score": {"type": "number"},
+        "rationale": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "commandResult": {
+      "type": "object",
+      "required": [
+        "name",
+        "command",
+        "cwd",
+        "status",
+        "exit_code",
+        "started_at",
+        "finished_at",
+        "duration_seconds",
+        "stdout",
+        "stderr"
+      ],
+      "properties": {
+        "name": {"type": "string"},
+        "command": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "cwd": {"type": "string"},
+        "status": {
+          "type": "string",
+          "enum": ["success", "failure", "skipped"]
+        },
+        "exit_code": {"type": "integer"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "duration_seconds": {"type": "number", "minimum": 0},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

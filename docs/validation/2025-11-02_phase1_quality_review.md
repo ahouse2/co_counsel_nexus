@@ -97,3 +97,13 @@
     - #### Publish JSON schema for reports, enforce via CI validation step.
   - ### Phase C — Policy Enforcement
     - #### Wire rubric gating + status checks blocking merges on failure.
+  - ### Implementation Notes — 2025-11-03 Update
+    - #### Retriever Stage
+      - ##### Materialised as `python -m tools.ace.retriever` producing validated `retriever_report.json` and context bundle copies under `build_logs/<date>/ace/<pr>/`.
+      - ##### Static analysis commands configured via `tools/ace/config/default.json` with deterministic logging.
+    - #### Planner Stage
+      - ##### Synthesises `plan.json` + human-readable `plan.md` using heuristics keyed by changed file prefixes.
+      - ##### Ensures rubric coverage mapping persists for downstream critic scoring.
+    - #### Critic Stage
+      - ##### Executes planner commands sequentially, scoring rubric via `tools.ace.critic.evaluate` with gating thresholds (avg ≥ 8.0, min ≥ 7.0).
+      - ##### Emits GitHub-ready comment snippet and optional ACE memory append for repository provenance.

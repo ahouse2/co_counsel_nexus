@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ACEPlannerPlan",
+  "type": "object",
+  "required": ["metadata", "steps", "rationale", "generated_at"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["pr_number", "planner_version"],
+      "properties": {
+        "pr_number": {"type": "string"},
+        "planner_version": {"type": "string"},
+        "changed_file_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "steps": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/planStep"},
+      "minItems": 1
+    },
+    "rationale": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "planStep": {
+      "type": "object",
+      "required": [
+        "identifier",
+        "name",
+        "description",
+        "command",
+        "rubric_categories",
+        "continue_on_error"
+      ],
+      "properties": {
+        "identifier": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "command": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1
+        },
+        "rubric_categories": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1
+        },
+        "continue_on_error": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,77 @@
+# ACE System Implementation Plan — 2025-11-03
+
+- ## Vision
+  - ### Goals
+    - #### Establish automated Retriever → Planner → Critic validation loop for PRs targeting `main`.
+    - #### Persist artefacts + rubric deltas for auditability under `build_logs/<date>/ace/<pr-id>/`.
+    - #### Enforce rubric gate: average ≥ 8.0, per-category ≥ 7.0, with actionable reviewer feedback.
+  - ### Guiding Principles
+    - #### Determinism — command execution must produce reproducible artefacts (seeded randomness, canonical ordering).
+    - #### Observability — log structured outputs and exit codes for each command invocation.
+    - #### Extensibility — allow future agents to add new checks without rewriting orchestrator.
+
+- ## Phase Tree
+  - ### Phase A — Automation Scaffolding
+    - #### A1 — Repository Layout
+      - ##### Create `tools/ace/` package with modules for retriever, planner, critic, orchestration, and schema validation.
+      - ##### Define data classes representing artefacts (`RetrieverReport`, `PlannerPlan`, `CriticVerdict`) with JSON serialisation helpers.
+      - ##### Provide CLI entrypoints `python -m tools.ace.retriever ...`, etc.
+    - #### A2 — Configuration & Utilities
+      - ##### Implement configuration loader reading YAML/JSON + env overrides for command definitions and thresholds.
+      - ##### Implement subprocess runner capturing stdout/stderr, exit codes, durations, and writing structured logs.
+      - ##### Ensure filesystem helpers manage timestamped directories inside `build_logs` and avoid traversal.
+  - ### Phase B — Artefact Schema Stabilisation
+    - #### B1 — JSON Schema Definitions
+      - ##### Create `docs/schemas/ace/` with JSON Schema files for retriever report, planner plan, critic verdict.
+      - ##### Document schema fields with descriptions aligning with blueprint responsibilities.
+    - #### B2 — Validation Pipeline
+      - ##### Implement schema validation utility using `jsonschema` to validate artefacts before persistence.
+      - ##### Provide unit tests covering valid/invalid payloads per schema.
+  - ### Phase C — Policy Enforcement & CI Integration
+    - #### C1 — Policy Engine
+      - ##### Implement rubric evaluation logic ensuring thresholds; raise descriptive errors when violations occur.
+      - ##### Persist rubric deltas + thresholds into verdict output.
+    - #### C2 — GitHub Workflows
+      - ##### Add reusable workflow `.github/workflows/ace_retriever.yml` to run retriever stage and upload artefacts.
+      - ##### Add `.github/workflows/ace_planner.yml` triggered by retriever artefact to produce plan + tests matrix.
+      - ##### Add `.github/workflows/ace_critic.yml` to execute plan commands, run critic, publish status and PR comment.
+      - ##### Add `.github/workflows/ace_entry.yml` as entrypoint for PRs targeting `main` orchestrating dependent workflows.
+    - #### C3 — PR Comment + Memory Update
+      - ##### Provide script to append to `memory/ace_state.jsonl` with latest verdict when critic passes.
+      - ##### Add CLI option for Slack webhook (disabled by default) but structured for future activation.
+  - ### Phase D — Quality & Documentation
+    - #### D1 — Tests
+      - ##### Write tests for command runner error handling, schema validation, and rubric enforcement.
+      - ##### Integrate tests into existing pytest suite (e.g., `pytest tools/tests -q`).
+    - #### D2 — Documentation & Logs
+      - ##### Update `build_logs/2025-11-03.md` summarising implementation + checks.
+      - ##### Extend `docs/validation/...` blueprint with references to concrete scripts (append Implementation Notes section).
+      - ##### Update root `AGENTS.md` stewardship log and `memory/ace_state.jsonl` entry post-run.
+
+- ## Decision Trees
+  - ### Command Execution Strategy
+    - #### Option 1 — direct `subprocess.run` sequentially per command (Chosen: deterministic, easier to log).
+    - #### Option 2 — asynchronous orchestration (Rejected: unnecessary complexity for Phase 1.1).
+  - ### Schema Validation Library
+    - #### Option 1 — use `jsonschema` (Chosen: widely available, already dependency-friendly).
+    - #### Option 2 — implement custom validator (Rejected: reinvents wheel, risk of divergence).
+  - ### Artefact Storage Layout
+    - #### Option 1 — `build_logs/YYYY-MM-DD/ace/<pr>/stage/` with stage-specific files (Chosen for clarity).
+    - #### Option 2 — flatten by stage (Rejected: harder to correlate multi-PR runs).
+
+- ## Task Ledger
+  - ### Open
+    - *(cleared — see Done)*
+  - ### Done
+    - #### Implement CLI modules with full functionality.
+    - #### Author JSON Schemas + validators.
+    - #### Create GitHub workflows.
+    - #### Write tests + documentation updates.
+
+- ## Personal Notes
+  - ### Iteration Discipline
+    - #### After implementing each phase, perform at least two focused code review passes (structure + edge cases).
+    - #### Maintain changelog snippets for PR description reuse.
+  - ### Flair Opportunities
+    - #### Provide rich PR comment template summarising rubric deltas with emoji scoreboard for quick scanning.
+    - #### Include deterministic sample command outputs in documentation for onboarding delight.
