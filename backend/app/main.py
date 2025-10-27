@@ -11,6 +11,7 @@ from .models.api import (
     GraphNodeModel,
     IngestionRequest,
     IngestionResponse,
+    IngestionStatusResponse,
     QueryResponse,
     TimelineEventModel,
     TimelineResponse,
@@ -36,8 +37,27 @@ def ingest(
     service: IngestionService = Depends(get_ingestion_service),
 ) -> JSONResponse:
     job_id = service.ingest(payload)
-    response = IngestionResponse(job_id=job_id, status="completed")
-    return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=response.model_dump())
+    job_record = service.get_job(job_id)
+    response = IngestionResponse(job_id=job_id, status=job_record.get("status", "queued"))
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=response.model_dump(mode="json"),
+    )
+
+
+@app.get("/ingest/{job_id}", response_model=IngestionStatusResponse)
+def ingest_status(
+    job_id: str,
+    service: IngestionService = Depends(get_ingestion_service),
+) -> JSONResponse:
+    try:
+        record = service.get_job(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found") from exc
+    response = IngestionStatusResponse(**record)
+    terminal_statuses = {"succeeded", "failed", "cancelled"}
+    status_code = status.HTTP_200_OK if response.status in terminal_statuses else status.HTTP_202_ACCEPTED
+    return JSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
 
 
 @app.get("/query", response_model=QueryResponse)

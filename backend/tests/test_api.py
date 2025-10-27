@@ -71,6 +71,15 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     documents = job_manifest["documents"]
     assert len(documents) == 3
     doc_map = {doc["type"]: doc for doc in documents}
+    assert job_manifest["status"] == "succeeded"
+    ingestion_details = job_manifest["status_details"]["ingestion"]
+    assert ingestion_details["documents"] == 3
+    assert not ingestion_details["skipped"]
+    assert job_manifest["status_details"]["timeline"]["events"] >= 1
+    for doc in documents:
+        metadata = doc["metadata"]
+        assert metadata["checksum_sha256"]
+        assert metadata["ingested_uri"].startswith("/")
 
     query_response = client.get("/query", params={"q": "What happened with Acme?"})
     assert query_response.status_code == 200
@@ -104,10 +113,19 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert financial_forensics.status_code == 200
     assert financial_forensics.json()["data"]["totals"]["amount"] == 600.0
 
+    status_response = client.get(f"/ingest/{job_id}")
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["job_id"] == job_id
+    assert status_payload["status"] == "succeeded"
+    assert status_payload["status_details"]["ingestion"]["documents"] == 3
+    assert status_payload["documents"][0]["metadata"]["checksum_sha256"]
+
 
 def test_ingestion_validation_errors(client: TestClient) -> None:
     bad_source = client.post("/ingest", json={"sources": [{"type": "sharepoint", "credRef": "x"}]})
-    assert bad_source.status_code == 422
+    assert bad_source.status_code == 503
+    assert "requires" in bad_source.json()["detail"]
 
     missing_body = client.post("/ingest", json={"sources": []})
     assert missing_body.status_code == 400
@@ -125,4 +143,9 @@ def test_not_found_paths(client: TestClient) -> None:
 
     forensic_missing = client.get("/forensics/document", params={"id": "missing"})
     assert forensic_missing.status_code == 404
+
+
+def test_ingest_status_not_found(client: TestClient) -> None:
+    response = client.get("/ingest/unknown-job")
+    assert response.status_code == 404
 

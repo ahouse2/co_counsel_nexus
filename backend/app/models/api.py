@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -18,7 +18,52 @@ class IngestionRequest(BaseModel):
 
 class IngestionResponse(BaseModel):
     job_id: str = Field(description="Identifier tracking the ingestion operation")
-    status: str = Field(description="Current job status")
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"] = Field(
+        description="Current job status"
+    )
+
+
+class IngestionDocumentModel(BaseModel):
+    id: str
+    uri: Optional[HttpUrl | str] = None
+    type: str
+    title: str
+    metadata: dict
+
+
+class IngestionErrorModel(BaseModel):
+    code: str
+    message: str
+    source: Optional[str] = None
+
+
+class IngestionIngestionDetailsModel(BaseModel):
+    documents: int
+    skipped: List[dict] = Field(default_factory=list)
+
+
+class IngestionTimelineDetailsModel(BaseModel):
+    events: int
+
+
+class IngestionForensicsDetailsModel(BaseModel):
+    artifacts: List[dict] = Field(default_factory=list)
+
+
+class IngestionStatusDetailsModel(BaseModel):
+    ingestion: IngestionIngestionDetailsModel
+    timeline: IngestionTimelineDetailsModel
+    forensics: IngestionForensicsDetailsModel
+
+
+class IngestionStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    submitted_at: datetime
+    updated_at: datetime
+    documents: List[IngestionDocumentModel]
+    errors: List[IngestionErrorModel] = Field(default_factory=list)
+    status_details: IngestionStatusDetailsModel
 
 
 class CitationModel(BaseModel):

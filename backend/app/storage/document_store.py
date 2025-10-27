@@ -1,40 +1,39 @@
 from __future__ import annotations
 
-import json
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Dict, List
 
+from ..utils.storage import atomic_write_json, read_json, safe_path
+
 
 class DocumentStore:
-    """File-backed document metadata store.
-
-    Documents are persisted as prettified JSON payloads named by their identifier.
-    """
+    """File-backed document metadata store with traversal safeguards."""
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, doc_id: str) -> Path:
-        safe_id = doc_id.replace("/", "_")
-        return self.root / f"{safe_id}.json"
+        return safe_path(self.root, doc_id)
 
     def write_document(self, doc_id: str, payload: Dict[str, object]) -> None:
         path = self._path(doc_id)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        atomic_write_json(path, payload)
 
     def read_document(self, doc_id: str) -> Dict[str, object]:
         path = self._path(doc_id)
         if not path.exists():
             raise FileNotFoundError(f"Document {doc_id} missing from store")
-        return json.loads(path.read_text())
+        return read_json(path)
 
     def list_documents(self) -> List[Dict[str, object]]:
         documents: List[Dict[str, object]] = []
         for file in sorted(self.root.glob("*.json")):
             try:
-                documents.append(json.loads(file.read_text()))
-            except json.JSONDecodeError:
+                documents.append(read_json(file))
+            except (ValueError, FileNotFoundError, OSError):
                 continue
         return documents
 
