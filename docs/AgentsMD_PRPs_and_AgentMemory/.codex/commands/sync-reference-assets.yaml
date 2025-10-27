@@ -1,0 +1,11 @@
+name: sync-reference-assets
+description: Clone or update all upstream SDKs listed in Reference Code/catalog.yaml
+tags:
+  - reference-code
+  - dependencies
+  - reproducibility
+steps:
+  - python Reference\ Code/sync_reference_code.py --dest "Reference Code/vendor"
+artifacts:
+  - path: Reference Code/vendor
+    description: Local mirror of upstream repositories (excluded from git)

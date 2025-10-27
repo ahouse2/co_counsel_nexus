@@ -1,0 +1,11 @@
+name: validate-doc-links
+description: Ensure all onboarding and PRP cross-links resolve to local files
+tags:
+  - docs
+  - validation
+  - quality-gate
+steps:
+  - python tools/docs/validate_links.py
+artifacts:
+  - path: build_logs/validate_doc_links.log
+    description: Optional log file capturing validator output (create by redirecting stdout/stderr when running manually)
