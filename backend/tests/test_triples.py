@@ -7,7 +7,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from backend.app.utils.triples import extract_entities, extract_triples, normalise_entity_id
+from backend.app.utils.triples import (  # noqa: E402
+    extract_entities,
+    extract_triples,
+    normalise_entity_id,
+)
 
 
 def test_extract_entities_and_ids() -> None:

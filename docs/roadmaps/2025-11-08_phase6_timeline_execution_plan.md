@@ -4,6 +4,9 @@
 - Deliver a resilient `/timeline` service that synthesises graph-derived events, persists deterministic histories, and exposes filterable, paginated APIs for agents and UI clients.
 - Harden supporting systems (stores, graph queries, agents) so that multi-agent workflows can depend on timeline accuracy and availability.
 
+### Status
+Cursor pagination, timestamp/entity filters, and defensive cursor validation are live in `backend/app/services/timeline.py` with regression coverage in `backend/tests/test_api.py::test_timeline_pagination_and_filters`; telemetry counters and UI wiring remain outstanding for observability and presentation layers.
+
 ## 2. Decision Tree Overview
 - **2.1 Data Provenance**
   - 2.1.1 Use ingestion-produced events as authoritative records; enrich via graph entity lookups for filtering.

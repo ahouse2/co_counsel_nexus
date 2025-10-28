@@ -4,7 +4,7 @@ import math
 import re
 from hashlib import sha256
 from pathlib import Path
-from typing import Iterable, Iterator, List, Optional, Sequence
+from typing import Iterator, List, Optional, Sequence
 
 _WORD_RE = re.compile(r"[A-Za-z0-9']+")
 _CAPITALIZED_RE = re.compile(r"\b([A-Z][a-zA-Z0-9]{2,})\b")
