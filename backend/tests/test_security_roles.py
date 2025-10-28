@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from backend.app.storage.job_store import JobStore
+
+
+def _wait_for_job_completion(job_store: JobStore, job_id: str, timeout: float = 10.0) -> None:
+    deadline = time.time() + timeout
+    while True:
+        manifest = job_store.read_job(job_id)
+        status = manifest.get("status")
+        if status in {"succeeded", "failed", "cancelled"}:
+            return
+        if time.time() >= deadline:
+            raise AssertionError(f"Timed out waiting for ingestion job {job_id}")
+        time.sleep(0.05)
 
 
 def _perform_ingestion(client: TestClient, workspace: Path, auth_headers_factory) -> None:
@@ -16,6 +29,9 @@ def _perform_ingestion(client: TestClient, workspace: Path, auth_headers_factory
         headers=headers,
     )
     assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    job_store = JobStore(Path(os.environ["JOB_STORE_DIR"]))
+    _wait_for_job_completion(job_store, job_id)
 
 
 def test_query_requires_scope(

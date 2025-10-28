@@ -60,6 +60,8 @@ class Settings(BaseSettings):
 
     ingestion_chunk_size: int = Field(default=400)
     ingestion_chunk_overlap: int = Field(default=60)
+    ingestion_queue_maxsize: int = Field(default=32)
+    ingestion_worker_concurrency: int = Field(default=1)
 
     retrieval_max_search_window: int = Field(default=60)
     retrieval_graph_hop_window: int = Field(default=12)

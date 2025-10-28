@@ -26,7 +26,12 @@ from .models.api import (
 from .services.agents import AgentsService, get_agents_service
 from .services.forensics import ForensicsService, get_forensics_service
 from .services.graph import GraphService, get_graph_service
-from .services.ingestion import IngestionService, get_ingestion_service
+from .services.ingestion import (
+    IngestionService,
+    get_ingestion_service,
+    get_ingestion_worker,
+    shutdown_ingestion_worker,
+)
 from .services.retrieval import RetrievalService, get_retrieval_service
 from .services.timeline import TimelineService, get_timeline_service
 from .security.authz import Principal
@@ -49,6 +54,16 @@ settings = get_settings()
 setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.add_middleware(MTLSMiddleware, config=create_mtls_config())
+
+
+@app.on_event("startup")
+def start_background_workers() -> None:
+    get_ingestion_worker()
+
+
+@app.on_event("shutdown")
+def stop_background_workers() -> None:
+    shutdown_ingestion_worker(timeout=5.0)
 
 
 @app.get("/health")

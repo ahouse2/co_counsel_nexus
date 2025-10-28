@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -15,6 +16,18 @@ def _read_job_manifest(job_dir: Path, job_id: str) -> Dict[str, object]:
     manifest = job_dir / f"{job_id}.json"
     assert manifest.exists(), f"Expected manifest {manifest}"
     return json.loads(manifest.read_text())
+
+
+def _wait_for_job_completion(job_dir: Path, job_id: str, timeout: float = 10.0) -> Dict[str, object]:
+    deadline = time.time() + timeout
+    while True:
+        manifest = _read_job_manifest(job_dir, job_id)
+        status = manifest.get("status")
+        if status in {"succeeded", "failed", "cancelled"}:
+            return manifest
+        if time.time() >= deadline:
+            raise AssertionError(f"Timed out waiting for ingestion job {job_id} to complete")
+        time.sleep(0.05)
 
 
 def test_ingestion_and_retrieval(
@@ -32,7 +45,7 @@ def test_ingestion_and_retrieval(
     assert response.status_code == 202
     job_id = response.json()["job_id"]
 
-    job_manifest = _read_job_manifest(Path(os.environ["JOB_STORE_DIR"]), job_id)
+    job_manifest = _wait_for_job_completion(Path(os.environ["JOB_STORE_DIR"]), job_id)
     documents = job_manifest["documents"]
     assert len(documents) == 3
     doc_map = {doc["type"]: doc for doc in documents}
@@ -140,6 +153,8 @@ def test_query_filters_and_pagination(
         headers=headers,
     )
     assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    _wait_for_job_completion(Path(os.environ["JOB_STORE_DIR"]), job_id)
 
     first_page = client.get(
         "/query",
@@ -220,6 +235,7 @@ def test_timeline_pagination_and_filters(
         headers=headers,
     )
     assert response.status_code == 202
+    _wait_for_job_completion(Path(os.environ["JOB_STORE_DIR"]), response.json()["job_id"])
 
     timeline_store = TimelineStore(Path(os.environ["TIMELINE_PATH"]))
     neutral_event = TimelineEvent(
@@ -276,8 +292,10 @@ def test_ingestion_validation_errors(client: TestClient, auth_headers_factory) -
     bad_source = client.post(
         "/ingest", json={"sources": [{"type": "sharepoint", "credRef": "x"}]}, headers=headers
     )
-    assert bad_source.status_code in {404, 503}
-    assert bad_source.json()["detail"]
+    assert bad_source.status_code == 202
+    bad_job = _wait_for_job_completion(Path(os.environ["JOB_STORE_DIR"]), bad_source.json()["job_id"])
+    assert bad_job["status"] == "failed"
+    assert any(error.get("code") in {"404", "INGESTION_ERROR"} for error in bad_job["errors"])
 
     missing_body = client.post("/ingest", json={"sources": []}, headers=headers)
     assert missing_body.status_code == 400
@@ -290,7 +308,10 @@ def test_not_found_paths(client: TestClient, auth_headers_factory) -> None:
         json={"sources": [{"type": "local", "path": "/nonexistent"}]},
         headers=headers,
     )
-    assert response.status_code == 404
+    assert response.status_code == 202
+    manifest = _wait_for_job_completion(Path(os.environ["JOB_STORE_DIR"]), response.json()["job_id"])
+    assert manifest["status"] == "failed"
+    assert any(error.get("code") == "404" for error in manifest["errors"])
 
     graph_missing = client.get(
         "/graph/neighbor", params={"id": "entity::Missing"}, headers=headers
