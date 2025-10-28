@@ -240,7 +240,7 @@ class RetrievalService:
                         or edge.get("source") in doc_ids_page
                         or edge.get("target") in doc_ids_page
                     )
-                [
+                ]
                 graph_node_ids = {
                     edge.get("source") for edge in graph_edges_page
                 } | {
