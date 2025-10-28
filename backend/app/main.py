@@ -81,7 +81,7 @@ def ingest(
     service: IngestionService = Depends(get_ingestion_service),
     principal: Principal = Depends(authorize_ingest_enqueue),
 ) -> JSONResponse:
-    job_id = service.ingest(payload)
+    job_id = service.ingest(payload, principal=principal)
     job_record = service.get_job(job_id)
     response = IngestionResponse(job_id=job_id, status=job_record.get("status", "queued"))
     return JSONResponse(
@@ -272,7 +272,7 @@ def agents_run(
     principal: Principal = Depends(authorize_agents_run),
 ) -> AgentRunResponse:
     top_k = payload.top_k or 5
-    response = service.run_case(payload.case_id, payload.question, top_k=top_k)
+    response = service.run_case(payload.case_id, payload.question, top_k=top_k, principal=principal)
     return AgentRunResponse(**response)
 
 

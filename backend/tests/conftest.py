@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import importlib
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from fastapi.testclient import TestClient
 
 from backend.app import config
 from backend.app.security.dependencies import reset_security_caches
+from backend.app.utils.audit import reset_audit_trail
 
 
 @dataclass
@@ -296,6 +298,11 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
     monkeypatch.setenv("DOCUMENT_STORE_DIR", str(storage_root / "documents"))
     monkeypatch.setenv("INGESTION_WORKSPACE_DIR", str(storage_root / "workspaces"))
     monkeypatch.setenv("AGENT_THREADS_DIR", str(storage_root / "agent_threads"))
+    key_path = storage_root / "manifest.key"
+    key_path.write_bytes(os.urandom(32))
+    audit_log_path = storage_root / "audit.log"
+    monkeypatch.setenv("MANIFEST_ENCRYPTION_KEY_PATH", str(key_path))
+    monkeypatch.setenv("AUDIT_LOG_PATH", str(audit_log_path))
 
     from backend.app import config as app_config
     from backend.app.services import graph as graph_service
@@ -303,6 +310,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
 
     app_config.reset_settings_cache()
     reset_security_caches()
+    reset_audit_trail()
     vector_service.reset_vector_service()
     graph_service.reset_graph_service()
 

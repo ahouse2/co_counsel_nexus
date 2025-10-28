@@ -8,9 +8,10 @@ from typing import Iterable
 from fastapi import Depends, HTTPException, Request, status
 
 from ..config import get_settings
+from ..utils.audit import AuditEvent, get_audit_trail
 from .authz import AuthorizationService, Principal, build_resource
 from .mtls import ClientIdentity, MTLSConfig
-from .oauth import OAuthValidator
+from .oauth import OAuthValidator, TokenClaims
 
 
 LOGGER = logging.getLogger("backend.security.dependencies")
@@ -66,6 +67,62 @@ def _extract_bearer_token(request: Request) -> str:
     return parts[1]
 
 
+def _audit_security_event(
+    *,
+    identity: ClientIdentity,
+    claims: TokenClaims | None,
+    principal: Principal | None,
+    metadata: dict,
+    outcome: str,
+    status_code: int | None = None,
+    detail: str | None = None,
+    severity: str = "info",
+) -> None:
+    actor = {
+        "client_id": identity.client_id,
+        "tenant_id": identity.tenant_id,
+        "subject": (claims.subject if claims and claims.subject else identity.subject),
+        "fingerprint": identity.fingerprint,
+        "certificate_roles": sorted(identity.roles),
+        "token_roles": sorted(claims.roles if claims else []),
+        "scopes": sorted(claims.scopes if claims else []),
+    }
+    metadata_payload = dict(metadata)
+    if status_code is not None:
+        metadata_payload["status_code"] = status_code
+    if detail is not None:
+        metadata_payload["detail"] = detail
+    if principal is not None:
+        metadata_payload.setdefault("effective_roles", sorted(principal.roles))
+        metadata_payload.setdefault("case_admin", principal.case_admin)
+    event = AuditEvent(
+        category="security",
+        action="security.authz",
+        actor=actor,
+        subject={
+            "resource": metadata.get("resource"),
+            "action": metadata.get("action"),
+            "tenant_id": identity.tenant_id,
+        },
+        outcome=outcome,
+        severity=severity,
+        correlation_id=f"{identity.client_id}:{metadata.get('resource', 'unknown')}",
+        metadata=metadata_payload,
+    )
+    try:
+        get_audit_trail().append(event)
+    except Exception:  # pragma: no cover - audit persistence must not break auth
+        LOGGER.exception(
+            "Failed to append security audit event",
+            extra={
+                "client_id": identity.client_id,
+                "tenant_id": identity.tenant_id,
+                "resource": metadata.get("resource"),
+                "outcome": outcome,
+            },
+        )
+
+
 def _authorize(
     request: Request,
     *,
@@ -78,67 +135,106 @@ def _authorize(
     identity = _extract_identity(request)
     token = _extract_bearer_token(request)
     validator = _get_oauth_validator()
-    claims = validator.validate(token, audience=audience)
-    if identity.tenant_id != claims.tenant_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant mismatch between certificate and token")
-    certificate_roles = set(identity.roles)
-    token_roles = set(claims.roles)
-    effective_roles = (certificate_roles & token_roles) if token_roles else certificate_roles
+    claims: TokenClaims | None = None
+    principal: Principal | None = None
+    metadata_base = {
+        "resource": resource_name,
+        "action": action,
+        "audience": audience,
+        "required_scopes": sorted(required_scopes),
+        "allowed_roles": sorted(allowed_roles),
+    }
 
-    principal = Principal(
-        client_id=identity.client_id,
-        subject=claims.subject or identity.subject,
-        tenant_id=claims.tenant_id,
-        roles=effective_roles,
-        token_roles=token_roles,
-        certificate_roles=certificate_roles,
-        scopes=set(claims.scopes),
-        case_admin=claims.case_admin,
-        attributes={
-            **identity.metadata,
-            **claims.attributes,
-            "token_roles": sorted(token_roles),
-            "certificate_roles": sorted(certificate_roles),
-        },
-    )
-    request.state.principal = principal
+    try:
+        claims = validator.validate(token, audience=audience)
+        if identity.tenant_id != claims.tenant_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant mismatch between certificate and token")
+        certificate_roles = set(identity.roles)
+        token_roles = set(claims.roles)
+        effective_roles = (certificate_roles & token_roles) if token_roles else certificate_roles
 
-    required_scope_set = set(required_scopes)
-    missing_scopes = sorted(required_scope_set - principal.scopes)
-    if missing_scopes:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Missing required scope(s): {', '.join(missing_scopes)}",
+        principal = Principal(
+            client_id=identity.client_id,
+            subject=claims.subject or identity.subject,
+            tenant_id=claims.tenant_id,
+            roles=effective_roles,
+            token_roles=token_roles,
+            certificate_roles=certificate_roles,
+            scopes=set(claims.scopes),
+            case_admin=claims.case_admin,
+            attributes={
+                **identity.metadata,
+                **claims.attributes,
+                "token_roles": sorted(token_roles),
+                "certificate_roles": sorted(certificate_roles),
+            },
         )
+        request.state.principal = principal
 
-    allowed_role_set = set(allowed_roles)
-    if allowed_role_set and not (principal.roles & allowed_role_set):
-        if principal.case_admin:
-            LOGGER.debug(
-                "Bypassing role enforcement for case administrator",
-                extra={
-                    "client_id": principal.client_id,
-                    "subject": principal.subject,
-                    "resource": resource_name,
-                    "roles": sorted(principal.roles),
-                },
-            )
-        else:
+        required_scope_set = set(required_scopes)
+        missing_scopes = sorted(required_scope_set - principal.scopes)
+        if missing_scopes:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient role for requested resource",
+                detail=f"Missing required scope(s): {', '.join(missing_scopes)}",
             )
 
-    resource = build_resource(
-        resource_name,
-        action,
-        tenant_id=claims.tenant_id,
-        scopes=required_scopes,
-        roles=allowed_roles,
-        attributes={"case_admin": claims.case_admin, **claims.attributes},
+        allowed_role_set = set(allowed_roles)
+        if allowed_role_set and not (principal.roles & allowed_role_set):
+            if principal.case_admin:
+                LOGGER.debug(
+                    "Bypassing role enforcement for case administrator",
+                    extra={
+                        "client_id": principal.client_id,
+                        "subject": principal.subject,
+                        "resource": resource_name,
+                        "roles": sorted(principal.roles),
+                    },
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Insufficient role for requested resource",
+                )
+
+        resource = build_resource(
+            resource_name,
+            action,
+            tenant_id=claims.tenant_id,
+            scopes=required_scopes,
+            roles=allowed_roles,
+            attributes={"case_admin": claims.case_admin, **claims.attributes},
+        )
+        authz = get_authorization_service()
+        authz.authorize(principal, action, resource)
+    except HTTPException as exc:
+        severity = "error" if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR else "warning"
+        metadata = dict(metadata_base)
+        if claims is not None:
+            metadata["token_audience"] = sorted(claims.audience)
+        _audit_security_event(
+            identity=identity,
+            claims=claims,
+            principal=principal,
+            metadata=metadata,
+            outcome="denied",
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+            severity=severity,
+        )
+        raise
+
+    metadata = dict(metadata_base)
+    metadata["token_audience"] = sorted(claims.audience)
+    metadata["principal_roles"] = sorted(principal.roles)
+    _audit_security_event(
+        identity=identity,
+        claims=claims,
+        principal=principal,
+        metadata=metadata,
+        outcome="allowed",
+        severity="info",
     )
-    authz = get_authorization_service()
-    authz.authorize(principal, action, resource)
     return principal
 
 
