@@ -35,6 +35,7 @@
 - [ ] **Background Ingestion Workers** — Move ingestion orchestration off request thread. *(Owners: Platform Core Guild)*
   - [ ] Introduce task queue abstraction (Celery/RQ) with idempotent job handling. *(Code: `backend/app/services/ingestion_worker.py`)*
   - [ ] Provide e2e test verifying async job lifecycle + status polling. *(Tests: `backend/tests/test_ingestion_async.py`)*
-- [ ] **Telemetry & Metrics Export** — Emit OpenTelemetry spans/metrics for retrieval + forensics pipelines. *(Owners: Observability Team)*
-  - [ ] Integrate OTLP exporter configuration + span instrumentation. *(Code: `backend/app/telemetry/__init__.py`)*
-  - [ ] Document dashboards + SLO probes in validation playbook. *(Docs: `docs/validation/nfr_validation_matrix.md`)*
+- [x] **Telemetry & Metrics Export** — Emit OpenTelemetry spans/metrics for retrieval + forensics pipelines. *(Owners: Observability Team)*
+  - [x] Integrate OTLP exporter configuration + span instrumentation. *(Code: `backend/app/telemetry/__init__.py`)*
+  - [x] Document dashboards + SLO probes in validation playbook. *(Docs: `docs/validation/nfr_validation_matrix.md`)*
+  - [x] Stabilise instrumentation tests with recording stubs for spans/metrics. *(Tests: `backend/tests/test_telemetry.py`)*

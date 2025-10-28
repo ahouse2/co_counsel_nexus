@@ -1,0 +1,70 @@
+# PRP Execution Run — Phase 8 Telemetry & Metrics Enablement
+
+- ## Vision: Instrument the Co-Counsel backend with production-grade OpenTelemetry tracing and metrics that satisfy PRP Phase 4 observability commitments and unlock validation automation.
+  - ### Objectives
+    - #### O1: Establish configurable telemetry bootstrap with OTLP exporter support and deterministic defaults.
+      - ##### Outcomes
+        - Settings surface `telemetry_enabled`, OTLP endpoint/insecure toggles, service metadata, and metric cadence.
+        - `backend/app/telemetry` initialises tracer + meter providers exactly once with thread safety and idempotent reset hooks for tests.
+        - Console-safe fallback ensures local development works without collector dependencies while preserving span recording semantics.
+    - #### O2: Emit high-fidelity spans and metrics across retrieval and forensics critical paths.
+      - ##### Outcomes
+        - Retrieval queries wrap vector/graph/forensics fusion inside spans that capture pagination, filters, rerank and evidence counts.
+        - Metrics record query durations, result counts, rerank toggles, and fallback behaviour for downstream dashboards.
+        - Forensics pipelines generate parent/child spans per stage, annotate fallback + error pathways, and publish counters/histograms for pipeline duration + stage latency.
+    - #### O3: Validate instrumentation through deterministic automated tests and documentation updates.
+      - ##### Outcomes
+        - Pytest suite exercises telemetry bootstrap with in-memory exporters, asserting span attributes and metric datapoints.
+        - NFR validation matrix lists OTLP dashboards + probes, linking telemetry streams to SLO evidence capture.
+        - PRP task tracker reflects completion of telemetry instrumentation work package.
+
+- ## Decision Tree Snapshot
+  - ### Telemetry Bootstrap Strategy
+    - #### Option A: Rely on implicit global providers without central setup (rejected — difficult to tune exporter + resource metadata).
+    - #### Option B: Build bespoke tracing abstraction divorced from OpenTelemetry (rejected — diverges from spec + ecosystem tooling).
+    - #### Option C: Implement OpenTelemetry bootstrap with OTLP exporter hooks and testing reset utilities (**selected** for standard compliance and CI determinism).
+  - ### Exporter Selection
+    - #### Option A: Hardcode OTLP gRPC exporter and fail when endpoint missing (rejected — hurts developer experience/offline runs).
+    - #### Option B: Provide dynamic exporter factory enabling OTLP, console, or none via settings (**selected** — patchable in tests, resilient in prod).
+    - #### Option C: Integrate vendor-specific exporters (deferred — revisit when deployment target confirmed).
+  - ### Metrics Collection
+    - #### Option A: Skip metrics instrumentation (rejected — violates observability task requirements).
+    - #### Option B: Use synchronous counters/histograms from `opentelemetry.metrics` with periodic exporters (**selected** — aligns with OTel spec and reduces dependency surface).
+    - #### Option C: Introduce Prometheus client alongside OTel (deferred — duplicate effort, consider once scraping strategy defined).
+
+- ## Implementation Breakdown
+  - ### Phase A — Configuration & Bootstrap (owner: Platform Core Guild, est. 0.5 day)
+    - #### Step A1: Extend `Settings` with telemetry toggles + metadata; ensure directory prep unaffected.
+    - #### Step A2: Author `backend/app/telemetry/__init__.py` with idempotent `setup_telemetry`/`reset_telemetry`, OTLP exporter factories, and console fallback.
+    - #### Step A3: Invoke telemetry bootstrap from `backend/app/main.py` immediately after loading settings.
+  - ### Phase B — Retrieval Instrumentation (owner: Retrieval Engineering Pod, est. 0.5 day)
+    - #### Step B1: Instantiate tracer/meter, counters (`retrieval_queries_total`) and histograms (`retrieval_query_duration_ms`, `retrieval_results_returned`).
+    - #### Step B2: Wrap `RetrievalService.query` logic in parent span capturing filters, pagination, rerank usage, search window, evidence counts.
+    - #### Step B3: Record metrics with attributes for source filter, rerank boolean, and evidence availability; ensure instrumentation respects error paths.
+  - ### Phase C — Forensics Instrumentation (owner: Forensic Intelligence Guild, est. 0.75 day)
+    - #### Step C1: Define tracer/meter constructs plus counters/histograms for pipeline executions and stage durations.
+    - #### Step C2: Enclose `_execute_pipeline` plus each stage invocation inside spans capturing status, fallback, exceptions.
+    - #### Step C3: Emit metrics for pipeline totals, fallback usage, stage-level durations; propagate span events on failures for diagnostics.
+  - ### Phase D — Validation & Documentation (owner: Reliability & Compliance Team, est. 0.5 day)
+    - #### Step D1: Craft pytest module leveraging in-memory exporters to assert spans/metrics for retrieval and forensics flows.
+    - #### Step D2: Update NFR validation matrix with telemetry dashboards + probes; note OTLP endpoint naming and metric keys.
+    - #### Step D3: Mark telemetry tasks as complete within PRP task tracker and log execution in build log, ACE memory, and stewardship chain.
+
+- ## Acceptance Criteria
+  - ### Functional
+    - #### AC1: `setup_telemetry` can be called multiple times safely; `reset_telemetry` restores clean state for test isolation.
+    - #### AC2: Retrieval span contains attributes `{page, page_size, rerank, filters.source, filters.entity, has_evidence, total_items}` and metrics log at least one data point per query invocation.
+    - #### AC3: Forensics pipeline spans nest stage spans and annotate fallback state; metrics capture stage durations with non-zero values.
+  - ### Operational
+    - #### AC4: Enabling telemetry with OTLP endpoint environment variables results in exporter instantiation without raising exceptions.
+    - #### AC5: Documentation enumerates metric + span names, linking to dashboards or probes.
+    - #### AC6: Pytest suite remains green with telemetry enabled/disabled; coverage unchanged or improved.
+
+- ## Verification Matrix
+  - ### Tests
+    - #### `pytest backend/tests/test_telemetry.py -q` — validates bootstrap idempotency, span attributes, metric datapoints.
+    - #### `pytest backend/tests -q` — ensures regression suite passes with telemetry instrumentation active.
+  - ### Artefacts
+    - #### `build_logs/2025-11-12.md` — execution narrative, exporter configuration, pytest evidence.
+    - #### `memory/ace_state.jsonl` — ACE loop capsule summarising telemetry enablement.
+    - #### `AGENTS.md` Chain of Stewardship entry — timestamped record of observability delivery.

@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     agent_threads_dir: Path = Field(default=Path("storage/agent_threads"))
     credentials_registry_path: Path | None = Field(default=None)
 
+    telemetry_enabled: bool = Field(default=False)
+    telemetry_service_name: str = Field(default="cocounsel-backend")
+    telemetry_environment: str = Field(default="local")
+    telemetry_otlp_endpoint: str | None = Field(default=None)
+    telemetry_otlp_insecure: bool = Field(default=True)
+    telemetry_metrics_interval: float = Field(default=30.0)
+    telemetry_console_fallback: bool = Field(default=True)
+
     qdrant_collection: str = Field(default="cocounsel_documents")
     qdrant_vector_size: int = Field(default=128)
     qdrant_distance: Literal["Cosine", "Dot", "Euclid"] = Field(default="Cosine")
