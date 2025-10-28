@@ -21,6 +21,10 @@ backend/app/storage/__pycache__/
 # Logs
 *.log
 build_logs/*.jsonl
+coverage.xml
+.coverage
+htmlcov/
+pytest-backend.xml
 
 # Misc
 .DS_Store

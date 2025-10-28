@@ -1,0 +1,65 @@
+# 2025-11-15 — Audit & Manifest Security Hardening Plan
+
+- ## Volume I — Objective Definition
+  - ### Chapter 1 — Audit Evidence Guarantees
+    - #### Paragraph a — Append-only JSONL ledger with hash chaining to satisfy evidentiary integrity.
+    - #### Paragraph b — Emit security-sensitive events for ingestion lifecycle, agent operations, and authz workflows.
+  - ### Chapter 2 — Manifest Confidentiality & Retention
+    - #### Paragraph a — Encrypt job/document manifests using AES-GCM envelope keys sourced from managed secrets.
+    - #### Paragraph b — Enforce retention windows with automated pruning on read/write cycles.
+  - ### Chapter 3 — Governance Artefacts
+    - #### Paragraph a — Document operational runbook additions (rotation, review cadence, break-glass reconciliation).
+    - #### Paragraph b — Link guidance into validation matrix and stewardship narrative.
+
+- ## Volume II — Implementation Blueprint
+  - ### Chapter 4 — Audit Trail Utility
+    - #### Paragraph a — Design `AuditTrail` abstraction (init, append, verify) under `backend/app/utils/audit.py`.
+      - ##### Sentence i — Persist events as canonical JSON lines with `prev_hash`/`hash` chain.
+      - ##### Sentence ii — Include actor, subject, action, category, correlation identifiers, and metadata.
+      - ##### Sentence iii — Provide memoized accessor `get_audit_trail()` with thread-safe hash cache refresh.
+    - #### Paragraph b — Extend unit coverage (`backend/tests/test_audit_log.py`) to validate append-only sequencing and tamper detection.
+  - ### Chapter 5 — Service Integration
+    - #### Paragraph a — Ingestion lifecycle hooks
+      - ##### Sentence i — Capture enqueue, queue saturation, job start, per-source completion, terminal status.
+      - ##### Sentence ii — Store requestor fingerprint in manifest for downstream audit context.
+    - #### Paragraph b — Agents lifecycle hooks
+      - ##### Sentence i — Record thread creation, turn execution summaries, QA closure.
+      - ##### Sentence ii — Surface thread telemetry hashes for forensic replay.
+    - #### Paragraph c — Security dependencies
+      - ##### Sentence i — Emit `authz_attempt` before policy evaluation and mark status on allow/deny.
+      - ##### Sentence ii — Include scope/role decisions and certificate/token fingerprints.
+  - ### Chapter 6 — Manifest Storage Hardening
+    - #### Paragraph a — Introduce AES-GCM helpers within `backend/app/utils/storage.py`.
+      - ##### Sentence i — Load 256-bit key from `Settings.manifest_encryption_key_path` (base64/hex support).
+      - ##### Sentence ii — Canonicalise JSON payload prior to encryption; attach checksum + expiry metadata.
+    - #### Paragraph b — Update `DocumentStore` & `JobStore`
+      - ##### Sentence i — Apply encryption for read/write/list, exposing plaintext interface to callers.
+      - ##### Sentence ii — Enforce retention pruning on init and after writes.
+      - ##### Sentence iii — Adjust existing fixtures/tests to provision key material and validate retention behaviour.
+  - ### Chapter 7 — Configuration & Fixtures
+    - #### Paragraph a — Extend `Settings` with manifest key + retention configuration, ensuring directory prep handles audit log path.
+    - #### Paragraph b — Update pytest fixtures to generate ephemeral keys, propagate env vars, and reset caches.
+  - ### Chapter 8 — Documentation & Stewardship
+    - #### Paragraph a — Author `docs/compliance/audit_playbook.md` covering rotation cadence, review rituals, break-glass reconciliation.
+      - ##### Sentence i — Embed actionable checklists and escalation chains.
+    - #### Paragraph b — Reference new playbook within validation matrix + stewardship log narrative.
+    - #### Paragraph c — Append Chain-of-Stewardship entry post-completion with rubric/test summary.
+
+- ## Volume III — Verification Strategy
+  - ### Chapter 9 — Automated Tests
+    - #### Paragraph a — Run `pytest backend/tests -q` ensuring new audit + storage coverage.
+    - #### Paragraph b — Validate encryption retention test ensures expired manifests pruned.
+  - ### Chapter 10 — Manual Review
+    - #### Paragraph a — Inspect audit log sample for canonical hash sequencing.
+    - #### Paragraph b — Double-pass code review focusing on crypto misuse, concurrency, error handling.
+
+- ## Volume IV — Contingency Considerations
+  - ### Chapter 11 — Failure Modes & Mitigations
+    - #### Paragraph a — Key rotation: ensure loader reloads on cache reset and surfaces actionable errors when key absent/malformed.
+    - #### Paragraph b — Audit log corruption: provide verification helper to detect tampering and fail closed.
+    - #### Paragraph c — Retention misconfiguration: clamp retention minimum to 1 day, warn via log.
+
+- ## Volume V — Signature Flourish
+  - ### Chapter 12 — Personality Imprint
+    - #### Paragraph a — Infuse audit events with deterministic `lineage` fingerprint tying actor + service for narrative continuity.
+    - #### Paragraph b — Ensure documentation prose mirrors orchestral motif aligning with stewardship ethos.
