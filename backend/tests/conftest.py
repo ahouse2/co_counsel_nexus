@@ -21,10 +21,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: E402
 
-from backend.app import config
-from backend.app.security.dependencies import reset_security_caches
+from backend.app import config  # noqa: E402
+from backend.app.security.dependencies import reset_security_caches  # noqa: E402
 
 
 @dataclass
@@ -182,7 +182,6 @@ def security_materials(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Secur
     jwks_path = tmp_path / "jwks.json"
     _write_jwks(jwks_path, client_key.public_key())
 
-    private_key = client_key
     header_name = "X-Client-Cert"
     issuer = "https://auth.cocounsel.test"
 
