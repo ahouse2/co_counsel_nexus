@@ -34,10 +34,11 @@ Phase 5 — Multi‑Agent + ACE
   - [ ] **KnowledgeOps toolkit** — codify agent scaffolds (prompt packs, evaluation harness, deterministic fixtures) so new research or compliance agents can be added with <4h onboarding.
 
 Phase 6 — Timeline
-- [ ] Event extraction from KG; API: GET /timeline
-  - [ ] Implement cursor-based pagination, `from_ts`/`to_ts` range filters, and entity scoping backed by graph lookups.
+- [x] Event extraction from KG; API: GET /timeline
+  - [x] Implement cursor-based pagination, `from_ts`/`to_ts` range filters, and entity scoping backed by graph lookups. (Implemented in `backend/app/services/timeline.py`; verifies naive timestamps + cursor sequencing.)
   - [ ] Emit telemetry counters/latency histograms; fail closed on malformed cursors with structured 400 responses.
-  - [ ] Regression-suite coverage for timeline enrichment, pagination, and filter semantics.
+    - Structured 400s landed; telemetry counters still pending once observability wiring arrives.
+  - [x] Regression-suite coverage for timeline enrichment, pagination, and filter semantics. (`backend/tests/test_api.py::test_timeline_pagination_and_filters`.)
 - [ ] UI timeline with pop‑outs and citations
   - [ ] Wire streaming data layer to `/timeline` endpoint with optimistic updates + offline cache.
   - [ ] Provide evidence pop-outs that hydrate citations + forensics deltas; add accessibility narration and keyboard traversal.
