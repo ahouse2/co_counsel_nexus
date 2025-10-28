@@ -9,7 +9,7 @@ from ..config import get_settings
 from ..storage.agent_memory_store import AgentMemoryStore, AgentThreadRecord
 from ..storage.document_store import DocumentStore
 from .forensics import ForensicsService, get_forensics_service
-from .retrieval import RetrievalService, get_retrieval_service
+from .retrieval import QueryResult, RetrievalService, get_retrieval_service
 
 
 def _now() -> datetime:
@@ -269,7 +269,8 @@ class AgentsService:
 
     def _execute_research(self, question: str, top_k: int) -> Tuple[AgentTurn, Dict[str, Any]]:
         started = _now()
-        output = self.retrieval_service.query(question, top_k=top_k)
+        result = self.retrieval_service.query(question, page_size=top_k)
+        output = result.to_dict() if isinstance(result, QueryResult) else result
         completed = _now()
         metrics = {
             "vector_hits": len(output.get("traces", {}).get("vector", [])),
