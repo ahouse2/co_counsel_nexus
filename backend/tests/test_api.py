@@ -3,14 +3,14 @@ from __future__ import annotations
 import importlib
 import json
 import os
-from pathlib import Path
+from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Dict
 
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch) -> TestClient:
@@ -108,8 +108,12 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
 
     timeline_response = client.get("/timeline")
     assert timeline_response.status_code == 200
-    events = timeline_response.json()["events"]
+    timeline_payload = timeline_response.json()
+    events = timeline_payload["events"]
+    meta = timeline_payload["meta"]
     assert events and any("2024-10-01" in event["summary"] for event in events)
+    assert meta["limit"] == 20
+    assert meta["has_more"] is False
 
     graph_response = client.get("/graph/neighbor", params={"id": "entity::acme_corporation"})
     assert graph_response.status_code == 200
@@ -144,6 +148,51 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert status_payload["status"] == "succeeded"
     assert status_payload["status_details"]["ingestion"]["documents"] == 3
     assert status_payload["documents"][0]["metadata"]["checksum_sha256"]
+
+
+def test_timeline_pagination_and_filters(client: TestClient, sample_workspace: Path) -> None:
+    from backend.app.storage.timeline_store import TimelineEvent, TimelineStore
+
+    response = client.post(
+        "/ingest",
+        json={"sources": [{"type": "local", "path": str(sample_workspace)}]},
+    )
+    assert response.status_code == 202
+
+    timeline_store = TimelineStore(Path(os.environ["TIMELINE_PATH"]))
+    neutral_event = TimelineEvent(
+        id="neutral::event::0",
+        ts=datetime(2024, 12, 25, 0, 0, 0),
+        title="Neutral reference",
+        summary="Unrelated year-end milestone",
+        citations=["neutral::doc"],
+    )
+    timeline_store.append([neutral_event])
+
+    default_payload = client.get("/timeline").json()
+    assert len(default_payload["events"]) >= 3
+
+    page_one = client.get("/timeline", params={"limit": 1})
+    assert page_one.status_code == 200
+    page_one_payload = page_one.json()
+    assert page_one_payload["meta"]["has_more"] is True
+    cursor = page_one_payload["meta"]["cursor"]
+    assert cursor
+
+    page_two = client.get("/timeline", params={"limit": 1, "cursor": cursor})
+    assert page_two.status_code == 200
+    page_two_payload = page_two.json()
+    assert page_two_payload["events"][0]["id"] != page_one_payload["events"][0]["id"]
+
+    entity_payload = client.get("/timeline", params={"entity": "Acme Corporation"}).json()
+    assert all(event["id"] != neutral_event.id for event in entity_payload["events"])
+
+    ts_threshold = page_two_payload["events"][0]["ts"]
+    range_payload = client.get("/timeline", params={"from_ts": ts_threshold}).json()
+    assert all(event["ts"] >= ts_threshold for event in range_payload["events"])
+
+    invalid_cursor = client.get("/timeline", params={"cursor": "@@bad"})
+    assert invalid_cursor.status_code == 400
 
 
 def test_ingestion_validation_errors(client: TestClient) -> None:

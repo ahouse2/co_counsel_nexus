@@ -18,7 +18,13 @@ from ..storage.document_store import DocumentStore
 from ..storage.job_store import JobStore
 from ..storage.timeline_store import TimelineEvent, TimelineStore
 from ..utils.credentials import CredentialRegistry
-from ..utils.text import chunk_text, find_dates, hashed_embedding, read_text
+from ..utils.text import (
+    chunk_text,
+    find_dates,
+    hashed_embedding,
+    read_text,
+    sentence_containing,
+)
 from ..utils.triples import (
     EntitySpan,
     Triple,
@@ -381,11 +387,16 @@ class IngestionService:
             timestamp = parse_timestamp(ts_str)
             if not timestamp:
                 continue
+            sentence = sentence_containing(text, ts_str)
+            summary = sentence or f"Evidence mentions {ts_str}"
+            title = summary.split(".")[0].strip()
+            if len(title) > 80:
+                title = f"{title[:77].rstrip()}..."
             event = TimelineEvent(
                 id=f"{doc_id}::event::{idx}",
                 ts=timestamp,
-                title=f"Event from {doc_id}",
-                summary=f"Evidence mentions {ts_str}",
+                title=title or f"Event from {doc_id}",
+                summary=summary,
                 citations=[doc_id],
             )
             events.append(event)

@@ -4,11 +4,12 @@ import math
 import re
 from hashlib import sha256
 from pathlib import Path
-from typing import Iterable, Iterator, List, Sequence
+from typing import Iterable, Iterator, List, Optional, Sequence
 
 _WORD_RE = re.compile(r"[A-Za-z0-9']+")
 _CAPITALIZED_RE = re.compile(r"\b([A-Z][a-zA-Z0-9]{2,})\b")
 _DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})")
+_SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]?")
 
 
 def read_text(path: Path) -> str:
@@ -67,4 +68,14 @@ def sliding_window(sequence: Sequence[str], window: int) -> Iterator[Sequence[st
         raise ValueError("window must be positive")
     for idx in range(0, len(sequence), window):
         yield sequence[idx : idx + window]
+
+
+def sentence_containing(text: str, fragment: str) -> Optional[str]:
+    if not fragment:
+        return None
+    for match in _SENTENCE_RE.finditer(text):
+        sentence = match.group(0).strip()
+        if fragment in sentence:
+            return sentence
+    return None
 

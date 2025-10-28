@@ -111,6 +111,13 @@ class TimelineEventModel(BaseModel):
 
 class TimelineResponse(BaseModel):
     events: List[TimelineEventModel]
+    meta: Optional["TimelinePaginationModel"] = None
+
+
+class TimelinePaginationModel(BaseModel):
+    cursor: Optional[str] = None
+    limit: int
+    has_more: bool
 
 
 class GraphNodeModel(BaseModel):

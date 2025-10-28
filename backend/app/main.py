@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from datetime import datetime
+
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
@@ -17,6 +19,7 @@ from .models.api import (
     IngestionStatusResponse,
     QueryResponse,
     TimelineEventModel,
+    TimelinePaginationModel,
     TimelineResponse,
 )
 from .services.agents import AgentsService, get_agents_service
@@ -76,8 +79,18 @@ def query(
 @app.get("/timeline", response_model=TimelineResponse)
 def timeline(
     service: TimelineService = Depends(get_timeline_service),
+    cursor: str | None = Query(default=None, description="Opaque pagination cursor"),
+    limit: int = Query(default=20, ge=1, le=100, description="Number of events to return"),
+    from_ts: datetime | None = Query(default=None, description="Return events on/after this timestamp"),
+    to_ts: datetime | None = Query(default=None, description="Return events on/before this timestamp"),
+    entity: str | None = Query(default=None, description="Filter events by entity identifier or label"),
 ) -> TimelineResponse:
-    events = service.list_events()
+    try:
+        result = service.list_events(cursor=cursor, limit=limit, from_ts=from_ts, to_ts=to_ts, entity=entity)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    meta = TimelinePaginationModel(cursor=result.next_cursor, limit=result.limit, has_more=result.has_more)
     return TimelineResponse(
         events=[
             TimelineEventModel(
@@ -87,8 +100,9 @@ def timeline(
                 summary=event.summary,
                 citations=event.citations,
             )
-            for event in events
-        ]
+            for event in result.events
+        ],
+        meta=meta,
     )
 
 

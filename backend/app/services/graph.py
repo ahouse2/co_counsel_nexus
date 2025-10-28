@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 from neo4j import GraphDatabase
 
@@ -239,6 +239,41 @@ class GraphService:
                 matches.append(node)
         matches.sort(key=lambda node: node.properties.get("label", ""))
         return matches[:limit]
+
+    def document_entities(self, doc_ids: Iterable[str]) -> Dict[str, List[GraphNode]]:
+        ids = list(dict.fromkeys(doc_ids))
+        if not ids:
+            return {}
+        mapping: Dict[str, List[GraphNode]] = {doc_id: [] for doc_id in ids}
+        if self.mode == "neo4j":
+            query = (
+                "MATCH (d:Document)-[:MENTIONS]->(e:Entity) "
+                "WHERE d.id IN $doc_ids RETURN d.id AS doc_id, e"
+            )
+            with self.driver.session() as session:
+                records = session.execute_read(
+                    lambda tx: list(tx.run(query, doc_ids=ids))
+                )
+            for record in records:
+                node = record["e"]
+                graph_node = GraphNode(
+                    id=node["id"],
+                    type=node.get("type", "Entity"),
+                    properties=dict(node),
+                )
+                mapping.setdefault(record["doc_id"], []).append(graph_node)
+            return mapping
+
+        for edge in self._edges.values():
+            if edge.type != "MENTIONS":
+                continue
+            if edge.source not in mapping:
+                continue
+            node = self._nodes.get(edge.target)
+            if node is None:
+                continue
+            mapping[edge.source].append(node)
+        return mapping
 
     def _edge_key(
         self, source_id: str, relation_type: str, target_id: str, properties: Dict[str, object]
