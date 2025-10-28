@@ -240,7 +240,7 @@ class RetrievalService:
                         or edge.get("source") in doc_ids_page
                         or edge.get("target") in doc_ids_page
                     )
-                ]
+                [
                 graph_node_ids = {
                     edge.get("source") for edge in graph_edges_page
                 } | {
@@ -255,19 +255,25 @@ class RetrievalService:
                 graph_edges_page = []
                 graph_nodes_page = []
 
+            relation_statements_page = [
+                statement
+                for statement, doc_id in relation_statements
+                if doc_id is None or doc_id in doc_ids_page
+            ]
+
             trace_page = Trace(
                 vector=vector_trace_page,
                 graph={"nodes": graph_nodes_page, "edges": graph_edges_page},
                 forensics=forensics_trace_page,
             )
 
-            answer = self._compose_answer(question, filtered_results, relation_statements)
+            answer = self._compose_answer(question, page_results, relation_statements_page)
             if start >= total_items:
                 answer = (
                     f"{answer} No additional supporting evidence available for page {page}; "
                     "adjust pagination or filters to view existing evidence."
                 )
-
+            
             meta = QueryMeta(
                 page=page,
                 page_size=page_size,
@@ -342,7 +348,7 @@ class RetrievalService:
 
     def _build_trace(
         self, results: List[qmodels.ScoredPoint], entity_ids: List[str]
-    ) -> Tuple[Trace, List[str]]:
+    ) -> Tuple[Trace, List[Tuple[str, str | None]]]:
         vector_trace = [
             {
                 "id": str(point.id),
@@ -354,8 +360,8 @@ class RetrievalService:
         forensics_trace = self._build_forensics_trace(results)
         node_map: Dict[str, GraphNode] = {}
         edge_bucket: Dict[Tuple[str, str, str, object], GraphEdge] = {}
-        relation_statements: List[str] = []
-        statement_seen: Set[str] = set()
+        relation_statements: List[Tuple[str, str | None]] = []
+        statement_seen: Set[Tuple[str, str | None]] = set()
         for entity_id in entity_ids:
             try:
                 node_list, edge_list = self.graph_service.neighbors(entity_id)
@@ -369,9 +375,14 @@ class RetrievalService:
                     edge_bucket[key] = edge
                 if edge.type != "MENTIONS":
                     statement = self._format_relation_statement(edge, node_map)
-                    if statement and statement not in statement_seen:
-                        statement_seen.add(statement)
-                        relation_statements.append(statement)
+                    if not statement:
+                        continue
+                    doc_id_raw = edge.properties.get("doc_id")
+                    doc_id = str(doc_id_raw) if doc_id_raw is not None else None
+                    statement_key = (statement, doc_id)
+                    if statement_key not in statement_seen:
+                        statement_seen.add(statement_key)
+                        relation_statements.append(statement_key)
         graph_trace = {
             "nodes": [
                 {"id": node.id, "type": node.type, "properties": node.properties}
