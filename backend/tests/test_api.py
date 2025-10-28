@@ -265,6 +265,7 @@ def test_timeline_pagination_and_filters(
     aware_filter = client.get(
         "/timeline",
         params={"from_ts": datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat()},
+        headers=headers,
     )
     assert aware_filter.status_code == 400
     assert "timezone-naive" in aware_filter.json()["detail"]
