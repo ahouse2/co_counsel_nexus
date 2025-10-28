@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
+from .telemetry import setup_telemetry
 from .models.api import (
     AgentRunRequest,
     AgentRunResponse,
@@ -45,6 +46,7 @@ from .security.dependencies import (
 from .security.mtls import MTLSMiddleware
 
 settings = get_settings()
+setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.add_middleware(MTLSMiddleware, config=create_mtls_config())
 

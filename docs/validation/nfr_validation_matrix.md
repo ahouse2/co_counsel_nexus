@@ -26,6 +26,8 @@ This playbook codifies the hardware assumptions, synthetic load profiles, and va
 | Performance | Ingest throughput | \>=150 documents/hour | `tools/perf/query_latency_probe.py --skip-ingest` paired with manual duration tracking for 10 ingests | Capture elapsed wall-clock and compute throughput |
 | Provider Policy | Preferred provider ratio | \>=95% of calls | `tools/monitoring/provider_mix_check.py` | `python tools/monitoring/provider_mix_check.py build_logs/llm_invocations.jsonl` |
 | Provider Policy | Fallback error rate | \<=1% | `tools/monitoring/provider_mix_check.py` (inspect non-success entries) | Same as above |
+| Observability | Retrieval telemetry coverage | Spans + metrics exported (`retrieval_query_duration_ms`, `retrieval_results_returned`, `retrieval_queries_total`) | OTLP dashboard `retrieval-latency` | Enable telemetry env vars then `pytest backend/tests/test_telemetry.py -q` |
+| Observability | Forensics telemetry coverage | Stage spans + metrics (`forensics_pipeline_duration_ms`, `forensics_stage_duration_ms`, `forensics_reports_total`) | OTLP dashboard `forensics-pipeline` | Enable telemetry env vars then `pytest backend/tests/test_telemetry.py -q` |
 
 ## Offline Tolerance
 1. Start the stack: `docker compose -f infra/docker-compose.yml up -d`.
@@ -38,3 +40,5 @@ This playbook codifies the hardware assumptions, synthetic load profiles, and va
 ## Notes
 - Persist raw metrics (CSV/JSON) in `build_logs/` for auditability.
 - When collecting provider metrics, standardize the JSONL schema to `{ "timestamp": "ISO", "provider": "gemini-2.5-flash", "status": "success" }`.
+- Telemetry bootstrap variables: set `TELEMETRY_ENABLED=true`, `TELEMETRY_OTLP_ENDPOINT=grpc://otel-collector:4317`, `TELEMETRY_SERVICE_NAME=cocounsel-backend`, and `TELEMETRY_CONSOLE_FALLBACK=false` in production.
+- Dashboards ingest the following OTel instruments: retrieval (`retrieval_query_duration_ms`, `retrieval_queries_total`, `retrieval_results_returned`) and forensics (`forensics_pipeline_duration_ms`, `forensics_stage_duration_ms`, `forensics_reports_total`, `forensics_pipeline_fallbacks_total`).

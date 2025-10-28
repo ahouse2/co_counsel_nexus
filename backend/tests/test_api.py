@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Dict
@@ -261,6 +261,13 @@ def test_timeline_pagination_and_filters(
 
     invalid_cursor = client.get("/timeline", params={"cursor": "@@bad"}, headers=headers)
     assert invalid_cursor.status_code == 400
+
+    aware_filter = client.get(
+        "/timeline",
+        params={"from_ts": datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat()},
+    )
+    assert aware_filter.status_code == 400
+    assert "timezone-naive" in aware_filter.json()["detail"]
 
 
 def test_ingestion_validation_errors(client: TestClient, auth_headers_factory) -> None:

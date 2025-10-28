@@ -39,6 +39,8 @@ class TimelineService:
         to_ts: Optional[datetime] = None,
         entity: Optional[str] = None,
     ) -> TimelineQueryResult:
+        from_ts = self._ensure_naive_timestamp(from_ts, "from_ts")
+        to_ts = self._ensure_naive_timestamp(to_ts, "to_ts")
         bounded_limit = self._bounded_limit(limit)
         if from_ts and to_ts and from_ts > to_ts:
             raise ValueError("from_ts must be earlier than to_ts")
@@ -76,6 +78,15 @@ class TimelineService:
                 continue
             result.append(event)
         return result
+
+    @staticmethod
+    def _ensure_naive_timestamp(value: Optional[datetime], label: str) -> Optional[datetime]:
+        if value is None:
+            return None
+        tzinfo = value.tzinfo
+        if tzinfo is None or tzinfo.utcoffset(value) is None:
+            return value.replace(tzinfo=None)
+        raise ValueError(f"{label} must be timezone-naive")
 
     def _filter_by_entity(self, events: Iterable[TimelineEvent], entity: str) -> List[TimelineEvent]:
         doc_ids = self._collect_citations(events)

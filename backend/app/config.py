@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     security_audience_graph: str = Field(default="co-counsel.graph")
     security_audience_forensics: str = Field(default="co-counsel.forensics")
     security_audience_agents: str = Field(default="co-counsel.agents")
+    telemetry_enabled: bool = Field(default=False)
+    telemetry_service_name: str = Field(default="cocounsel-backend")
+    telemetry_environment: str = Field(default="local")
+    telemetry_otlp_endpoint: str | None = Field(default=None)
+    telemetry_otlp_insecure: bool = Field(default=True)
+    telemetry_metrics_interval: float = Field(default=30.0)
+    telemetry_console_fallback: bool = Field(default=True)
 
     qdrant_collection: str = Field(default="cocounsel_documents")
     qdrant_vector_size: int = Field(default=128)
