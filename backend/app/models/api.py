@@ -95,10 +95,18 @@ class TraceModel(BaseModel):
     forensics: List[dict] = Field(default_factory=list)
 
 
+class QueryPaginationModel(BaseModel):
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=50)
+    total_items: int = Field(ge=0)
+    has_next: bool
+
+
 class QueryResponse(BaseModel):
     answer: str
     citations: List[CitationModel]
     traces: TraceModel
+    meta: QueryPaginationModel
 
 
 class TimelineEventModel(BaseModel):

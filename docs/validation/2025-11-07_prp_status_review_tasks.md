@@ -24,7 +24,7 @@
   - [ ] Update onboarding docs with setup instructions and smoke commands. *(Docs: `docs/ONBOARDING.md`)*
 
 ## Functional Coverage
-- [ ] **/query Enhancements** — Add pagination, filters, and rerank toggle per spec. *(Owners: Retrieval Engineering Pod)*
+- [x] **/query Enhancements** — Add pagination, filters, and rerank toggle per spec. *(Owners: Retrieval Engineering Pod — completed 2025-11-11; see backend/app/services/retrieval.py & backend/tests/test_api.py)*
   - [ ] Extend Pydantic models + service layer to accept pagination/filter args. *(Code: `backend/app/models/api.py`, `backend/app/services/retrieval.py`)*
   - [ ] Update FastAPI route + tests verifying behaviour. *(Files: `backend/app/main.py`, `backend/tests/test_api.py`)*
 - [ ] **Remote Ingestion Connectors** — Implement SharePoint/S3/OneDrive connectors with credential registry integration. *(Owners: Data Pipelines Squad)*
