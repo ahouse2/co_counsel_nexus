@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
+from .telemetry import setup_telemetry
 from .models.api import (
     AgentRunRequest,
     AgentRunResponse,
@@ -28,9 +29,26 @@ from .services.graph import GraphService, get_graph_service
 from .services.ingestion import IngestionService, get_ingestion_service
 from .services.retrieval import RetrievalService, get_retrieval_service
 from .services.timeline import TimelineService, get_timeline_service
+from .security.authz import Principal
+from .security.dependencies import (
+    authorize_agents_read,
+    authorize_agents_run,
+    authorize_forensics_document,
+    authorize_forensics_financial,
+    authorize_forensics_image,
+    authorize_graph_read,
+    authorize_ingest_enqueue,
+    authorize_ingest_status,
+    authorize_query,
+    authorize_timeline,
+    create_mtls_config,
+)
+from .security.mtls import MTLSMiddleware
 
 settings = get_settings()
+setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
+app.add_middleware(MTLSMiddleware, config=create_mtls_config())
 
 
 @app.get("/health")
@@ -38,10 +56,15 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/ingest", response_model=IngestionResponse, status_code=status.HTTP_202_ACCEPTED)
+@app.post(
+    "/ingest",
+    response_model=IngestionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 def ingest(
     payload: IngestionRequest,
     service: IngestionService = Depends(get_ingestion_service),
+    principal: Principal = Depends(authorize_ingest_enqueue),
 ) -> JSONResponse:
     job_id = service.ingest(payload)
     job_record = service.get_job(job_id)
@@ -56,12 +79,18 @@ def ingest(
 def ingest_status(
     job_id: str,
     service: IngestionService = Depends(get_ingestion_service),
+    principal: Principal = Depends(authorize_ingest_status),
 ) -> JSONResponse:
     try:
         record = service.get_job(job_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found") from exc
     response = IngestionStatusResponse(**record)
+    if "ResearchAnalyst" in principal.roles and response.status not in {"succeeded", "failed", "cancelled"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Research analysts may only access completed ingestion runs",
+        )
     terminal_statuses = {"succeeded", "failed", "cancelled"}
     status_code = status.HTTP_200_OK if response.status in terminal_statuses else status.HTTP_202_ACCEPTED
     return JSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
@@ -86,6 +115,7 @@ def query(
         default=False, description="Enable deterministic reranking heuristics"
     ),
     service: RetrievalService = Depends(get_retrieval_service),
+    principal: Principal = Depends(authorize_query),
 ) -> Response:
     filters: dict[str, str] = {}
     if filters_source:
@@ -104,12 +134,16 @@ def query(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not result.has_evidence:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    return JSONResponse(content=result.to_dict())
+    payload = result.to_dict()
+    if "CaseCoordinator" in principal.roles and "query:trace" not in principal.scopes:
+        payload["traces"] = {"vector": [], "graph": {"nodes": [], "edges": []}, "forensics": []}
+    return JSONResponse(content=payload)
 
 
 @app.get("/timeline", response_model=TimelineResponse)
 def timeline(
     service: TimelineService = Depends(get_timeline_service),
+    principal: Principal = Depends(authorize_timeline),
     cursor: str | None = Query(default=None, description="Opaque pagination cursor"),
     limit: int = Query(default=20, ge=1, le=100, description="Number of events to return"),
     from_ts: datetime | None = Query(default=None, description="Return events on/after this timestamp"),
@@ -141,6 +175,7 @@ def timeline(
 def graph_neighbor(
     id: str,
     service: GraphService = Depends(get_graph_service),
+    principal: Principal = Depends(authorize_graph_read),
 ) -> GraphNeighborResponse:
     try:
         nodes, edges = service.neighbors(id)
@@ -164,6 +199,7 @@ def _load_forensics(
     service: ForensicsService,
     file_id: str,
     artifact: str,
+    principal: Principal,
 ) -> ForensicsResponse:
     try:
         payload = service.load_artifact(file_id, artifact)
@@ -174,7 +210,7 @@ def _load_forensics(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Forensics analyzer unavailable for artifact {artifact}",
         )
-    return ForensicsResponse(
+    response = ForensicsResponse(
         summary=payload.get("summary", ""),
         data=payload.get("data", {}),
         metadata=payload.get("metadata", {}),
@@ -184,36 +220,41 @@ def _load_forensics(
         schema_version=payload.get("schema_version", "unknown"),
         generated_at=payload.get("generated_at"),
     )
+    return response
 
 
 @app.get("/forensics/document", response_model=ForensicsResponse)
 def forensics_document(
     id: str,
     service: ForensicsService = Depends(get_forensics_service),
+    principal: Principal = Depends(authorize_forensics_document),
 ) -> ForensicsResponse:
-    return _load_forensics(service, id, "document")
+    return _load_forensics(service, id, "document", principal)
 
 
 @app.get("/forensics/image", response_model=ForensicsResponse)
 def forensics_image(
     id: str,
     service: ForensicsService = Depends(get_forensics_service),
+    principal: Principal = Depends(authorize_forensics_image),
 ) -> ForensicsResponse:
-    return _load_forensics(service, id, "image")
+    return _load_forensics(service, id, "image", principal)
 
 
 @app.get("/forensics/financial", response_model=ForensicsResponse)
 def forensics_financial(
     id: str,
     service: ForensicsService = Depends(get_forensics_service),
+    principal: Principal = Depends(authorize_forensics_financial),
 ) -> ForensicsResponse:
-    return _load_forensics(service, id, "financial")
+    return _load_forensics(service, id, "financial", principal)
 
 
 @app.post("/agents/run", response_model=AgentRunResponse)
 def agents_run(
     payload: AgentRunRequest,
     service: AgentsService = Depends(get_agents_service),
+    principal: Principal = Depends(authorize_agents_run),
 ) -> AgentRunResponse:
     top_k = payload.top_k or 5
     response = service.run_case(payload.case_id, payload.question, top_k=top_k)
@@ -224,6 +265,7 @@ def agents_run(
 def agents_thread(
     thread_id: str,
     service: AgentsService = Depends(get_agents_service),
+    principal: Principal = Depends(authorize_agents_read),
 ) -> AgentRunResponse:
     try:
         payload = service.get_thread(thread_id)
@@ -233,7 +275,10 @@ def agents_thread(
 
 
 @app.get("/agents/threads", response_model=AgentThreadListResponse)
-def agents_threads(service: AgentsService = Depends(get_agents_service)) -> AgentThreadListResponse:
+def agents_threads(
+    service: AgentsService = Depends(get_agents_service),
+    principal: Principal = Depends(authorize_agents_read),
+) -> AgentThreadListResponse:
     threads = service.list_threads()
     return AgentThreadListResponse(threads=threads)
 

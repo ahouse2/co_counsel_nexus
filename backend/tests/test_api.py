@@ -1,57 +1,14 @@
 from __future__ import annotations
 
-import importlib
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Dict
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch) -> TestClient:
-    storage_root = tmp_path / "storage"
-    storage_root.mkdir()
-    monkeypatch.setenv("NEO4J_URI", "memory://")
-    monkeypatch.setenv("QDRANT_PATH", ":memory:")
-    monkeypatch.delenv("QDRANT_URL", raising=False)
-    monkeypatch.setenv("VECTOR_DIR", str(storage_root / "vector"))
-    monkeypatch.setenv("FORENSICS_DIR", str(storage_root / "forensics"))
-    monkeypatch.setenv("TIMELINE_PATH", str(storage_root / "timeline.jsonl"))
-    monkeypatch.setenv("JOB_STORE_DIR", str(storage_root / "jobs"))
-    monkeypatch.setenv("DOCUMENT_STORE_DIR", str(storage_root / "documents"))
-
-    from backend.app import config
-    from backend.app.services import graph as graph_service
-    from backend.app.services import vector as vector_service
-
-    config.reset_settings_cache()
-    vector_service.reset_vector_service()
-    graph_service.reset_graph_service()
-
-    main_module = importlib.import_module("backend.app.main")
-    importlib.reload(main_module)
-    return TestClient(main_module.app)
-
-
-@pytest.fixture()
-def sample_workspace(tmp_path) -> Path:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    text = root / "case_notes.txt"
-    text.write_text(
-        "Acme Corporation acquired Beta LLC on 2024-10-01 after the initial filing on 2024-09-15."
-    )
-    image = root / "evidence.png"
-    img = Image.new("RGB", (16, 16), color=(123, 45, 67))
-    img.save(image)
-    csv_file = root / "ledger.csv"
-    csv_file.write_text("entity,amount\nAcme,100.0\nBeta,100.0\nBeta,400.0\n")
-    return root
 
 
 def _read_job_manifest(job_dir: Path, job_id: str) -> Dict[str, object]:
@@ -60,10 +17,17 @@ def _read_job_manifest(job_dir: Path, job_id: str) -> Dict[str, object]:
     return json.loads(manifest.read_text())
 
 
-def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp_path: Path) -> None:
+def test_ingestion_and_retrieval(
+    client: TestClient,
+    sample_workspace: Path,
+    tmp_path: Path,
+    auth_headers_factory,
+) -> None:
+    headers = auth_headers_factory()
     response = client.post(
         "/ingest",
         json={"sources": [{"type": "local", "path": str(sample_workspace)}]},
+        headers=headers,
     )
     assert response.status_code == 202
     job_id = response.json()["job_id"]
@@ -95,7 +59,7 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
         assert metadata["checksum_sha256"]
         assert metadata["ingested_uri"].startswith("/")
 
-    query_response = client.get("/query", params={"q": "What happened with Acme?"})
+    query_response = client.get("/query", params={"q": "What happened with Acme?"}, headers=headers)
     assert query_response.status_code == 200
     payload = query_response.json()
     assert "Acme" in payload["answer"]
@@ -113,7 +77,7 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert traces["forensics"]
     assert len(traces["vector"]) <= meta["page_size"]
 
-    timeline_response = client.get("/timeline")
+    timeline_response = client.get("/timeline", headers=headers)
     assert timeline_response.status_code == 200
     timeline_payload = timeline_response.json()
     events = timeline_payload["events"]
@@ -122,33 +86,37 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert meta["limit"] == 20
     assert meta["has_more"] is False
 
-    graph_response = client.get("/graph/neighbor", params={"id": "entity::acme_corporation"})
+    graph_response = client.get(
+        "/graph/neighbor", params={"id": "entity::acme_corporation"}, headers=headers
+    )
     assert graph_response.status_code == 200
     graph_payload = graph_response.json()
     assert graph_payload["nodes"]
     assert any(edge["type"] == "ACQUIRED" for edge in graph_payload["edges"])
 
     doc_id = doc_map["text"]["id"]
-    doc_forensics = client.get("/forensics/document", params={"id": doc_id})
+    doc_forensics = client.get("/forensics/document", params={"id": doc_id}, headers=headers)
     assert doc_forensics.status_code == 200
     doc_payload = doc_forensics.json()
     assert doc_payload["data"]["hashes"]["sha256"]
     assert doc_payload["schema_version"]
 
     image_id = doc_map["image"]["id"]
-    image_forensics = client.get("/forensics/image", params={"id": image_id})
+    image_forensics = client.get("/forensics/image", params={"id": image_id}, headers=headers)
     assert image_forensics.status_code == 200
     image_payload = image_forensics.json()
     assert image_payload["data"]["ela"]["mean_absolute_error"] >= 0.0
     assert image_payload["fallback_applied"] is True
 
     financial_id = doc_map["financial"]["id"]
-    financial_forensics = client.get("/forensics/financial", params={"id": financial_id})
+    financial_forensics = client.get(
+        "/forensics/financial", params={"id": financial_id}, headers=headers
+    )
     assert financial_forensics.status_code == 200
     totals = financial_forensics.json()["data"]["totals"]
     assert Decimal(totals["amount"]) == Decimal("600.0")
 
-    status_response = client.get(f"/ingest/{job_id}")
+    status_response = client.get(f"/ingest/{job_id}", headers=headers)
     assert status_response.status_code == 200
     status_payload = status_response.json()
     assert status_payload["job_id"] == job_id
@@ -157,7 +125,10 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert status_payload["documents"][0]["metadata"]["checksum_sha256"]
 
 
-def test_query_filters_and_pagination(client: TestClient, sample_workspace: Path) -> None:
+def test_query_filters_and_pagination(
+    client: TestClient, sample_workspace: Path, auth_headers_factory
+) -> None:
+    headers = auth_headers_factory()
     followup = sample_workspace / "followup_notes.txt"
     followup.write_text(
         "Acme Corporation met Contoso Analytics on 2024-08-10 to audit Beta LLC ledgers and discuss compliance."
@@ -166,12 +137,14 @@ def test_query_filters_and_pagination(client: TestClient, sample_workspace: Path
     response = client.post(
         "/ingest",
         json={"sources": [{"type": "local", "path": str(sample_workspace)}]},
+        headers=headers,
     )
     assert response.status_code == 202
 
     first_page = client.get(
         "/query",
         params={"q": "Acme compliance history", "page_size": 1},
+        headers=headers,
     )
     assert first_page.status_code == 200
     first_payload = first_page.json()
@@ -183,6 +156,7 @@ def test_query_filters_and_pagination(client: TestClient, sample_workspace: Path
     second_page = client.get(
         "/query",
         params={"q": "Acme compliance history", "page": 2, "page_size": 1},
+        headers=headers,
     )
     assert second_page.status_code == 200
     second_payload = second_page.json()
@@ -193,30 +167,35 @@ def test_query_filters_and_pagination(client: TestClient, sample_workspace: Path
     source_filtered = client.get(
         "/query",
         params={"q": "Acme compliance history", "filters[source]": "local"},
+        headers=headers,
     )
     assert source_filtered.status_code == 200
 
     missing_source = client.get(
         "/query",
         params={"q": "Acme compliance history", "filters[source]": "s3"},
+        headers=headers,
     )
     assert missing_source.status_code == 204
 
     entity_filtered = client.get(
         "/query",
         params={"q": "Acme compliance history", "filters[entity]": "Acme"},
+        headers=headers,
     )
     assert entity_filtered.status_code == 200
 
     missing_entity = client.get(
         "/query",
         params={"q": "Acme compliance history", "filters[entity]": "Gamma"},
+        headers=headers,
     )
     assert missing_entity.status_code == 204
 
     rerank_enabled = client.get(
         "/query",
         params={"q": "Acme compliance history", "rerank": True},
+        headers=headers,
     )
     assert rerank_enabled.status_code == 200
     assert rerank_enabled.json()["meta"]["total_items"] >= 1
@@ -224,16 +203,21 @@ def test_query_filters_and_pagination(client: TestClient, sample_workspace: Path
     invalid_filter = client.get(
         "/query",
         params={"q": "Acme compliance history", "filters[source]": "ftp"},
+        headers=headers,
     )
     assert invalid_filter.status_code == 400
 
 
-def test_timeline_pagination_and_filters(client: TestClient, sample_workspace: Path) -> None:
+def test_timeline_pagination_and_filters(
+    client: TestClient, sample_workspace: Path, auth_headers_factory
+) -> None:
     from backend.app.storage.timeline_store import TimelineEvent, TimelineStore
 
+    headers = auth_headers_factory()
     response = client.post(
         "/ingest",
         json={"sources": [{"type": "local", "path": str(sample_workspace)}]},
+        headers=headers,
     )
     assert response.status_code == 202
 
@@ -247,56 +231,79 @@ def test_timeline_pagination_and_filters(client: TestClient, sample_workspace: P
     )
     timeline_store.append([neutral_event])
 
-    default_payload = client.get("/timeline").json()
+    default_payload = client.get("/timeline", headers=headers).json()
     assert len(default_payload["events"]) >= 3
 
-    page_one = client.get("/timeline", params={"limit": 1})
+    page_one = client.get("/timeline", params={"limit": 1}, headers=headers)
     assert page_one.status_code == 200
     page_one_payload = page_one.json()
     assert page_one_payload["meta"]["has_more"] is True
     cursor = page_one_payload["meta"]["cursor"]
     assert cursor
 
-    page_two = client.get("/timeline", params={"limit": 1, "cursor": cursor})
+    page_two = client.get(
+        "/timeline", params={"limit": 1, "cursor": cursor}, headers=headers
+    )
     assert page_two.status_code == 200
     page_two_payload = page_two.json()
     assert page_two_payload["events"][0]["id"] != page_one_payload["events"][0]["id"]
 
-    entity_payload = client.get("/timeline", params={"entity": "Acme Corporation"}).json()
+    entity_payload = client.get(
+        "/timeline", params={"entity": "Acme Corporation"}, headers=headers
+    ).json()
     assert all(event["id"] != neutral_event.id for event in entity_payload["events"])
 
     ts_threshold = page_two_payload["events"][0]["ts"]
-    range_payload = client.get("/timeline", params={"from_ts": ts_threshold}).json()
+    range_payload = client.get(
+        "/timeline", params={"from_ts": ts_threshold}, headers=headers
+    ).json()
     assert all(event["ts"] >= ts_threshold for event in range_payload["events"])
 
-    invalid_cursor = client.get("/timeline", params={"cursor": "@@bad"})
+    invalid_cursor = client.get("/timeline", params={"cursor": "@@bad"}, headers=headers)
     assert invalid_cursor.status_code == 400
 
+    aware_filter = client.get(
+        "/timeline",
+        params={"from_ts": datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat()},
+    )
+    assert aware_filter.status_code == 400
+    assert "timezone-naive" in aware_filter.json()["detail"]
 
-def test_ingestion_validation_errors(client: TestClient) -> None:
-    bad_source = client.post("/ingest", json={"sources": [{"type": "sharepoint", "credRef": "x"}]})
+
+def test_ingestion_validation_errors(client: TestClient, auth_headers_factory) -> None:
+    headers = auth_headers_factory()
+    bad_source = client.post(
+        "/ingest", json={"sources": [{"type": "sharepoint", "credRef": "x"}]}, headers=headers
+    )
     assert bad_source.status_code in {404, 503}
     assert bad_source.json()["detail"]
 
-    missing_body = client.post("/ingest", json={"sources": []})
+    missing_body = client.post("/ingest", json={"sources": []}, headers=headers)
     assert missing_body.status_code == 400
 
 
-def test_not_found_paths(client: TestClient) -> None:
+def test_not_found_paths(client: TestClient, auth_headers_factory) -> None:
+    headers = auth_headers_factory()
     response = client.post(
         "/ingest",
         json={"sources": [{"type": "local", "path": "/nonexistent"}]},
+        headers=headers,
     )
     assert response.status_code == 404
 
-    graph_missing = client.get("/graph/neighbor", params={"id": "entity::Missing"})
+    graph_missing = client.get(
+        "/graph/neighbor", params={"id": "entity::Missing"}, headers=headers
+    )
     assert graph_missing.status_code == 404
 
-    forensic_missing = client.get("/forensics/document", params={"id": "missing"})
+    forensic_missing = client.get(
+        "/forensics/document", params={"id": "missing"}, headers=headers
+    )
     assert forensic_missing.status_code == 404
 
 
-def test_ingest_status_not_found(client: TestClient) -> None:
-    response = client.get("/ingest/unknown-job")
+def test_ingest_status_not_found(client: TestClient, auth_headers_factory) -> None:
+    headers = auth_headers_factory()
+    response = client.get("/ingest/unknown-job", headers=headers)
     assert response.status_code == 404
 

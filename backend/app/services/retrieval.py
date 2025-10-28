@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Dict, List, Set, Tuple
 
 from qdrant_client.http import models as qmodels
+
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
 
 from ..config import get_settings
 from ..storage.document_store import DocumentStore
@@ -12,6 +16,25 @@ from ..utils.triples import extract_entities, normalise_entity_id
 from .forensics import ForensicsService, get_forensics_service
 from .graph import GraphEdge, GraphNode, GraphService, get_graph_service
 from .vector import VectorService, get_vector_service
+
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+_retrieval_queries_counter = _meter.create_counter(
+    "retrieval_queries_total",
+    unit="1",
+    description="Total retrieval queries processed",
+)
+_retrieval_query_duration = _meter.create_histogram(
+    "retrieval_query_duration_ms",
+    unit="ms",
+    description="Latency of retrieval queries",
+)
+_retrieval_results_histogram = _meter.create_histogram(
+    "retrieval_results_returned",
+    unit="1",
+    description="Number of vector results evaluated per query",
+)
 
 
 @dataclass
@@ -97,130 +120,184 @@ class RetrievalService:
             raise ValueError("page must be greater than or equal to 1")
         if page_size < 1 or page_size > 50:
             raise ValueError("page_size must be between 1 and 50")
-
+        start_time = perf_counter()
         filters = filters or {}
-        source_filter = filters.get("source")
-        entity_filter = filters.get("entity")
         allowed_sources = {"local", "s3", "sharepoint"}
-        if source_filter:
-            source_filter = source_filter.strip().lower()
-            if source_filter not in allowed_sources:
-                raise ValueError(f"Unsupported source filter '{source_filter}'")
-        else:
-            source_filter = None
-        if entity_filter:
-            entity_filter = entity_filter.strip()
-        else:
-            entity_filter = None
 
-        max_window = self.settings.retrieval_max_search_window
-        if page_size > max_window:
-            raise ValueError(
-                "page_size exceeds configured retrieval window"
+        with _tracer.start_as_current_span("retrieval.query") as span:
+            span.set_attribute("retrieval.page", page)
+            span.set_attribute("retrieval.page_size", page_size)
+            span.set_attribute("retrieval.rerank", rerank)
+
+            source_filter = filters.get("source")
+            entity_filter = filters.get("entity")
+            if source_filter:
+                source_filter = source_filter.strip().lower()
+                if source_filter not in allowed_sources:
+                    message = f"Unsupported source filter '{source_filter}'"
+                    span.record_exception(ValueError(message))
+                    span.set_status(Status(StatusCode.ERROR, message))
+                    raise ValueError(message)
+            else:
+                source_filter = None
+            if entity_filter:
+                entity_filter = entity_filter.strip()
+            else:
+                entity_filter = None
+
+            span.set_attribute("retrieval.filters.source", source_filter or "")
+            span.set_attribute("retrieval.filters.entity", entity_filter or "")
+            span.set_attribute("retrieval.filters.applied", bool(source_filter or entity_filter))
+
+            max_window = self.settings.retrieval_max_search_window
+            span.set_attribute("retrieval.search_window.max", max_window)
+            if page_size > max_window:
+                message = "page_size exceeds configured retrieval window"
+                span.record_exception(ValueError(message))
+                span.set_status(Status(StatusCode.ERROR, message))
+                raise ValueError(message)
+            search_window = min(max_window, max(page * page_size * 2, page_size))
+            span.set_attribute("retrieval.search_window", search_window)
+
+            query_vector = hashed_embedding(question, self.settings.qdrant_vector_size)
+            with _tracer.start_as_current_span("retrieval.vector_search") as vector_span:
+                vector_span.set_attribute("retrieval.vector.top_k", search_window)
+                results = self.vector_service.search(query_vector, top_k=search_window)
+                vector_span.set_attribute("retrieval.vector.count", len(results))
+
+            if rerank:
+                with _tracer.start_as_current_span("retrieval.rerank") as rerank_span:
+                    rerank_span.set_attribute("retrieval.rerank.candidates", len(results))
+                    results = self._rerank_results(results, entity_filter)
+                    rerank_span.set_attribute("retrieval.rerank.reordered", len(results))
+
+            filtered_results = self._apply_filters(results, source_filter, entity_filter)
+            span.set_attribute("retrieval.filtered_results", len(filtered_results))
+
+            total_items = len(filtered_results)
+            metric_attrs: Dict[str, object] = {
+                "rerank": rerank,
+                "filter_source": source_filter or "any",
+                "filter_entity": bool(entity_filter),
+            }
+
+            if total_items == 0:
+                has_evidence = False
+                metric_attrs["has_evidence"] = has_evidence
+                duration_ms = (perf_counter() - start_time) * 1000.0
+                span.set_attribute("retrieval.total_items", total_items)
+                span.set_attribute("retrieval.has_evidence", has_evidence)
+                span.set_attribute("retrieval.duration_ms", duration_ms)
+                _retrieval_queries_counter.add(1, attributes=metric_attrs)
+                _retrieval_query_duration.record(duration_ms, attributes=metric_attrs)
+                _retrieval_results_histogram.record(total_items, attributes=metric_attrs)
+                empty_trace = Trace(vector=[], graph={"nodes": [], "edges": []}, forensics=[])
+                meta = QueryMeta(page=page, page_size=page_size, total_items=0, has_next=False)
+                answer = "No supporting evidence found for the supplied query."
+                return QueryResult(
+                    answer=answer,
+                    citations=[],
+                    trace=empty_trace,
+                    meta=meta,
+                    has_evidence=False,
+                )
+
+            start = (page - 1) * page_size
+            end = min(start + page_size, total_items)
+            has_next = end < total_items
+
+            primary_span = filtered_results[: page_size]
+            graph_window = min(self.settings.retrieval_graph_hop_window, max(len(primary_span), 1))
+            graph_seed = filtered_results[:graph_window]
+            vector_entities = self._collect_entities(graph_seed)
+            entity_ids = self._augment_entity_ids(question, vector_entities)
+            with _tracer.start_as_current_span("retrieval.trace_build") as trace_span:
+                trace_span.set_attribute("retrieval.trace.entity_ids", len(entity_ids))
+                trace_full, relation_statements = self._build_trace(filtered_results, entity_ids)
+                trace_span.set_attribute("retrieval.trace.nodes", len(trace_full.graph.get("nodes", [])))
+                trace_span.set_attribute("retrieval.trace.edges", len(trace_full.graph.get("edges", [])))
+            citations_full = self._build_citations(filtered_results)
+
+            page_results = filtered_results[start:end]
+            citations_page = citations_full[start:end] if end > start else []
+            doc_ids_page: Set[str] = set()
+            for point in page_results:
+                payload = point.payload or {}
+                doc_id = payload.get("doc_id")
+                if doc_id is not None:
+                    doc_ids_page.add(str(doc_id))
+
+            vector_trace_page = trace_full.vector[start:end] if end > start else []
+            forensics_trace_page = [
+                entry for entry in trace_full.forensics if entry.get("document_id") in doc_ids_page
+            ]
+            if doc_ids_page:
+                graph_edges_page = [
+                    edge
+                    for edge in trace_full.graph.get("edges", [])
+                    if (
+                        edge.get("properties", {}).get("doc_id") in doc_ids_page
+                        or edge.get("source") in doc_ids_page
+                        or edge.get("target") in doc_ids_page
+                    )
+                [
+                graph_node_ids = {
+                    edge.get("source") for edge in graph_edges_page
+                } | {
+                    edge.get("target") for edge in graph_edges_page
+                }
+                graph_nodes_page = [
+                    node
+                    for node in trace_full.graph.get("nodes", [])
+                    if node.get("id") in graph_node_ids
+                ]
+            else:
+                graph_edges_page = []
+                graph_nodes_page = []
+
+            relation_statements_page = [
+                statement
+                for statement, doc_id in relation_statements
+                if doc_id is None or doc_id in doc_ids_page
+            ]
+
+            trace_page = Trace(
+                vector=vector_trace_page,
+                graph={"nodes": graph_nodes_page, "edges": graph_edges_page},
+                forensics=forensics_trace_page,
             )
-        search_window = min(max_window, max(page * page_size * 2, page_size))
 
-        query_vector = hashed_embedding(question, self.settings.qdrant_vector_size)
-        results = self.vector_service.search(query_vector, top_k=search_window)
-        if rerank:
-            results = self._rerank_results(results, entity_filter)
-        filtered_results = self._apply_filters(results, source_filter, entity_filter)
+            answer = self._compose_answer(question, page_results, relation_statements_page)
+            if start >= total_items:
+                answer = (
+                    f"{answer} No additional supporting evidence available for page {page}; "
+                    "adjust pagination or filters to view existing evidence."
+                )
+            
+            meta = QueryMeta(
+                page=page,
+                page_size=page_size,
+                total_items=total_items,
+                has_next=has_next,
+            )
 
-        total_items = len(filtered_results)
-        if total_items == 0:
-            empty_trace = Trace(vector=[], graph={"nodes": [], "edges": []}, forensics=[])
-            meta = QueryMeta(page=page, page_size=page_size, total_items=0, has_next=False)
-            answer = "No supporting evidence found for the supplied query."
+            has_evidence = True
+            metric_attrs["has_evidence"] = has_evidence
+            duration_ms = (perf_counter() - start_time) * 1000.0
+            span.set_attribute("retrieval.total_items", total_items)
+            span.set_attribute("retrieval.has_evidence", has_evidence)
+            span.set_attribute("retrieval.duration_ms", duration_ms)
+            _retrieval_queries_counter.add(1, attributes=metric_attrs)
+            _retrieval_query_duration.record(duration_ms, attributes=metric_attrs)
+            _retrieval_results_histogram.record(total_items, attributes=metric_attrs)
+
             return QueryResult(
                 answer=answer,
-                citations=[],
-                trace=empty_trace,
+                citations=citations_page,
+                trace=trace_page,
                 meta=meta,
-                has_evidence=False,
+                has_evidence=True,
             )
-
-        start = (page - 1) * page_size
-        end = min(start + page_size, total_items)
-        has_next = end < total_items
-
-        primary_span = filtered_results[: page_size]
-        graph_window = min(self.settings.retrieval_graph_hop_window, max(len(primary_span), 1))
-        graph_seed = filtered_results[:graph_window]
-        vector_entities = self._collect_entities(graph_seed)
-        entity_ids = self._augment_entity_ids(question, vector_entities)
-        trace_full, relation_statements = self._build_trace(filtered_results, entity_ids)
-        citations_full = self._build_citations(filtered_results)
-
-        page_results = filtered_results[start:end]
-        citations_page = citations_full[start:end] if end > start else []
-        doc_ids_page: Set[str] = set()
-        for point in page_results:
-            payload = point.payload or {}
-            doc_id = payload.get("doc_id")
-            if doc_id is not None:
-                doc_ids_page.add(str(doc_id))
-
-        vector_trace_page = trace_full.vector[start:end] if end > start else []
-        forensics_trace_page = [
-            entry for entry in trace_full.forensics if entry.get("document_id") in doc_ids_page
-        ]
-        if doc_ids_page:
-            graph_edges_page = [
-                edge
-                for edge in trace_full.graph.get("edges", [])
-                if (
-                    edge.get("properties", {}).get("doc_id") in doc_ids_page
-                    or edge.get("source") in doc_ids_page
-                    or edge.get("target") in doc_ids_page
-                )
-            ]
-            graph_node_ids = {
-                edge.get("source") for edge in graph_edges_page
-            } | {
-                edge.get("target") for edge in graph_edges_page
-            }
-            graph_nodes_page = [
-                node
-                for node in trace_full.graph.get("nodes", [])
-                if node.get("id") in graph_node_ids
-            ]
-        else:
-            graph_edges_page = []
-            graph_nodes_page = []
-
-        relation_statements_page = [
-            statement
-            for statement, doc_id in relation_statements
-            if doc_id is None or doc_id in doc_ids_page
-        ]
-
-        trace_page = Trace(
-            vector=vector_trace_page,
-            graph={"nodes": graph_nodes_page, "edges": graph_edges_page},
-            forensics=forensics_trace_page,
-        )
-
-        answer = self._compose_answer(question, page_results, relation_statements_page)
-        if start >= total_items:
-            answer = (
-                f"{answer} No additional supporting evidence available for page {page}; "
-                "adjust pagination or filters to view existing evidence."
-            )
-
-        meta = QueryMeta(
-            page=page,
-            page_size=page_size,
-            total_items=total_items,
-            has_next=has_next,
-        )
-
-        return QueryResult(
-            answer=answer,
-            citations=citations_page,
-            trace=trace_page,
-            meta=meta,
-            has_evidence=True,
-        )
 
     def _build_citations(self, results: List[qmodels.ScoredPoint]) -> List[Citation]:
         citations: List[Citation] = []
