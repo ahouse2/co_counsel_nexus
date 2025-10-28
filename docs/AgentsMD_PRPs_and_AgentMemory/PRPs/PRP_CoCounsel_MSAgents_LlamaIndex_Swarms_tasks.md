@@ -133,7 +133,7 @@ status: draft
 **CI/CD Checkpoint:** `qa-suite` workflow (unit, integration, e2e, load-smoke)  
 **Exit Criteria:** All automated suites green, coverage thresholds met, NFR validation matrix signed off, release candidate tagged.
 
-- [ ] **Unit Coverage (Spec §§APIs & Forensics Nodes)** — Ensure loaders, graph upserts, forensic analyzers, retriever components meet ≥85% coverage.
+- [x] **Unit Coverage (Spec §§APIs & Forensics Nodes)** — Ensure loaders, graph upserts, forensic analyzers, retriever components meet ≥85% coverage (enforced via `python -m tools.qa.quality_gate`).
 - [ ] **Integration Journeys (Spec §Forensics Toolbox Execution Blueprint & §APIs)** — Validate end-to-end ingestion → query → forensics flows on sample corpus.
 - [ ] **E2E Scripted Journey (Spec §APIs.GET /query & §API Surfacing)** — Execute user journey script verifying chat, citations, timeline, forensics UI.
 - [ ] **Performance & Resilience (Spec §Forensics Nodes soft/hard fail paths)** — Run load and failover drills capturing metrics in NFR validation matrix.

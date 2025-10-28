@@ -101,10 +101,17 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert "Acme" in payload["answer"]
     assert "Graph analysis highlights" in payload["answer"]
     assert payload["citations"]
+    meta = payload["meta"]
+    assert meta["page"] == 1
+    assert meta["page_size"] == 10
+    assert meta["total_items"] >= 1
+    assert isinstance(meta["has_next"], bool)
+    assert len(payload["citations"]) <= meta["page_size"]
     traces = payload["traces"]
     graph_edges = traces["graph"]["edges"]
     assert any(edge["type"] == "ACQUIRED" for edge in graph_edges)
     assert traces["forensics"]
+    assert len(traces["vector"]) <= meta["page_size"]
 
     timeline_response = client.get("/timeline")
     assert timeline_response.status_code == 200
@@ -148,6 +155,77 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     assert status_payload["status"] == "succeeded"
     assert status_payload["status_details"]["ingestion"]["documents"] == 3
     assert status_payload["documents"][0]["metadata"]["checksum_sha256"]
+
+
+def test_query_filters_and_pagination(client: TestClient, sample_workspace: Path) -> None:
+    followup = sample_workspace / "followup_notes.txt"
+    followup.write_text(
+        "Acme Corporation met Contoso Analytics on 2024-08-10 to audit Beta LLC ledgers and discuss compliance."
+    )
+
+    response = client.post(
+        "/ingest",
+        json={"sources": [{"type": "local", "path": str(sample_workspace)}]},
+    )
+    assert response.status_code == 202
+
+    first_page = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "page_size": 1},
+    )
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert first_payload["meta"]["page"] == 1
+    assert first_payload["meta"]["page_size"] == 1
+    assert first_payload["meta"]["total_items"] >= 1
+    assert len(first_payload["citations"]) <= 1
+
+    second_page = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "page": 2, "page_size": 1},
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert second_payload["meta"]["page"] == 2
+    assert second_payload["meta"]["total_items"] == first_payload["meta"]["total_items"]
+    assert len(second_payload["citations"]) <= 1
+
+    source_filtered = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "filters[source]": "local"},
+    )
+    assert source_filtered.status_code == 200
+
+    missing_source = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "filters[source]": "s3"},
+    )
+    assert missing_source.status_code == 204
+
+    entity_filtered = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "filters[entity]": "Acme"},
+    )
+    assert entity_filtered.status_code == 200
+
+    missing_entity = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "filters[entity]": "Gamma"},
+    )
+    assert missing_entity.status_code == 204
+
+    rerank_enabled = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "rerank": True},
+    )
+    assert rerank_enabled.status_code == 200
+    assert rerank_enabled.json()["meta"]["total_items"] >= 1
+
+    invalid_filter = client.get(
+        "/query",
+        params={"q": "Acme compliance history", "filters[source]": "ftp"},
+    )
+    assert invalid_filter.status_code == 400
 
 
 def test_timeline_pagination_and_filters(client: TestClient, sample_workspace: Path) -> None:
