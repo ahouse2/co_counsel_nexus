@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     job_store_dir: Path = Field(default=Path("storage/jobs"))
     document_store_dir: Path = Field(default=Path("storage/documents"))
     ingestion_workspace_dir: Path = Field(default=Path("storage/workspaces"))
+    agent_threads_dir: Path = Field(default=Path("storage/agent_threads"))
     credentials_registry_path: Path | None = Field(default=None)
 
     qdrant_collection: str = Field(default="cocounsel_documents")
@@ -45,6 +46,7 @@ class Settings(BaseSettings):
         self.job_store_dir.mkdir(parents=True, exist_ok=True)
         self.document_store_dir.mkdir(parents=True, exist_ok=True)
         self.ingestion_workspace_dir.mkdir(parents=True, exist_ok=True)
+        self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

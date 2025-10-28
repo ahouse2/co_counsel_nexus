@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -155,4 +155,38 @@ class ForensicsResponse(BaseModel):
     fallback_applied: bool
     schema_version: str
     generated_at: Optional[datetime] = None
+
+
+class AgentRunRequest(BaseModel):
+    case_id: str
+    question: str
+    top_k: Optional[int] = Field(default=None, ge=1, le=20)
+
+
+class AgentTurnModel(BaseModel):
+    role: str
+    action: str
+    input: dict
+    output: dict
+    started_at: datetime
+    completed_at: datetime
+    metrics: dict
+
+
+class AgentRunResponse(BaseModel):
+    thread_id: str
+    case_id: str
+    question: str
+    created_at: datetime
+    updated_at: datetime
+    final_answer: str
+    citations: List[CitationModel]
+    qa_scores: Dict[str, float]
+    qa_notes: List[str]
+    turns: List[AgentTurnModel]
+    telemetry: dict
+
+
+class AgentThreadListResponse(BaseModel):
+    threads: List[str]
 
