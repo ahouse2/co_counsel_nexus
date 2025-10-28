@@ -220,18 +220,23 @@ class IngestionService:
         graph_mutation = GraphMutation()
         reports: List[ForensicsReport] = []
         origin = materialized.origin or str(root)
+        source_type = materialized.source.type.lower()
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
             suffix = path.suffix.lower()
             if suffix in _TEXT_EXTENSIONS:
-                document, timeline_events, mutation, report = self._ingest_text(path, origin)
+                document, timeline_events, mutation, report = self._ingest_text(
+                    path, origin, source_type
+                )
                 documents.append(document)
                 events.extend(timeline_events)
                 graph_mutation.merge(mutation)
                 reports.append(report)
             elif suffix in _IMAGE_EXTENSIONS:
-                doc_meta = self._register_document(path, doc_type="image", origin=origin)
+                doc_meta = self._register_document(
+                    path, doc_type="image", origin=origin, source_type=source_type
+                )
                 report = self.forensics_service.build_image_artifact(doc_meta.id, path)
                 documents.append(doc_meta)
                 mutation = GraphMutation()
@@ -239,7 +244,9 @@ class IngestionService:
                 graph_mutation.merge(mutation)
                 reports.append(report)
             elif suffix in _FINANCIAL_EXTENSIONS:
-                doc_meta = self._register_document(path, doc_type="financial", origin=origin)
+                doc_meta = self._register_document(
+                    path, doc_type="financial", origin=origin, source_type=source_type
+                )
                 report = self.forensics_service.build_financial_artifact(doc_meta.id, path)
                 documents.append(doc_meta)
                 mutation = GraphMutation()
@@ -255,14 +262,35 @@ class IngestionService:
         return documents, events, skipped, graph_mutation, reports
 
     def _ingest_text(
-        self, path: Path, origin: str
+        self, path: Path, origin: str, source_type: str
     ) -> Tuple[IngestedDocument, List[TimelineEvent], GraphMutation, ForensicsReport]:
-        document = self._register_document(path, doc_type="text", origin=origin)
+        document = self._register_document(
+            path, doc_type="text", origin=origin, source_type=source_type
+        )
         mutation = GraphMutation()
         mutation.record_node(document.id)
 
         text = read_text(path)
-        chunks = chunk_text(text, self.settings.ingestion_chunk_size, self.settings.ingestion_chunk_overlap)
+        chunks = chunk_text(
+            text, self.settings.ingestion_chunk_size, self.settings.ingestion_chunk_overlap
+        )
+        entity_spans = extract_entities(text)
+        entity_pairs: List[Tuple[str, str]] = []
+        seen_pairs: Set[Tuple[str, str]] = set()
+        for span in entity_spans:
+            label = span.label.strip()
+            if not label:
+                continue
+            normalised = normalise_entity_id(label)
+            key = (normalised, label)
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            entity_pairs.append(key)
+        entity_pairs.sort(key=lambda item: (item[0] or item[1].lower(), item[1].lower()))
+        entity_ids = [pair[0] for pair in entity_pairs if pair[0]]
+        entity_labels = [pair[1] for pair in entity_pairs]
+
         points: List[qmodels.PointStruct] = []
         for idx, chunk in enumerate(chunks):
             vector = hashed_embedding(chunk, self.settings.qdrant_vector_size)
@@ -272,6 +300,10 @@ class IngestionService:
                 "text": chunk,
                 "uri": document.uri,
                 "origin": origin,
+                "source_type": source_type,
+                "doc_type": "document",
+                "entity_ids": entity_ids,
+                "entity_labels": entity_labels,
             }
             points.append(
                 qmodels.PointStruct(
@@ -283,7 +315,6 @@ class IngestionService:
         if points:
             self.vector_service.upsert(points)
 
-        entity_spans = extract_entities(text)
         for span in entity_spans:
             self._commit_entity(document.id, span, mutation)
 
@@ -292,6 +323,13 @@ class IngestionService:
             self._commit_triples(document.id, triples, mutation)
 
         timeline_events = self._build_timeline_events(document.id, text)
+        metadata_updates: Dict[str, object] = {
+            "entity_ids": entity_ids,
+            "entity_labels": entity_labels,
+            "chunk_count": len(chunks),
+        }
+        document.metadata.update(metadata_updates)
+        self._update_document_metadata(document.id, metadata_updates)
         report = self.forensics_service.build_document_artifact(document.id, path)
         return document, timeline_events, mutation, report
 
@@ -354,7 +392,14 @@ class IngestionService:
             mutation.record_edge(subject_id, triple.predicate, object_id, doc_id)
             mutation.triples += 1
 
-    def _register_document(self, path: Path, doc_type: str, origin: str) -> IngestedDocument:
+    def _register_document(
+        self,
+        path: Path,
+        doc_type: str,
+        origin: str,
+        source_type: str,
+        extra_metadata: Dict[str, object] | None = None,
+    ) -> IngestedDocument:
         doc_id = sha256_id(path)
         title = path.stem.replace("_", " ").title()
         uri = str(path.resolve())
@@ -369,7 +414,11 @@ class IngestionService:
             "ingested_uri": uri,
             "type": doc_type,
             "checksum_sha256": checksum,
+            "source_type": source_type,
+            "doc_type": doc_type,
         }
+        if extra_metadata:
+            metadata.update(extra_metadata)
         self.graph_service.upsert_document(doc_id, title, metadata)
         self.document_store.write_document(
             doc_id,
@@ -380,6 +429,17 @@ class IngestionService:
             },
         )
         return IngestedDocument(id=doc_id, uri=uri, type=doc_type, title=title, metadata=metadata)
+
+    def _update_document_metadata(self, doc_id: str, updates: Dict[str, object]) -> None:
+        try:
+            record = self.document_store.read_document(doc_id)
+        except FileNotFoundError:
+            record = {"id": doc_id}
+        merged = {**record, **updates}
+        self.document_store.write_document(doc_id, merged)
+        title = str(merged.get("title", doc_id))
+        metadata = {key: value for key, value in merged.items() if key not in {"id", "title"}}
+        self.graph_service.upsert_document(doc_id, title, metadata)
 
     def _build_timeline_events(self, doc_id: str, text: str) -> List[TimelineEvent]:
         events: List[TimelineEvent] = []

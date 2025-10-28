@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
@@ -69,11 +69,42 @@ def ingest_status(
 
 @app.get("/query", response_model=QueryResponse)
 def query(
-    q: str,
+    q: str = Query(..., min_length=3, description="Natural language query"),
+    page: int = Query(1, ge=1, description="Page number for vector results"),
+    page_size: int = Query(10, ge=1, le=50, description="Vector results per page"),
+    filters_source: str | None = Query(
+        default=None,
+        alias="filters[source]",
+        description="Restrict results to an ingestion source type (local, s3, sharepoint)",
+    ),
+    filters_entity: str | None = Query(
+        default=None,
+        alias="filters[entity]",
+        description="Restrict results to documents mentioning an entity label or ID",
+    ),
+    rerank: bool = Query(
+        default=False, description="Enable deterministic reranking heuristics"
+    ),
     service: RetrievalService = Depends(get_retrieval_service),
-) -> QueryResponse:
-    result = service.query(q)
-    return QueryResponse(**result)
+) -> Response:
+    filters: dict[str, str] = {}
+    if filters_source:
+        filters["source"] = filters_source
+    if filters_entity:
+        filters["entity"] = filters_entity
+    try:
+        result = service.query(
+            q,
+            page=page,
+            page_size=page_size,
+            filters=filters or None,
+            rerank=rerank,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not result.has_evidence:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return JSONResponse(content=result.to_dict())
 
 
 @app.get("/timeline", response_model=TimelineResponse)
