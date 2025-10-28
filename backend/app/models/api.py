@@ -115,6 +115,9 @@ class TimelineEventModel(BaseModel):
     title: str
     summary: str
     citations: List[str]
+    entity_highlights: List[dict] = Field(default_factory=list)
+    relation_tags: List[dict] = Field(default_factory=list)
+    confidence: float | None = None
 
 
 class TimelineResponse(BaseModel):

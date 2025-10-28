@@ -179,6 +179,9 @@ def timeline(
                 title=event.title,
                 summary=event.summary,
                 citations=event.citations,
+                entity_highlights=event.entity_highlights,
+                relation_tags=event.relation_tags,
+                confidence=event.confidence,
             )
             for event in result.events
         ],

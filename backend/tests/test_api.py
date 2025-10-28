@@ -268,6 +268,9 @@ def test_timeline_pagination_and_filters(
         "/timeline", params={"entity": "Acme Corporation"}, headers=headers
     ).json()
     assert all(event["id"] != neutral_event.id for event in entity_payload["events"])
+    assert "entity_highlights" in entity_payload["events"][0]
+    assert "relation_tags" in entity_payload["events"][0]
+    assert "confidence" in entity_payload["events"][0]
 
     ts_threshold = page_two_payload["events"][0]["ts"]
     range_payload = client.get(
