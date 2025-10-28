@@ -1,0 +1,80 @@
+# PRP Execution Run — Phase 5 Multi-Agent & ACE Alignment
+
+- ## Vision: Deliver the orchestrated MS Agents workflow with durable memory threads, rubric-driven QA, and telemetry instrumentation required for PRP Phase 5 exit criteria.
+  - ### Objectives
+    - #### O1: Materialise deterministic multi-agent orchestration covering research, forensics, and QA agents.
+      - ##### Outcomes
+        - Orchestrator sequences `ResearchAgent → ForensicsAgent → QAAgent` with enforced state validation and guardrails for missing artifacts.
+        - `/agents/run` endpoint accepts case context, executes the workflow, and emits structured turns plus telemetry spans.
+        - `/agents/threads/*` endpoints expose persisted runs for audit, replay, and ACE critic ingestion.
+    - #### O2: Persist agent memory threads with rich telemetry and citations aligned to ACE trio requirements.
+      - ##### Outcomes
+        - Memory store records turns, timestamps, metrics, and QA rubric outputs under `storage/agent_threads/<thread>.json`.
+        - Telemetry captures per-turn durations, artifact counts, graph edges, and QA averages for downstream analytics.
+        - Thread list endpoint surfaces identifiers for ACE retriever consumption and build log linkage.
+    - #### O3: Operationalise QAAgent rubric scoring and reporting loop.
+      - ##### Outcomes
+        - QAAgent evaluates 15-category rubric with deterministic heuristics leveraging retrieval + forensics signals.
+        - QA scores propagate into API responses, telemetry payloads, build logs, and chain-of-stewardship entries.
+        - Average score ≥8.0 enforced in tests; failures flag actionable tasks for remediation.
+
+- ## Decision Tree Snapshot
+  - ### Workflow Composition
+    - #### Option A: Delegate to external orchestrator (e.g., Airflow, Prefect) (rejected — overkill for inline API execution, complicates tests).
+    - #### Option B: Embed orchestrator inside FastAPI service with deterministic dataclasses and telemetry (**selected** to maximise control and reproducibility).
+    - #### Option C: Async event-driven bus (deferred — revisit when background workers land in Phase 6/7).
+  - ### Memory Persistence
+    - #### Option A: Rely on in-memory cache only (rejected — fails audit/ACE replay requirements).
+    - #### Option B: File-backed JSON threads with atomic writes (**selected** for simplicity + determinism in CI).
+    - #### Option C: External database (postponed — integrate once deployment targets decided).
+  - ### QA Scoring Strategy
+    - #### Option A: Manual review prompts (rejected — violates non-mock directive, not automatable).
+    - #### Option B: Heuristic rubric using retrieval + forensics signals (**selected** ensures reproducible scores without external LLM dependency).
+    - #### Option C: LLM-assisted reviewer (future extension when online inference approved).
+
+- ## Execution Ladder
+  - ### Stage Alpha — Orchestrator Skeleton
+    - Introduce `AgentsService` with dataclasses for threads/turns and deterministic `_now()` helper.
+    - Wire `/agents/run` endpoint invoking orchestrator with dependency injection + caching reset hooks for tests.
+    - Persist run metadata into `AgentMemoryStore` via atomic writes.
+  - ### Stage Beta — Forensics + Retrieval Coupling
+    - Collate citations from retrieval, hydrate document metadata, and load modality-specific forensic reports.
+    - Record artifacts with schema version, signals, and stage snapshots to support QA heuristics.
+    - Ensure missing artifacts gracefully skipped while telemetry tallies attempted document IDs.
+  - ### Stage Gamma — QAAgent Heuristics
+    - Implement rubric scoring tied to answer length, citation coverage, graph edges, telemetry durations, and forensics signals.
+    - Emit notes summarising evidence coverage, runtime, and question complexity for build logs.
+    - Enforce ≥7.0 floor per category via tests; average stored in telemetry for ACE triggers.
+  - ### Stage Delta — Memory & APIs
+    - Store threads on disk, expose `/agents/threads` listing + fetch endpoints with error handling.
+    - Extend models with Pydantic schemas for requests/responses; ensure compatibility with existing citations.
+    - Add pytest coverage validating workflow sequencing, score thresholds, telemetry integrity, and persistence.
+
+- ## Validation Playbook
+  - ### Automated
+    - `pytest backend/tests/test_api.py -q`
+    - `pytest backend/tests/test_agents.py -q`
+    - `pytest backend/tests/test_forensics.py -q`
+  - ### Manual
+    - Inspect `storage/agent_threads/<thread>.json` for telemetry + rubric completeness.
+    - Invoke `/agents/threads/{id}` to confirm persisted payload matches run response.
+    - Review build log + ACE memory entries for rubric averages and follow-up tasks.
+
+- ## Risk Ledger
+  - ### R1: Heuristic scoring may drift from rubric expectations.
+    - #### Mitigation: Encode explicit feature thresholds in tests; document heuristics and adjust with rubric reviews.
+  - ### R2: File-backed memory store could grow unbounded.
+    - #### Mitigation: Track list endpoint output; plan retention policy + archival hooks in Phase 7.
+  - ### R3: Forensics loading may raise errors when artifacts missing.
+    - #### Mitigation: Guard reads with `report_exists`, skip gracefully, and log omissions in telemetry metrics.
+  - ### R4: Added endpoints expand attack surface before security middleware lands.
+    - #### Mitigation: Document requirement for mTLS/OAuth in Phase 6 security backlog; ensure tests assert telemetry-based auditing now.
+
+- ## Notes & Handoff
+  - ### Telemetry Integration
+    - Per-turn durations + QA averages feed future OpenTelemetry spans once exporters wired.
+    - Telemetry payload structure documented for ACE critic to consume in rubric cross-checks.
+  - ### Follow-up Actions
+    - Implement security middleware (mTLS/OAuth/Oso) per validation review tasks.
+    - Add retention policy + CLI tooling for agent thread pruning in subsequent phases.
+    - Extend QAAgent heuristics with citation confidence once remote connectors online.

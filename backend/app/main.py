@@ -5,6 +5,9 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .models.api import (
+    AgentRunRequest,
+    AgentRunResponse,
+    AgentThreadListResponse,
     ForensicsResponse,
     GraphEdgeModel,
     GraphNeighborResponse,
@@ -16,6 +19,7 @@ from .models.api import (
     TimelineEventModel,
     TimelineResponse,
 )
+from .services.agents import AgentsService, get_agents_service
 from .services.forensics import ForensicsService, get_forensics_service
 from .services.graph import GraphService, get_graph_service
 from .services.ingestion import IngestionService, get_ingestion_service
@@ -159,4 +163,32 @@ def forensics_financial(
     service: ForensicsService = Depends(get_forensics_service),
 ) -> ForensicsResponse:
     return _load_forensics(service, id, "financial")
+
+
+@app.post("/agents/run", response_model=AgentRunResponse)
+def agents_run(
+    payload: AgentRunRequest,
+    service: AgentsService = Depends(get_agents_service),
+) -> AgentRunResponse:
+    top_k = payload.top_k or 5
+    response = service.run_case(payload.case_id, payload.question, top_k=top_k)
+    return AgentRunResponse(**response)
+
+
+@app.get("/agents/threads/{thread_id}", response_model=AgentRunResponse)
+def agents_thread(
+    thread_id: str,
+    service: AgentsService = Depends(get_agents_service),
+) -> AgentRunResponse:
+    try:
+        payload = service.get_thread(thread_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return AgentRunResponse(**payload)
+
+
+@app.get("/agents/threads", response_model=AgentThreadListResponse)
+def agents_threads(service: AgentsService = Depends(get_agents_service)) -> AgentThreadListResponse:
+    threads = service.list_threads()
+    return AgentThreadListResponse(threads=threads)
 
