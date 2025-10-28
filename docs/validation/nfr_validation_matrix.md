@@ -39,6 +39,7 @@ This playbook codifies the hardware assumptions, synthetic load profiles, and va
 
 ## Notes
 - Persist raw metrics (CSV/JSON) in `build_logs/` for auditability.
+- Audit governance adheres to the [Audit Playbook](../compliance/audit_playbook.md) for rotation cadence, review checkpoints, and break-glass reconciliation.
 - When collecting provider metrics, standardize the JSONL schema to `{ "timestamp": "ISO", "provider": "gemini-2.5-flash", "status": "success" }`.
 - Telemetry bootstrap variables: set `TELEMETRY_ENABLED=true`, `TELEMETRY_OTLP_ENDPOINT=grpc://otel-collector:4317`, `TELEMETRY_SERVICE_NAME=cocounsel-backend`, and `TELEMETRY_CONSOLE_FALLBACK=false` in production.
 - Dashboards ingest the following OTel instruments: retrieval (`retrieval_query_duration_ms`, `retrieval_queries_total`, `retrieval_results_returned`) and forensics (`forensics_pipeline_duration_ms`, `forensics_stage_duration_ms`, `forensics_reports_total`, `forensics_pipeline_fallbacks_total`).

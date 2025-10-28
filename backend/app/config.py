@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     ingestion_workspace_dir: Path = Field(default=Path("storage/workspaces"))
     agent_threads_dir: Path = Field(default=Path("storage/agent_threads"))
     credentials_registry_path: Path | None = Field(default=None)
+    manifest_encryption_key_path: Path = Field(default=Path("storage/manifest.key"))
+    manifest_retention_days: int = Field(default=30)
+    audit_log_path: Path = Field(default=Path("storage/audit.log"))
 
     security_mtls_ca_path: Path | None = Field(default=None)
     security_mtls_registry_path: Path | None = Field(default=None)
@@ -76,6 +79,7 @@ class Settings(BaseSettings):
         self.document_store_dir.mkdir(parents=True, exist_ok=True)
         self.ingestion_workspace_dir.mkdir(parents=True, exist_ok=True)
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
+        self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
