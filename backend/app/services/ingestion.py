@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import mimetypes
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
+from threading import Lock
 from typing import Dict, List, Set, Tuple
 from uuid import uuid4
 
@@ -35,6 +37,12 @@ from ..utils.triples import (
 from .forensics import ForensicsReport, ForensicsService
 from .graph import GraphService, get_graph_service
 from .ingestion_sources import MaterializedSource, build_connector
+from .ingestion_worker import (
+    IngestionJobAlreadyQueued,
+    IngestionQueueFull,
+    IngestionTask,
+    IngestionWorker,
+)
 from .vector import VectorService, get_vector_service
 
 _TEXT_EXTENSIONS = {".txt", ".md", ".json", ".log", ".rtf"}
@@ -91,6 +99,7 @@ class IngestionService:
         job_store: JobStore | None = None,
         document_store: DocumentStore | None = None,
         forensics_service: ForensicsService | None = None,
+        worker: IngestionWorker | None = None,
     ) -> None:
         self.logger = LOGGER
         self.settings = get_settings()
@@ -101,6 +110,7 @@ class IngestionService:
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.forensics_service = forensics_service or ForensicsService()
         self.credential_registry = CredentialRegistry(self.settings.credentials_registry_path)
+        self.worker = worker
 
     def ingest(self, request: IngestionRequest) -> str:
         if not request.sources:
@@ -108,13 +118,65 @@ class IngestionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="At least one source must be provided",
             )
+
         job_id = str(uuid4())
         submitted_at = datetime.now(timezone.utc)
         job_record = self._initialise_job_record(job_id, submitted_at, request.sources)
         self.job_store.write_job(job_id, job_record)
+
+        worker = self.worker or get_ingestion_worker()
+        payload = request.model_dump(mode="json")
+        try:
+            worker.enqueue(job_id, payload)
+        except IngestionJobAlreadyQueued:
+            self.logger.info("Job already queued", extra={"job_id": job_id})
+        except IngestionQueueFull as exc:
+            self._record_error(
+                job_record,
+                {
+                    "code": "QUEUE_SATURATED",
+                    "message": "Ingestion queue capacity reached",
+                    "source": "queue",
+                },
+            )
+            self._transition_job(job_record, "failed")
+            self.job_store.write_job(job_id, job_record)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ingestion queue is full",
+            ) from exc
+        else:
+            self._touch_job(job_record)
+            self.job_store.write_job(job_id, job_record)
+        return job_id
+
+    def process_job(self, job_id: str, request: IngestionRequest) -> None:
+        try:
+            job_record = self.job_store.read_job(job_id)
+        except FileNotFoundError:
+            submitted_at = datetime.now(timezone.utc)
+            job_record = self._initialise_job_record(job_id, submitted_at, request.sources)
+        else:
+            self._ensure_job_defaults(job_record, request.sources)
+
+        status_value = job_record.get("status", "queued")
+        if status_value in {"succeeded", "failed", "cancelled"}:
+            self.logger.info(
+                "Skipping ingestion job with terminal status",
+                extra={"job_id": job_id, "status": status_value},
+            )
+            return
+
         self._transition_job(job_record, "running")
         self.job_store.write_job(job_id, job_record)
+        self._execute_job(job_id, request, job_record)
 
+    def _execute_job(
+        self,
+        job_id: str,
+        request: IngestionRequest,
+        job_record: Dict[str, object],
+    ) -> None:
         all_documents: List[IngestedDocument] = []
         all_events: List[TimelineEvent] = []
         graph_nodes: Set[str] = set()
@@ -138,6 +200,7 @@ class IngestionService:
                 graph_edges.update(mutation.edges)
                 triple_count += mutation.triples
 
+                job_record.setdefault("documents", [])
                 job_record["documents"].extend(doc.to_dict() for doc in documents)
                 job_record["status_details"]["ingestion"]["documents"] += len(documents)
                 job_record["status_details"]["ingestion"]["skipped"].extend(skipped)
@@ -193,7 +256,33 @@ class IngestionService:
             "Ingestion completed",
             extra={"job_id": job_id, "documents": len(all_documents), "events": len(all_events)},
         )
-        return job_id
+
+    def _ensure_job_defaults(
+        self, job_record: Dict[str, object], sources: List[IngestionSource]
+    ) -> None:
+        job_record.setdefault("status", "queued")
+        job_record.setdefault("submitted_at", self._now_iso())
+        job_record.setdefault("updated_at", self._now_iso())
+        job_record.setdefault(
+            "sources", [source.model_dump(exclude_none=True) for source in sources]
+        )
+        job_record.setdefault("documents", [])
+        job_record.setdefault("errors", [])
+        details = job_record.setdefault("status_details", {})
+        ingestion = details.setdefault("ingestion", {"documents": 0, "skipped": []})
+        ingestion.setdefault("documents", 0)
+        ingestion.setdefault("skipped", [])
+        timeline = details.setdefault("timeline", {"events": 0})
+        timeline.setdefault("events", 0)
+        forensics = details.setdefault(
+            "forensics", {"artifacts": [], "last_run_at": None}
+        )
+        forensics.setdefault("artifacts", [])
+        forensics.setdefault("last_run_at", None)
+        graph = details.setdefault("graph", {"nodes": 0, "edges": 0, "triples": 0})
+        graph.setdefault("nodes", 0)
+        graph.setdefault("edges", 0)
+        graph.setdefault("triples", 0)
 
     def get_job(self, job_id: str) -> Dict[str, object]:
         record = self.job_store.read_job(job_id)
@@ -520,6 +609,47 @@ class IngestionService:
     # endregion
 
 
+_WORKER_LOCK = Lock()
+_WORKER_INSTANCE: IngestionWorker | None = None
+
+
+def _handle_ingestion_task(task: IngestionTask) -> None:
+    service = IngestionService(worker=None)
+    request = IngestionRequest.model_validate(task.payload)
+    try:
+        service.process_job(task.job_id, request)
+    except HTTPException:
+        # Job manifest already records failure details; suppress to avoid worker crash logs.
+        return
+
+
+def get_ingestion_worker() -> IngestionWorker:
+    global _WORKER_INSTANCE
+    with _WORKER_LOCK:
+        if _WORKER_INSTANCE is None:
+            settings = get_settings()
+            worker = IngestionWorker(
+                handler=_handle_ingestion_task,
+                maxsize=settings.ingestion_queue_maxsize,
+                concurrency=settings.ingestion_worker_concurrency,
+            )
+            worker.start()
+            _WORKER_INSTANCE = worker
+    return _WORKER_INSTANCE
+
+
+def shutdown_ingestion_worker(timeout: float | None = None) -> None:
+    global _WORKER_INSTANCE
+    with _WORKER_LOCK:
+        if _WORKER_INSTANCE is None:
+            return
+        _WORKER_INSTANCE.stop(timeout=timeout)
+        _WORKER_INSTANCE = None
+
+
+atexit.register(shutdown_ingestion_worker)
+
+
 def sha256_id(path: Path) -> str:
     value = str(path.resolve()).encode("utf-8")
     return sha256(value).hexdigest()
@@ -546,4 +676,4 @@ def parse_timestamp(raw: str) -> datetime | None:
 
 
 def get_ingestion_service() -> IngestionService:
-    return IngestionService()
+    return IngestionService(worker=get_ingestion_worker())
