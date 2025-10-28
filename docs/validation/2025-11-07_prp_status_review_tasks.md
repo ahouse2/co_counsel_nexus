@@ -27,9 +27,9 @@
 - [x] **/query Enhancements** — Add pagination, filters, and rerank toggle per spec. *(Owners: Retrieval Engineering Pod — completed 2025-11-11; see backend/app/services/retrieval.py & backend/tests/test_api.py)*
   - [ ] Extend Pydantic models + service layer to accept pagination/filter args. *(Code: `backend/app/models/api.py`, `backend/app/services/retrieval.py`)*
   - [ ] Update FastAPI route + tests verifying behaviour. *(Files: `backend/app/main.py`, `backend/tests/test_api.py`)*
-- [ ] **Remote Ingestion Connectors** — Implement SharePoint/S3/OneDrive connectors with credential registry integration. *(Owners: Data Pipelines Squad)*
-  - [ ] Materialise connector classes with retries/backoff + secrets fetch. *(Code: `backend/app/services/ingestion_sources.py`)*
-  - [ ] Add fixtures + tests covering remote ingestion flows. *(Files: `backend/tests/test_ingestion_connectors.py`)*
+- [x] **Remote Ingestion Connectors** — Implement SharePoint/S3/OneDrive connectors with credential registry integration. *(Owners: Data Pipelines Squad — completed 2025-11-13; see regression tests)*
+  - [x] Materialise connector classes with retries/backoff + secrets fetch. *(Code: `backend/app/services/ingestion_sources.py`)*
+  - [x] Add fixtures + tests covering remote ingestion flows. *(Files: `backend/tests/test_ingestion_connectors.py`)*
 
 ## Scalability & Observability
 - [ ] **Background Ingestion Workers** — Move ingestion orchestration off request thread. *(Owners: Platform Core Guild)*
