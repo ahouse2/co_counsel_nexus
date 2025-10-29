@@ -10,7 +10,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import md5, sha256
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
+from time import perf_counter
+
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
 import numpy as np
 import pandas as pd
 import piexif
@@ -23,10 +27,35 @@ from pypdf import PdfReader
 from sklearn.ensemble import IsolationForest
 
 from ..config import get_settings
+from ..storage.forensics_chain import ForensicsChainLedger
 from ..utils.text import read_text
 
 
 SCHEMA_VERSION = "2025-11-06"
+
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+_forensics_pipeline_counter = _meter.create_counter(
+    "forensics_reports_total",
+    unit="1",
+    description="Total forensics reports generated",
+)
+_forensics_fallback_counter = _meter.create_counter(
+    "forensics_pipeline_fallbacks_total",
+    unit="1",
+    description="Number of pipelines completing with fallback applied",
+)
+_forensics_pipeline_duration = _meter.create_histogram(
+    "forensics_pipeline_duration_ms",
+    unit="ms",
+    description="Duration of forensics pipelines",
+)
+_forensics_stage_duration = _meter.create_histogram(
+    "forensics_stage_duration_ms",
+    unit="ms",
+    description="Duration of individual forensics stages",
+)
 
 
 @dataclass
@@ -121,6 +150,7 @@ class ForensicsService:
         self.settings = get_settings()
         self.base_dir = self.settings.forensics_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.chain_ledger = ForensicsChainLedger(self.settings.forensics_chain_path)
 
     # region public API
     def build_document_artifact(self, file_id: str, path: Path) -> ForensicsReport:
@@ -130,7 +160,7 @@ class ForensicsService:
             PipelineStage("metadata", self._stage_document_metadata),
             PipelineStage("analyse", self._stage_document_analyse, required=False),
         ]
-        records = self._execute_pipeline(ctx, stages)
+        records, duration_ms = self._execute_pipeline(ctx, stages)
         report = ForensicsReport(
             schema_version=SCHEMA_VERSION,
             file_id=file_id,
@@ -144,6 +174,7 @@ class ForensicsService:
             fallback_applied=ctx.fallback_applied,
         )
         report.report_path = self._persist(report)
+        self._record_pipeline_metrics(ctx, duration_ms)
         return report
 
     def build_image_artifact(self, file_id: str, path: Path) -> ForensicsReport:
@@ -153,7 +184,7 @@ class ForensicsService:
             PipelineStage("metadata", self._stage_image_metadata),
             PipelineStage("analyse", self._stage_image_analyse, required=False),
         ]
-        records = self._execute_pipeline(ctx, stages)
+        records, duration_ms = self._execute_pipeline(ctx, stages)
         report = ForensicsReport(
             schema_version=SCHEMA_VERSION,
             file_id=file_id,
@@ -167,6 +198,7 @@ class ForensicsService:
             fallback_applied=ctx.fallback_applied,
         )
         report.report_path = self._persist(report)
+        self._record_pipeline_metrics(ctx, duration_ms)
         return report
 
     def build_financial_artifact(self, file_id: str, path: Path) -> ForensicsReport:
@@ -176,7 +208,7 @@ class ForensicsService:
             PipelineStage("metadata", self._stage_financial_metadata),
             PipelineStage("analyse", self._stage_financial_analyse, required=False),
         ]
-        records = self._execute_pipeline(ctx, stages)
+        records, duration_ms = self._execute_pipeline(ctx, stages)
         report = ForensicsReport(
             schema_version=SCHEMA_VERSION,
             file_id=file_id,
@@ -190,6 +222,7 @@ class ForensicsService:
             fallback_applied=ctx.fallback_applied,
         )
         report.report_path = self._persist(report)
+        self._record_pipeline_metrics(ctx, duration_ms)
         return report
 
     def load_report(self, file_id: str) -> Dict[str, Any]:
@@ -231,23 +264,112 @@ class ForensicsService:
     # endregion
 
     # region pipeline execution
-    def _execute_pipeline(self, ctx: PipelineContext, stages: List[PipelineStage]) -> List[StageRecord]:
+    def _execute_pipeline(
+        self, ctx: PipelineContext, stages: List[PipelineStage]
+    ) -> Tuple[List[StageRecord], float]:
         records: List[StageRecord] = []
-        for stage in stages:
-            started = self._now_iso()
-            notes: List[str] = []
-            status = "succeeded"
-            try:
-                stage.handler(ctx, notes)
-            except Exception as exc:  # pylint: disable=broad-except
-                ctx.fallback_applied = True
-                status = "failed"
-                notes.append(str(exc))
-                if stage.required:
-                    records.append(StageRecord(stage.name, started, self._now_iso(), status, notes))
-                    raise
-            records.append(StageRecord(stage.name, started, self._now_iso(), status, notes))
-        return records
+        pipeline_start = perf_counter()
+        pipeline_duration_ms = 0.0
+        with _tracer.start_as_current_span("forensics.pipeline") as pipeline_span:
+            pipeline_span.set_attribute("forensics.file_id", ctx.file_id)
+            pipeline_span.set_attribute("forensics.artifact_type", ctx.artifact_type)
+            pipeline_span.set_attribute("forensics.stage.count", len(stages))
+
+            for stage in stages:
+                started = self._now_iso()
+                notes: List[str] = []
+                status = "succeeded"
+                stage_start = perf_counter()
+                with _tracer.start_as_current_span(
+                    f"forensics.stage.{stage.name}"
+                ) as stage_span:
+                    stage_span.set_attribute("forensics.stage.name", stage.name)
+                    stage_span.set_attribute("forensics.stage.required", stage.required)
+                    stage_span.set_attribute("forensics.artifact_type", ctx.artifact_type)
+                    try:
+                        stage.handler(ctx, notes)
+                    except Exception as exc:  # pylint: disable=broad-except
+                        ctx.fallback_applied = True
+                        status = "failed"
+                        notes.append(str(exc))
+                        stage_span.record_exception(exc)
+                        stage_span.set_status(Status(StatusCode.ERROR, str(exc)))
+                        pipeline_span.add_event(
+                            "forensics.stage.failure",
+                            {
+                                "forensics.stage": stage.name,
+                                "forensics.artifact_type": ctx.artifact_type,
+                            },
+                        )
+                        if stage.required:
+                            completed_at = self._now_iso()
+                            duration_ms = (perf_counter() - stage_start) * 1000.0
+                            stage_span.set_attribute("forensics.stage.duration_ms", duration_ms)
+                            stage_span.set_attribute("forensics.stage.status", status)
+                            stage_span.set_attribute(
+                                "forensics.stage.notes_count", len(notes)
+                            )
+                            stage_span.set_attribute(
+                                "forensics.stage.fallback_applied", ctx.fallback_applied
+                            )
+                            _forensics_stage_duration.record(
+                                duration_ms,
+                                attributes={
+                                    "stage": stage.name,
+                                    "artifact_type": ctx.artifact_type,
+                                    "required": stage.required,
+                                    "status": status,
+                                },
+                            )
+                            records.append(
+                                StageRecord(stage.name, started, completed_at, status, notes)
+                            )
+                            pipeline_span.set_status(
+                                Status(StatusCode.ERROR, f"Stage {stage.name} failed")
+                            )
+                            raise
+                    finally:
+                        completed_at = self._now_iso()
+                        duration_ms = (perf_counter() - stage_start) * 1000.0
+                        stage_span.set_attribute("forensics.stage.duration_ms", duration_ms)
+                        stage_span.set_attribute("forensics.stage.status", status)
+                        stage_span.set_attribute(
+                            "forensics.stage.notes_count", len(notes)
+                        )
+                        stage_span.set_attribute(
+                            "forensics.stage.fallback_applied", ctx.fallback_applied
+                        )
+                        _forensics_stage_duration.record(
+                            duration_ms,
+                            attributes={
+                                "stage": stage.name,
+                                "artifact_type": ctx.artifact_type,
+                                "required": stage.required,
+                                "status": status,
+                            },
+                        )
+                records.append(
+                    StageRecord(stage.name, started, completed_at, status, notes)
+                )
+
+            pipeline_duration_ms = (perf_counter() - pipeline_start) * 1000.0
+            pipeline_span.set_attribute(
+                "forensics.pipeline.duration_ms", pipeline_duration_ms
+            )
+            pipeline_span.set_attribute(
+                "forensics.pipeline.fallback_applied", ctx.fallback_applied
+            )
+
+        return records, pipeline_duration_ms
+
+    def _record_pipeline_metrics(self, ctx: PipelineContext, duration_ms: float) -> None:
+        attributes = {
+            "artifact_type": ctx.artifact_type,
+        }
+        _forensics_pipeline_counter.add(1, attributes=attributes)
+        _forensics_pipeline_duration.record(duration_ms, attributes=attributes)
+        if ctx.fallback_applied:
+            _forensics_fallback_counter.add(1, attributes=attributes)
 
     def _stage_canonicalise(self, ctx: PipelineContext, notes: List[str]) -> None:
         destination_dir = self.base_dir / ctx.file_id / "source"
@@ -662,6 +784,19 @@ class ForensicsService:
         payload["generated_at"] = report.generated_at
         payload.setdefault("artifacts", {})[report.artifact_type] = report.artifact_mapping()
         report_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        checksum = sha256(report_path.read_bytes()).hexdigest()
+        self.chain_ledger.append(
+            actor="forensics.service",
+            action=f"persist:{report.artifact_type}",
+            payload={
+                "file_id": report.file_id,
+                "artifact_type": report.artifact_type,
+                "report_path": report_path,
+                "generated_at": report.generated_at,
+                "checksum_sha256": checksum,
+                "signals": [signal.to_dict() for signal in report.signals],
+            },
+        )
         return report_path
 
     @staticmethod

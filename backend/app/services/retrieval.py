@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Dict, List, Set, Tuple
 
 from qdrant_client.http import models as qmodels
+
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
 
 from ..config import get_settings
 from ..storage.document_store import DocumentStore
@@ -11,7 +15,31 @@ from ..utils.text import hashed_embedding
 from ..utils.triples import extract_entities, normalise_entity_id
 from .forensics import ForensicsService, get_forensics_service
 from .graph import GraphEdge, GraphNode, GraphService, get_graph_service
+from .privilege import (
+    PrivilegeClassifierService,
+    PrivilegeDecision,
+    get_privilege_classifier_service,
+)
 from .vector import VectorService, get_vector_service
+
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+_retrieval_queries_counter = _meter.create_counter(
+    "retrieval_queries_total",
+    unit="1",
+    description="Total retrieval queries processed",
+)
+_retrieval_query_duration = _meter.create_histogram(
+    "retrieval_query_duration_ms",
+    unit="ms",
+    description="Latency of retrieval queries",
+)
+_retrieval_results_histogram = _meter.create_histogram(
+    "retrieval_results_returned",
+    unit="1",
+    description="Number of vector results evaluated per query",
+)
 
 
 @dataclass
@@ -32,9 +60,50 @@ class Trace:
     vector: List[Dict[str, object]]
     graph: Dict[str, List[Dict[str, object]]]
     forensics: List[Dict[str, object]]
+    privilege: Dict[str, object] | None = None
 
     def to_dict(self) -> Dict[str, object]:
-        return {"vector": self.vector, "graph": self.graph, "forensics": self.forensics}
+        payload = {
+            "vector": self.vector,
+            "graph": self.graph,
+            "forensics": self.forensics,
+        }
+        if self.privilege is not None:
+            payload["privilege"] = self.privilege
+        return payload
+
+
+@dataclass
+class QueryMeta:
+    page: int
+    page_size: int
+    total_items: int
+    has_next: bool
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "page": self.page,
+            "page_size": self.page_size,
+            "total_items": self.total_items,
+            "has_next": self.has_next,
+        }
+
+
+@dataclass
+class QueryResult:
+    answer: str
+    citations: List[Citation]
+    trace: Trace
+    meta: QueryMeta
+    has_evidence: bool
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "answer": self.answer,
+            "citations": [citation.to_dict() for citation in self.citations],
+            "traces": self.trace.to_dict(),
+            "meta": self.meta.to_dict(),
+        }
 
 
 class RetrievalService:
@@ -44,26 +113,219 @@ class RetrievalService:
         graph_service: GraphService | None = None,
         document_store: DocumentStore | None = None,
         forensics_service: ForensicsService | None = None,
+        privilege_classifier: PrivilegeClassifierService | None = None,
     ) -> None:
         self.settings = get_settings()
         self.vector_service = vector_service or get_vector_service()
         self.graph_service = graph_service or get_graph_service()
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.forensics_service = forensics_service or get_forensics_service()
+        self.privilege_classifier = privilege_classifier or get_privilege_classifier_service()
 
-    def query(self, question: str, top_k: int = 5) -> Dict[str, object]:
-        query_vector = hashed_embedding(question, self.settings.qdrant_vector_size)
-        results = self.vector_service.search(query_vector, top_k=top_k)
-        citations = self._build_citations(results)
-        vector_entities = self._collect_entities(results)
-        entity_ids = self._augment_entity_ids(question, vector_entities)
-        trace, relation_statements = self._build_trace(results, entity_ids)
-        summary = self._compose_answer(question, results, relation_statements)
-        return {
-            "answer": summary,
-            "citations": [citation.to_dict() for citation in citations],
-            "traces": trace.to_dict(),
-        }
+    def query(
+        self,
+        question: str,
+        *,
+        page: int = 1,
+        page_size: int = 10,
+        filters: Dict[str, str] | None = None,
+        rerank: bool = False,
+    ) -> QueryResult:
+        if page < 1:
+            raise ValueError("page must be greater than or equal to 1")
+        if page_size < 1 or page_size > 50:
+            raise ValueError("page_size must be between 1 and 50")
+        start_time = perf_counter()
+        filters = filters or {}
+        allowed_sources = {"local", "s3", "sharepoint", "onedrive", "courtlistener", "websearch"}
+
+        with _tracer.start_as_current_span("retrieval.query") as span:
+            span.set_attribute("retrieval.page", page)
+            span.set_attribute("retrieval.page_size", page_size)
+            span.set_attribute("retrieval.rerank", rerank)
+
+            source_filter = filters.get("source")
+            entity_filter = filters.get("entity")
+            if source_filter:
+                source_filter = source_filter.strip().lower()
+                if source_filter not in allowed_sources:
+                    message = f"Unsupported source filter '{source_filter}'"
+                    span.record_exception(ValueError(message))
+                    span.set_status(Status(StatusCode.ERROR, message))
+                    raise ValueError(message)
+            else:
+                source_filter = None
+            if entity_filter:
+                entity_filter = entity_filter.strip()
+            else:
+                entity_filter = None
+
+            span.set_attribute("retrieval.filters.source", source_filter or "")
+            span.set_attribute("retrieval.filters.entity", entity_filter or "")
+            span.set_attribute("retrieval.filters.applied", bool(source_filter or entity_filter))
+
+            max_window = self.settings.retrieval_max_search_window
+            span.set_attribute("retrieval.search_window.max", max_window)
+            if page_size > max_window:
+                message = "page_size exceeds configured retrieval window"
+                span.record_exception(ValueError(message))
+                span.set_status(Status(StatusCode.ERROR, message))
+                raise ValueError(message)
+            search_window = min(max_window, max(page * page_size * 2, page_size))
+            span.set_attribute("retrieval.search_window", search_window)
+
+            query_vector = hashed_embedding(question, self.settings.qdrant_vector_size)
+            with _tracer.start_as_current_span("retrieval.vector_search") as vector_span:
+                vector_span.set_attribute("retrieval.vector.top_k", search_window)
+                results = self.vector_service.search(query_vector, top_k=search_window)
+                vector_span.set_attribute("retrieval.vector.count", len(results))
+
+            if rerank:
+                with _tracer.start_as_current_span("retrieval.rerank") as rerank_span:
+                    rerank_span.set_attribute("retrieval.rerank.candidates", len(results))
+                    results = self._rerank_results(results, entity_filter)
+                    rerank_span.set_attribute("retrieval.rerank.reordered", len(results))
+
+            filtered_results = self._apply_filters(results, source_filter, entity_filter)
+            span.set_attribute("retrieval.filtered_results", len(filtered_results))
+
+            total_items = len(filtered_results)
+            metric_attrs: Dict[str, object] = {
+                "rerank": rerank,
+                "filter_source": source_filter or "any",
+                "filter_entity": bool(entity_filter),
+            }
+
+            if total_items == 0:
+                has_evidence = False
+                metric_attrs["has_evidence"] = has_evidence
+                duration_ms = (perf_counter() - start_time) * 1000.0
+                span.set_attribute("retrieval.total_items", total_items)
+                span.set_attribute("retrieval.has_evidence", has_evidence)
+                span.set_attribute("retrieval.duration_ms", duration_ms)
+                _retrieval_queries_counter.add(1, attributes=metric_attrs)
+                _retrieval_query_duration.record(duration_ms, attributes=metric_attrs)
+                _retrieval_results_histogram.record(total_items, attributes=metric_attrs)
+                empty_trace = Trace(vector=[], graph={"nodes": [], "edges": []}, forensics=[])
+                meta = QueryMeta(page=page, page_size=page_size, total_items=0, has_next=False)
+                answer = "No supporting evidence found for the supplied query."
+                return QueryResult(
+                    answer=answer,
+                    citations=[],
+                    trace=empty_trace,
+                    meta=meta,
+                    has_evidence=False,
+                )
+
+            start = (page - 1) * page_size
+            end = min(start + page_size, total_items)
+            has_next = end < total_items
+
+            primary_span = filtered_results[: page_size]
+            graph_window = min(self.settings.retrieval_graph_hop_window, max(len(primary_span), 1))
+            graph_seed = filtered_results[:graph_window]
+            vector_entities = self._collect_entities(graph_seed)
+            entity_ids = self._augment_entity_ids(question, vector_entities)
+            with _tracer.start_as_current_span("retrieval.trace_build") as trace_span:
+                trace_span.set_attribute("retrieval.trace.entity_ids", len(entity_ids))
+                trace_full, relation_statements = self._build_trace(filtered_results, entity_ids)
+                trace_span.set_attribute("retrieval.trace.nodes", len(trace_full.graph.get("nodes", [])))
+                trace_span.set_attribute("retrieval.trace.edges", len(trace_full.graph.get("edges", [])))
+            citations_full = self._build_citations(filtered_results)
+
+            page_results = filtered_results[start:end]
+            citations_page = citations_full[start:end] if end > start else []
+            doc_ids_page: Set[str] = set()
+            for point in page_results:
+                payload = point.payload or {}
+                doc_id = payload.get("doc_id")
+                if doc_id is not None:
+                    doc_ids_page.add(str(doc_id))
+
+            vector_trace_page = trace_full.vector[start:end] if end > start else []
+            forensics_trace_page = [
+                entry for entry in trace_full.forensics if entry.get("document_id") in doc_ids_page
+            ]
+            if doc_ids_page:
+                graph_edges_page = [
+                    edge
+                    for edge in trace_full.graph.get("edges", [])
+                    if (
+                        edge.get("properties", {}).get("doc_id") in doc_ids_page
+                        or edge.get("source") in doc_ids_page
+                        or edge.get("target") in doc_ids_page
+                    )
+                ]
+                graph_node_ids = {
+                    edge.get("source") for edge in graph_edges_page
+                } | {
+                    edge.get("target") for edge in graph_edges_page
+                }
+                graph_nodes_page = [
+                    node
+                    for node in trace_full.graph.get("nodes", [])
+                    if node.get("id") in graph_node_ids
+                ]
+            else:
+                graph_edges_page = []
+                graph_nodes_page = []
+
+            relation_statements_page = [
+                statement
+                for statement, doc_id in relation_statements
+                if doc_id is None or doc_id in doc_ids_page
+            ]
+
+            privilege_full = trace_full.privilege or {
+                "decisions": [],
+                "aggregate": {"label": "unknown", "score": 0.0, "flagged": []},
+            }
+            privilege_page = self._page_privilege_trace(privilege_full, doc_ids_page)
+
+            trace_page = Trace(
+                vector=vector_trace_page,
+                graph={"nodes": graph_nodes_page, "edges": graph_edges_page},
+                forensics=forensics_trace_page,
+                privilege=privilege_page,
+            )
+            privilege_label = privilege_page.get("aggregate", {}).get("label", "unknown")
+            privilege_flagged = privilege_page.get("aggregate", {}).get("flagged", [])
+            span.set_attribute("retrieval.privilege.label", privilege_label)
+            span.set_attribute("retrieval.privilege.flagged", len(privilege_flagged))
+            metric_attrs["privilege_label"] = privilege_label
+            metric_attrs["privilege_flagged"] = bool(privilege_flagged)
+
+            answer = self._compose_answer(question, page_results, relation_statements_page)
+            if start >= total_items:
+                answer = (
+                    f"{answer} No additional supporting evidence available for page {page}; "
+                    "adjust pagination or filters to view existing evidence."
+                )
+            
+            meta = QueryMeta(
+                page=page,
+                page_size=page_size,
+                total_items=total_items,
+                has_next=has_next,
+            )
+
+            has_evidence = True
+            metric_attrs["has_evidence"] = has_evidence
+            duration_ms = (perf_counter() - start_time) * 1000.0
+            span.set_attribute("retrieval.total_items", total_items)
+            span.set_attribute("retrieval.has_evidence", has_evidence)
+            span.set_attribute("retrieval.duration_ms", duration_ms)
+            _retrieval_queries_counter.add(1, attributes=metric_attrs)
+            _retrieval_query_duration.record(duration_ms, attributes=metric_attrs)
+            _retrieval_results_histogram.record(total_items, attributes=metric_attrs)
+
+            return QueryResult(
+                answer=answer,
+                citations=citations_page,
+                trace=trace_page,
+                meta=meta,
+                has_evidence=True,
+            )
 
     def _build_citations(self, results: List[qmodels.ScoredPoint]) -> List[Citation]:
         citations: List[Citation] = []
@@ -114,7 +376,7 @@ class RetrievalService:
 
     def _build_trace(
         self, results: List[qmodels.ScoredPoint], entity_ids: List[str]
-    ) -> Tuple[Trace, List[str]]:
+    ) -> Tuple[Trace, List[Tuple[str, str | None]]]:
         vector_trace = [
             {
                 "id": str(point.id),
@@ -126,8 +388,8 @@ class RetrievalService:
         forensics_trace = self._build_forensics_trace(results)
         node_map: Dict[str, GraphNode] = {}
         edge_bucket: Dict[Tuple[str, str, str, object], GraphEdge] = {}
-        relation_statements: List[str] = []
-        statement_seen: Set[str] = set()
+        relation_statements: List[Tuple[str, str | None]] = []
+        statement_seen: Set[Tuple[str, str | None]] = set()
         for entity_id in entity_ids:
             try:
                 node_list, edge_list = self.graph_service.neighbors(entity_id)
@@ -141,9 +403,14 @@ class RetrievalService:
                     edge_bucket[key] = edge
                 if edge.type != "MENTIONS":
                     statement = self._format_relation_statement(edge, node_map)
-                    if statement and statement not in statement_seen:
-                        statement_seen.add(statement)
-                        relation_statements.append(statement)
+                    if not statement:
+                        continue
+                    doc_id_raw = edge.properties.get("doc_id")
+                    doc_id = str(doc_id_raw) if doc_id_raw is not None else None
+                    statement_key = (statement, doc_id)
+                    if statement_key not in statement_seen:
+                        statement_seen.add(statement_key)
+                        relation_statements.append(statement_key)
         graph_trace = {
             "nodes": [
                 {"id": node.id, "type": node.type, "properties": node.properties}
@@ -159,7 +426,54 @@ class RetrievalService:
                 for edge in edge_bucket.values()
             ],
         }
-        return Trace(vector=vector_trace, graph=graph_trace, forensics=forensics_trace), relation_statements
+        privilege_trace = self._build_privilege_trace(results)
+        trace = Trace(
+            vector=vector_trace,
+            graph=graph_trace,
+            forensics=forensics_trace,
+            privilege=privilege_trace,
+        )
+        return trace, relation_statements
+
+    def _build_privilege_trace(self, results: List[qmodels.ScoredPoint]) -> Dict[str, object]:
+        decisions: List[PrivilegeDecision] = []
+        for point in results:
+            payload = point.payload or {}
+            doc_id = payload.get("doc_id")
+            if doc_id is None:
+                continue
+            text = payload.get("text")
+            metadata = {key: value for key, value in payload.items() if key != "text"}
+            decision = self.privilege_classifier.classify(str(doc_id), str(text or ""), metadata)
+            decisions.append(decision)
+        return self.privilege_classifier.format_trace(decisions)
+
+    def _page_privilege_trace(
+        self, privilege_trace: Dict[str, object], doc_ids: Set[str]
+    ) -> Dict[str, object]:
+        if not doc_ids:
+            return {"decisions": [], "aggregate": privilege_trace.get("aggregate", {})}
+        decisions_payload = privilege_trace.get("decisions", [])
+        filtered_payload = [
+            decision
+            for decision in decisions_payload
+            if str(decision.get("doc_id")) in doc_ids
+        ]
+        decisions = [
+            PrivilegeDecision(
+                doc_id=str(item.get("doc_id", "")),
+                label=str(item.get("label", "unknown")),
+                score=float(item.get("score", 0.0)),
+                explanation=str(item.get("explanation", "")),
+                source=str(item.get("source", "classifier")),
+            )
+            for item in filtered_payload
+        ]
+        summary = self.privilege_classifier.aggregate(decisions)
+        return {
+            "decisions": filtered_payload,
+            "aggregate": summary.to_dict(),
+        }
 
     def _build_forensics_trace(
         self, results: List[qmodels.ScoredPoint]
@@ -201,6 +515,123 @@ class RetrievalService:
                 }
             )
         return entries
+
+    def _apply_filters(
+        self,
+        results: List[qmodels.ScoredPoint],
+        source_filter: str | None,
+        entity_filter: str | None,
+    ) -> List[qmodels.ScoredPoint]:
+        if source_filter is None and entity_filter is None:
+            return results
+        filtered: List[qmodels.ScoredPoint] = []
+        doc_cache: Dict[str, Dict[str, object]] = {}
+        entity_cache: Dict[str, List[GraphNode]] = {}
+        for point in results:
+            payload = point.payload or {}
+            raw_doc = payload.get("doc_id")
+            doc_id = str(raw_doc) if raw_doc is not None else None
+            if source_filter and not self._matches_source(payload, source_filter, doc_id, doc_cache):
+                continue
+            if entity_filter and not self._matches_entity(payload, entity_filter, doc_id, entity_cache, doc_cache):
+                continue
+            filtered.append(point)
+        return filtered
+
+    def _matches_source(
+        self,
+        payload: Dict[str, object],
+        source_filter: str,
+        doc_id: str | None,
+        doc_cache: Dict[str, Dict[str, object]],
+    ) -> bool:
+        payload_source = str(payload.get("source_type", "")).lower()
+        if payload_source == source_filter:
+            return True
+        if doc_id is None:
+            return False
+        if doc_id not in doc_cache:
+            try:
+                doc_cache[doc_id] = self.document_store.read_document(doc_id)
+            except FileNotFoundError:
+                doc_cache[doc_id] = {}
+        record_source = str(doc_cache[doc_id].get("source_type", "")).lower()
+        return record_source == source_filter
+
+    def _matches_entity(
+        self,
+        payload: Dict[str, object],
+        entity_filter: str,
+        doc_id: str | None,
+        entity_cache: Dict[str, List[GraphNode]],
+        doc_cache: Dict[str, Dict[str, object]],
+    ) -> bool:
+        token = entity_filter.lower()
+        labels = [str(label) for label in payload.get("entity_labels", [])]
+        ids = [str(identifier) for identifier in payload.get("entity_ids", [])]
+        if any(token in label.lower() for label in labels):
+            return True
+        if any(token == identifier.lower() for identifier in ids):
+            return True
+        if doc_id is None:
+            return False
+        if doc_id not in doc_cache:
+            try:
+                doc_cache[doc_id] = self.document_store.read_document(doc_id)
+            except FileNotFoundError:
+                doc_cache[doc_id] = {}
+        record = doc_cache[doc_id]
+        record_labels = [str(label) for label in record.get("entity_labels", [])]
+        record_ids = [str(identifier) for identifier in record.get("entity_ids", [])]
+        if any(token in label.lower() for label in record_labels):
+            return True
+        if any(token == identifier.lower() for identifier in record_ids):
+            return True
+        if doc_id not in entity_cache:
+            mapping = self.graph_service.document_entities([doc_id])
+            entity_cache[doc_id] = mapping.get(doc_id, [])
+        for node in entity_cache.get(doc_id, []):
+            label = str(node.properties.get("label", "")).lower()
+            if token in label:
+                return True
+            if token == node.id.lower():
+                return True
+        return False
+
+    def _rerank_results(
+        self,
+        results: List[qmodels.ScoredPoint],
+        entity_filter: str | None,
+    ) -> List[qmodels.ScoredPoint]:
+        if not results:
+            return results
+        entity_token = entity_filter.lower() if entity_filter else None
+        forensics_cache: Dict[str, bool] = {}
+        ranked: List[Tuple[float, qmodels.ScoredPoint]] = []
+        for point in results:
+            payload = point.payload or {}
+            base_score = float(point.score or 0.0)
+            boost = 0.0
+            labels = [str(label) for label in payload.get("entity_labels", [])]
+            ids = [str(identifier) for identifier in payload.get("entity_ids", [])]
+            if entity_token:
+                if any(entity_token in label.lower() for label in labels) or any(
+                    entity_token == identifier.lower() for identifier in ids
+                ):
+                    boost += 0.25
+            boost += min(0.15, 0.02 * len(labels))
+            raw_doc = payload.get("doc_id")
+            doc_id = str(raw_doc) if raw_doc is not None else None
+            if doc_id:
+                artifact = self._artifact_name_for_type(payload.get("doc_type") or payload.get("type"))
+                if artifact:
+                    if doc_id not in forensics_cache:
+                        forensics_cache[doc_id] = self.forensics_service.report_exists(doc_id, artifact)
+                    if forensics_cache[doc_id]:
+                        boost += 0.05
+            ranked.append((base_score + boost, point))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in ranked]
 
     @staticmethod
     def _artifact_name_for_type(doc_type: str | None) -> str | None:

@@ -21,7 +21,9 @@ Environment
 - Create `.env` with: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `VECTOR_DIR=./storage/vector`
 
 Install (suggested commands)
-- Python: create venv, install backend deps (to be defined in project setup)
+- Backend Python stack:
+  1. Run `./scripts/bootstrap_backend.sh` (creates `.venv` locally; respects `CI` to avoid nested venvs).
+  2. Activate via `source .venv/bin/activate` when working locally; the bootstrap step installs runtime deps plus `ruff`, `mypy`, and `pytest` for parity with CI.
 - Node: install UI deps when UI folder is added
 
 Reference SDK acquisition
@@ -43,6 +45,11 @@ Reference SDK acquisition
 
 Run
 - Use Docker Compose (to be added) to bring up api, Neo4j, and vector DB
+- Python quality gates (mirrors CI):
+  - `ruff check backend`
+  - `mypy --config-file mypy.ini backend`
+  - `PYTHONPATH=. pytest backend/tests -q --cov=backend/app --cov-report=xml --cov-report=html`
+- Coverage artifacts land in `coverage.xml` and `htmlcov/` (uploaded by CI for inspection).
 - Forensics artifacts output to `./storage/forensics/{fileId}/` once implemented
 
 ## 4) Key Components
@@ -53,6 +60,7 @@ Run
 ## 5) Dev Workflow
 - Draft/refine PRPs; implement minimal diffs; validate via gates
 - Conventional commits; small PRs; OTel traces in agents workflow
+- Backend CI (`.github/workflows/backend_ci.yml`) runs on pushes/PRs touching backend tooling; it bootstraps via `scripts/bootstrap_backend.sh`, caches heavy wheels (pandas/scikit-learn) using uv/pip caches, runs lint/type/test suites, and publishes coverage + pytest artefacts to the PR.
 
 ## 6) Architecture Decisions
 - Local-first RAG; GraphRAG via Neo4j; MS Agents for workflow; Swarms for roles

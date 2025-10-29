@@ -1,0 +1,62 @@
+# Phase 10 Execution Plan — Background Ingestion Workers
+
+- ## Context
+  - ### Objectives
+    - Introduce durable background ingestion workers decoupling request handling per PRP Phase 10 scope.
+    - Provide deterministic queue semantics with idempotent job handling and observable status transitions.
+    - Extend regression coverage to validate async lifecycle and polling behaviour.
+  - ### Inputs
+    - Spec sections: APIs.POST /ingest, GET /ingest/{job_id}; Scalability requirements in PRP tasks doc.
+    - Existing synchronous ingestion pipeline in `backend/app/services/ingestion.py`.
+    - Job manifest storage under `storage/jobs/`.
+  - ### Exit Criteria
+    - `/ingest` returns 202 with queued status while worker processes job asynchronously.
+    - Queue prevents duplicate job execution and surfaces saturation gracefully.
+    - `backend/tests/test_ingestion_async.py` validates enqueue → running → succeeded transitions and polling semantics.
+    - Documentation + stewardship artefacts updated (tasks checklist, build log, memory, ACE state).
+
+- ## Phase Breakdown
+  - ### Phase A — Queue Architecture
+    - #### A1 — Define worker abstractions
+      - Create `backend/app/services/ingestion_worker.py` with `IngestionTask`, `IngestionWorker`, exceptions, and idle waiting utilities.
+      - Support configurable concurrency + queue depth (new settings fields).
+    - #### A2 — Lifecycle management hooks
+      - Provide module-level `get_ingestion_worker()` and `shutdown_ingestion_worker()` entrypoints.
+      - Register `atexit` shutdown guard; expose FastAPI startup/shutdown hooks.
+  - ### Phase B — Service Refactor
+    - #### B1 — Split enqueue vs. execution
+      - Refactor `IngestionService.ingest` to create manifests then enqueue via worker.
+      - Extract new `process_job` (or `_execute_job`) performing current ingestion loop with idempotent checks.
+    - #### B2 — Error propagation + idempotency
+      - Ensure duplicate submissions raise HTTP 409; queue saturation yields 503 with manifest annotated failure.
+      - Persist intermediate states (`queued`, `running`, `succeeded`/`failed`) exactly once.
+  - ### Phase C — FastAPI Integration
+    - #### C1 — Dependency wiring
+      - Update `get_ingestion_service()` to inject shared worker reference.
+      - Amend `main.py` startup/shutdown events to manage worker lifecycle.
+    - #### C2 — Status endpoint alignment
+      - Confirm `/ingest/{job_id}` uses 202 for non-terminal states (already implemented) but add regression verifying asynchronous path.
+  - ### Phase D — Testing & Tooling
+    - #### D1 — Async lifecycle regression
+      - Author `backend/tests/test_ingestion_async.py` covering queue capacity, duplicate guard, and status polling.
+      - Update existing API integration tests to poll for completion before downstream assertions.
+    - #### D2 — Fixtures & utilities
+      - Provide helper for waiting on job manifests; ensure worker teardown between tests if necessary.
+  - ### Phase E — Documentation & Stewardship
+    - #### E1 — Update PRP task checklist to mark background worker tasks complete.
+    - #### E2 — Record build log entry + memory/ACE note; append stewardship chain entry in root `AGENTS.md`.
+
+- ## Decision Log
+  - ### Queue Implementation Choice
+    - Adopt in-process threaded worker leveraging `queue.Queue` to avoid external dependencies while satisfying PRP requirement for deterministic task queue semantics.
+    - Track pending job IDs to enforce idempotency within the process boundary.
+  - ### Failure Handling Strategy
+    - Saturation or duplicate enqueue results in immediate HTTP error and manifest annotations to aid observability.
+    - Worker exceptions rely on existing ingestion error capture to persist diagnostics.
+  - ### Testing Approach
+    - Integration-first coverage ensures API contracts remain intact under async semantics.
+    - Dedicated unit-style tests validate queue edge cases without relying on wall-clock flakiness via bounded waits.
+
+- ## Open Questions / Future Enhancements
+  - Should we persist queue state across restarts (future extension: durable queue backing store)?
+  - Evaluate multi-process worker scaling once deployment topology demands >1 concurrency.

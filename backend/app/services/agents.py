@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 from uuid import uuid4
 
 from ..config import get_settings
+from ..security.authz import Principal
 from ..storage.agent_memory_store import AgentMemoryStore, AgentThreadRecord
 from ..storage.document_store import DocumentStore
+from ..utils.audit import AuditEvent, get_audit_trail
 from .forensics import ForensicsService, get_forensics_service
-from .retrieval import RetrievalService, get_retrieval_service
+from .retrieval import QueryResult, RetrievalService, get_retrieval_service
 
 
 def _now() -> datetime:
@@ -109,6 +112,11 @@ class QAAgent:
         vector_hits = len(traces.get("vector", []))
         graph_nodes = len(graph.get("nodes", []))
         graph_edges = len(graph.get("edges", []))
+        privilege = traces.get("privilege", {})
+        privileged_docs = [
+            item for item in privilege.get("decisions", []) if item.get("label") == "privileged"
+        ]
+        privilege_max = max((float(item.get("score", 0.0)) for item in privilege.get("decisions", [])), default=0.0)
         artifacts: List[Dict[str, Any]] = forensics_bundle.get("artifacts", [])
         artifact_count = len(artifacts)
         forensics_signals = sum(len(item.get("signals", [])) for item in artifacts)
@@ -197,6 +205,8 @@ class QAAgent:
             7.0,
             0.5 if forensics_signals == 0 else 0.2,
             0.4 if artifact_count else 0.0,
+            (-0.8 if privileged_docs else 0.0),
+            (-0.4 if privilege_max >= 0.8 else (-0.2 if privilege_max >= 0.6 else 0.0)),
         )
         scores["Enterprise Value"] = score(
             7.1,
@@ -211,6 +221,9 @@ class QAAgent:
             f"Citations: {len(citations)}; Forensics artifacts: {artifact_count}; Graph edges: {graph_edges}.",
             f"Total runtime: {round(total_duration, 2)} ms across {len(turn_roles)} turns.",
         ]
+        if privileged_docs:
+            doc_list = ", ".join(item.get("doc_id", "?") for item in privileged_docs)
+            notes.append(f"Privilege alerts: {len(privileged_docs)} document(s) flagged ({doc_list}).")
         return scores, notes, average
 
 
@@ -229,8 +242,17 @@ class AgentsService:
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.memory_store = memory_store or AgentMemoryStore(self.settings.agent_threads_dir)
         self.qa_agent = qa_agent or QAAgent()
+        self.audit = get_audit_trail()
 
-    def run_case(self, case_id: str, question: str, *, top_k: int = 5) -> Dict[str, Any]:
+    def run_case(
+        self,
+        case_id: str,
+        question: str,
+        *,
+        top_k: int = 5,
+        principal: Principal | None = None,
+    ) -> Dict[str, Any]:
+        actor = self._actor_from_principal(principal)
         thread = AgentThread(
             thread_id=str(uuid4()),
             case_id=case_id,
@@ -238,14 +260,24 @@ class AgentsService:
             created_at=_now(),
             updated_at=_now(),
         )
+        self._audit_agents_event(
+            action="agents.thread.created",
+            outcome="accepted",
+            subject={"thread_id": thread.thread_id, "case_id": case_id},
+            metadata={"question_length": len(question), "top_k": top_k},
+            actor=actor,
+            correlation_id=thread.thread_id,
+        )
 
         research_turn, retrieval_output = self._execute_research(question, top_k)
         thread.turns.append(research_turn)
         thread.final_answer = retrieval_output.get("answer", "")
         thread.citations = retrieval_output.get("citations", [])
+        self._audit_turn(thread, research_turn, actor)
 
         forensics_turn, forensics_bundle = self._collect_forensics(thread.citations)
         thread.turns.append(forensics_turn)
+        self._audit_turn(thread, forensics_turn, actor)
 
         telemetry_context = self._base_telemetry(retrieval_output, forensics_bundle, thread.turns)
 
@@ -253,9 +285,22 @@ class AgentsService:
         thread.turns.append(qa_turn)
         thread.qa_scores = qa_turn.output.get("scores", {})
         thread.qa_notes = qa_turn.output.get("notes", [])
+        self._audit_turn(thread, qa_turn, actor)
 
         thread.telemetry = self._finalise_telemetry(telemetry_context, thread.turns, qa_turn.output)
         thread.updated_at = _now()
+        self._audit_agents_event(
+            action="agents.thread.completed",
+            outcome="success",
+            subject={"thread_id": thread.thread_id, "case_id": case_id},
+            metadata={
+                "final_answer_length": len(thread.final_answer),
+                "qa_average": qa_turn.output.get("average"),
+                "turn_count": len(thread.turns),
+            },
+            actor=actor,
+            correlation_id=thread.thread_id,
+        )
 
         record = thread.to_record()
         self.memory_store.write(record)
@@ -269,7 +314,8 @@ class AgentsService:
 
     def _execute_research(self, question: str, top_k: int) -> Tuple[AgentTurn, Dict[str, Any]]:
         started = _now()
-        output = self.retrieval_service.query(question, top_k=top_k)
+        result = self.retrieval_service.query(question, page_size=top_k)
+        output = result.to_dict() if isinstance(result, QueryResult) else result
         completed = _now()
         metrics = {
             "vector_hits": len(output.get("traces", {}).get("vector", [])),
@@ -277,6 +323,11 @@ class AgentsService:
             "graph_edges": len(output.get("traces", {}).get("graph", {}).get("edges", [])),
             "citations": len(output.get("citations", [])),
         }
+        privilege = output.get("traces", {}).get("privilege", {})
+        metrics["privileged_docs"] = sum(
+            1 for item in privilege.get("decisions", []) if item.get("label") == "privileged"
+        )
+        metrics["privilege_label"] = privilege.get("aggregate", {}).get("label", "unknown")
         turn = AgentTurn(
             role="research",
             action="retrieve_context",
@@ -382,6 +433,12 @@ class AgentsService:
             "turn_roles": [turn.role for turn in turns],
             "durations_ms": [round(turn.duration_ms(), 2) for turn in turns],
         }
+        privilege = traces.get("privilege", {})
+        telemetry["privileged_docs"] = sum(
+            1 for item in privilege.get("decisions", []) if item.get("label") == "privileged"
+        )
+        telemetry["privilege_label"] = privilege.get("aggregate", {}).get("label", "unknown")
+        telemetry["privilege_score"] = privilege.get("aggregate", {}).get("score", 0.0)
         telemetry["total_duration_ms"] = round(sum(telemetry["durations_ms"]), 2)
         telemetry["sequence_valid"] = telemetry["turn_roles"] == ["research", "forensics"]
         return telemetry
@@ -400,6 +457,76 @@ class AgentsService:
         telemetry["sequence_valid"] = telemetry["turn_roles"] == ["research", "forensics", "qa"]
         telemetry["qa_average"] = qa_output.get("average")
         return telemetry
+
+    def _system_actor(self) -> Dict[str, Any]:
+        return {"id": "agents-orchestrator", "type": "system", "roles": ["System"]}
+
+    def _actor_from_principal(self, principal: Principal | None) -> Dict[str, Any]:
+        if principal is None:
+            return self._system_actor()
+        actor = {
+            "id": principal.client_id,
+            "subject": principal.subject,
+            "tenant_id": principal.tenant_id,
+            "roles": sorted(principal.roles),
+            "scopes": sorted(principal.scopes),
+            "case_admin": principal.case_admin,
+            "token_roles": sorted(principal.token_roles),
+            "certificate_roles": sorted(principal.certificate_roles),
+        }
+        fingerprint = principal.attributes.get("fingerprint") or principal.attributes.get("certificate_fingerprint")
+        if fingerprint:
+            actor["fingerprint"] = fingerprint
+        return actor
+
+    def _audit_agents_event(
+        self,
+        *,
+        action: str,
+        outcome: str,
+        subject: Dict[str, Any],
+        metadata: Dict[str, Any] | None,
+        actor: Dict[str, Any],
+        correlation_id: str,
+        severity: str = "info",
+    ) -> None:
+        event = AuditEvent(
+            category="agents",
+            action=action,
+            actor=actor,
+            subject=subject,
+            outcome=outcome,
+            severity=severity,
+            correlation_id=correlation_id,
+            metadata=metadata or {},
+        )
+        self._safe_audit(event)
+
+    def _audit_turn(self, thread: AgentThread, turn: AgentTurn, actor: Dict[str, Any]) -> None:
+        metadata = {
+            "role": turn.role,
+            "action": turn.action,
+            "duration_ms": round(turn.duration_ms(), 2),
+            "metrics": dict(turn.metrics),
+        }
+        subject = {"thread_id": thread.thread_id, "case_id": thread.case_id, "turn_role": turn.role}
+        self._audit_agents_event(
+            action=f"agents.turn.{turn.role}",
+            outcome="success",
+            subject=subject,
+            metadata=metadata,
+            actor=actor,
+            correlation_id=thread.thread_id,
+        )
+
+    def _safe_audit(self, event: AuditEvent) -> None:
+        try:
+            self.audit.append(event)
+        except Exception:  # pragma: no cover - guard rail for audit persistence
+            logging.getLogger("backend.services.agents").exception(
+                "Failed to append agents audit event",
+                extra={"category": event.category, "action": event.action},
+            )
 
 
 _AGENTS_SERVICE: AgentsService | None = None

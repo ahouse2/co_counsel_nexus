@@ -8,6 +8,8 @@ venv/
 node_modules/
 .next/
 dist/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # Env & local
 .env
@@ -19,6 +21,10 @@ backend/app/storage/__pycache__/
 # Logs
 *.log
 build_logs/*.jsonl
+coverage.xml
+.coverage
+htmlcov/
+pytest-backend.xml
 
 # Misc
 .DS_Store

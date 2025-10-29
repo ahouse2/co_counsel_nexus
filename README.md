@@ -1,0 +1,1 @@
+donations accepted. cash preferred, tacos also welcome. trying to stock my bunker for the pending +18 only AI takeover/ singularity party, invitations are open, BYOB+1 (bring your own b***h, +1) for entry. inquire within for deets

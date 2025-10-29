@@ -93,12 +93,21 @@ class TraceModel(BaseModel):
     vector: List[dict]
     graph: dict
     forensics: List[dict] = Field(default_factory=list)
+    privilege: Optional[dict] = None
+
+
+class QueryPaginationModel(BaseModel):
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=50)
+    total_items: int = Field(ge=0)
+    has_next: bool
 
 
 class QueryResponse(BaseModel):
     answer: str
     citations: List[CitationModel]
     traces: TraceModel
+    meta: QueryPaginationModel
 
 
 class TimelineEventModel(BaseModel):
@@ -107,10 +116,20 @@ class TimelineEventModel(BaseModel):
     title: str
     summary: str
     citations: List[str]
+    entity_highlights: List[dict] = Field(default_factory=list)
+    relation_tags: List[dict] = Field(default_factory=list)
+    confidence: float | None = None
 
 
 class TimelineResponse(BaseModel):
     events: List[TimelineEventModel]
+    meta: Optional["TimelinePaginationModel"] = None
+
+
+class TimelinePaginationModel(BaseModel):
+    cursor: Optional[str] = None
+    limit: int
+    has_more: bool
 
 
 class GraphNodeModel(BaseModel):

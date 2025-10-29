@@ -30,17 +30,32 @@ Phase 5 — Multi‑Agent + ACE
 - [x] MS Agents workflow nodes; memory threads
 - [x] ACE trio orchestration; telemetry spans
 - [x] QAAgent with rubric scoring and citation audit
+  - [ ] **Follow-on hardening** — extend TimelineAgent playbooks with retry/circuit breaker patterns, persist agent trace spans, and surface structured error taxonomy for downstream escalation.
+  - [ ] **KnowledgeOps toolkit** — codify agent scaffolds (prompt packs, evaluation harness, deterministic fixtures) so new research or compliance agents can be added with <4h onboarding.
 
 Phase 6 — Timeline
-- [ ] Event extraction from KG; API: GET /timeline
+- [x] Event extraction from KG; API: GET /timeline
+  - [x] Implement cursor-based pagination, `from_ts`/`to_ts` range filters, and entity scoping backed by graph lookups. (Implemented in `backend/app/services/timeline.py`; verifies naive timestamps + cursor sequencing.)
+  - [ ] Emit telemetry counters/latency histograms; fail closed on malformed cursors with structured 400 responses.
+    - Structured 400s landed; telemetry counters still pending once observability wiring arrives.
+  - [x] Regression-suite coverage for timeline enrichment, pagination, and filter semantics. (`backend/tests/test_api.py::test_timeline_pagination_and_filters`.)
 - [ ] UI timeline with pop‑outs and citations
+  - [ ] Wire streaming data layer to `/timeline` endpoint with optimistic updates + offline cache.
+  - [ ] Provide evidence pop-outs that hydrate citations + forensics deltas; add accessibility narration and keyboard traversal.
 
 Phase 7 — Legal Research & Extended Forensics
 - [ ] CourtListener/web search; privilege detector; chain‑of‑custody
+  - [ ] Integrate external research connectors with rate-limited async agents and cached digests.
+  - [ ] Automate privilege classification with explainable feature attributions + policy overrides.
+  - [ ] Chain-of-custody ledger with cryptographic sealing + audit replay tooling.
 
 Phase 8–9 — API + Frontend
 - [ ] Endpoints: /ingest, /query, /timeline, /graph/neighbor
+  - [ ] Harden authZ/ABAC matrix, enforce scope-aware response shaping, and introduce streaming query responses with back-pressure.
+  - [ ] Graph diff + timeline delta webhooks for agent-triggered notifications.
 - [ ] Neon UI chat stream; citations; basic graph view
+  - [ ] Implement design tokens + dark-mode baseline; ensure WCAG AA contrast.
+  - [ ] Embed timeline + graph canvases with shared selection state + real-time collaboration primitives.
 
 Phase 10 — Testing & Hardening
 - [ ] Unit/integration/e2e/load; security posture review

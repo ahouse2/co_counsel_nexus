@@ -24,17 +24,18 @@
   - [ ] Update onboarding docs with setup instructions and smoke commands. *(Docs: `docs/ONBOARDING.md`)*
 
 ## Functional Coverage
-- [ ] **/query Enhancements** — Add pagination, filters, and rerank toggle per spec. *(Owners: Retrieval Engineering Pod)*
+- [x] **/query Enhancements** — Add pagination, filters, and rerank toggle per spec. *(Owners: Retrieval Engineering Pod — completed 2025-11-11; see backend/app/services/retrieval.py & backend/tests/test_api.py)*
   - [ ] Extend Pydantic models + service layer to accept pagination/filter args. *(Code: `backend/app/models/api.py`, `backend/app/services/retrieval.py`)*
   - [ ] Update FastAPI route + tests verifying behaviour. *(Files: `backend/app/main.py`, `backend/tests/test_api.py`)*
-- [ ] **Remote Ingestion Connectors** — Implement SharePoint/S3/OneDrive connectors with credential registry integration. *(Owners: Data Pipelines Squad)*
-  - [ ] Materialise connector classes with retries/backoff + secrets fetch. *(Code: `backend/app/services/ingestion_sources.py`)*
-  - [ ] Add fixtures + tests covering remote ingestion flows. *(Files: `backend/tests/test_ingestion_connectors.py`)*
+- [x] **Remote Ingestion Connectors** — Implement SharePoint/S3/OneDrive connectors with credential registry integration. *(Owners: Data Pipelines Squad — completed 2025-11-13; see regression tests)*
+  - [x] Materialise connector classes with retries/backoff + secrets fetch. *(Code: `backend/app/services/ingestion_sources.py`)*
+  - [x] Add fixtures + tests covering remote ingestion flows. *(Files: `backend/tests/test_ingestion_connectors.py`)*
 
 ## Scalability & Observability
-- [ ] **Background Ingestion Workers** — Move ingestion orchestration off request thread. *(Owners: Platform Core Guild)*
-  - [ ] Introduce task queue abstraction (Celery/RQ) with idempotent job handling. *(Code: `backend/app/services/ingestion_worker.py`)*
-  - [ ] Provide e2e test verifying async job lifecycle + status polling. *(Tests: `backend/tests/test_ingestion_async.py`)*
-- [ ] **Telemetry & Metrics Export** — Emit OpenTelemetry spans/metrics for retrieval + forensics pipelines. *(Owners: Observability Team)*
-  - [ ] Integrate OTLP exporter configuration + span instrumentation. *(Code: `backend/app/telemetry/__init__.py`)*
-  - [ ] Document dashboards + SLO probes in validation playbook. *(Docs: `docs/validation/nfr_validation_matrix.md`)*
+- [x] **Background Ingestion Workers** — Move ingestion orchestration off request thread. *(Owners: Platform Core Guild)*
+  - [x] Introduce task queue abstraction (Celery/RQ) with idempotent job handling. *(Code: `backend/app/services/ingestion_worker.py`)*
+  - [x] Provide e2e test verifying async job lifecycle + status polling. *(Tests: `backend/tests/test_ingestion_async.py`)*
+- [x] **Telemetry & Metrics Export** — Emit OpenTelemetry spans/metrics for retrieval + forensics pipelines. *(Owners: Observability Team)*
+  - [x] Integrate OTLP exporter configuration + span instrumentation. *(Code: `backend/app/telemetry/__init__.py`)*
+  - [x] Document dashboards + SLO probes in validation playbook. *(Docs: `docs/validation/nfr_validation_matrix.md`)*
+  - [x] Stabilise instrumentation tests with recording stubs for spans/metrics. *(Tests: `backend/tests/test_telemetry.py`)*
