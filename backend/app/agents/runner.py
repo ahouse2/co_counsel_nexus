@@ -127,7 +127,14 @@ class MicrosoftAgentsOrchestrator:
             telemetry["turn_roles"].append(turn.role)
             telemetry["durations_ms"].append(round(turn.duration_ms(), 2))
             if index:
-                telemetry["hand_offs"].append((self.graph[index - 1].role, turn.role))
+                previous = self.graph[index - 1]
+                telemetry["hand_offs"].append(
+                    {
+                        "from": previous.role,
+                        "to": turn.role,
+                        "via": tool.name,
+                    }
+                )
             memory.mark_updated()
 
             if definition.role == "research":
