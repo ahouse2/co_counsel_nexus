@@ -30,8 +30,8 @@ Phase 5 — Multi‑Agent + ACE
 - [x] MS Agents workflow nodes; memory threads
 - [x] ACE trio orchestration; telemetry spans
 - [x] QAAgent with rubric scoring and citation audit
-  - [ ] **Follow-on hardening** — extend TimelineAgent playbooks with retry/circuit breaker patterns, persist agent trace spans, and surface structured error taxonomy for downstream escalation.
-  - [ ] **KnowledgeOps toolkit** — codify agent scaffolds (prompt packs, evaluation harness, deterministic fixtures) so new research or compliance agents can be added with <4h onboarding.
+  - [x] **Follow-on hardening** — extend TimelineAgent playbooks with retry/circuit breaker patterns, persist agent trace spans, and surface structured error taxonomy for downstream escalation.
+  - [x] **KnowledgeOps toolkit** — codify agent scaffolds (prompt packs, evaluation harness, deterministic fixtures) so new research or compliance agents can be added with <4h onboarding.
 
 Phase 6 — Timeline
 - [x] Event extraction from KG; API: GET /timeline

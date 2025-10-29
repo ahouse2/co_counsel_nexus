@@ -192,17 +192,30 @@ class AgentTurnModel(BaseModel):
     metrics: dict
 
 
+class AgentErrorModel(BaseModel):
+    component: str
+    code: str
+    message: str
+    severity: Literal["info", "warning", "error", "critical"]
+    retryable: bool
+    occurred_at: datetime
+    attempt: int
+    context: dict = Field(default_factory=dict)
+
+
 class AgentRunResponse(BaseModel):
     thread_id: str
     case_id: str
     question: str
     created_at: datetime
     updated_at: datetime
+    status: Literal["pending", "succeeded", "failed", "degraded"]
     final_answer: str
     citations: List[CitationModel]
     qa_scores: Dict[str, float]
     qa_notes: List[str]
     turns: List[AgentTurnModel]
+    errors: List[AgentErrorModel]
     telemetry: dict
 
 

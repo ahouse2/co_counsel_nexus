@@ -1,0 +1,77 @@
+meta:
+  name: KnowledgeOps Compliance Baseline
+  version: "2025.11.18"
+  agent_type: compliance
+  description: >-
+    Prompt pack for compliance reviewers assessing privilege leakage, regulatory exposure,
+    and remediation steps for KnowledgeOps deployments.
+  tags:
+    - compliance
+    - privilege
+  maintainers:
+    - name: Compliance Controls Working Group
+      email: compliance@cocounsel.example
+prompts:
+  - id: privilege_review
+    version: 1.0.0
+    description: Evaluate documents for privilege exposure and recommend escalation actions.
+    inputs:
+      - question
+      - context
+      - references
+    messages:
+      - role: system
+        template: |-
+          You are reviewing work-product for privilege and confidentiality leakage.
+          Classify each cited document as privileged, potentially privileged, or safe to disclose.
+          Provide justification tied to policy clauses (e.g., attorney-client, work-product).
+          Recommend next actions: escalate, redact, or proceed. Output as markdown list.
+      - role: user
+        template: |-
+          ### Review Brief
+          {question}
+
+          ### Context Provided
+          {context}
+
+          ### Evidence
+          {references}
+    metadata:
+      compliance:
+        citation_policy: cite-or-silence
+        privilege_policy: escalate
+      evaluation:
+        metrics:
+          - max_privileged_documents
+          - contains
+  - id: regulatory_gap_analysis
+    version: 1.0.0
+    description: Map findings to regulatory obligations and highlight remediation gaps.
+    inputs:
+      - question
+      - context
+      - references
+    messages:
+      - role: system
+        template: |-
+          Analyse the scenario against SEC disclosure, GDPR data minimisation, and local retention mandates.
+          Identify gaps, cite evidence, and propose remediation tasks with owners and deadlines.
+          Use structured markdown with sections for Findings, Impacted Regulations, Remediation.
+      - role: user
+        template: |-
+          #### Scenario
+          {question}
+
+          #### Operational Context
+          {context}
+
+          #### Documents
+          {references}
+    metadata:
+      compliance:
+        citation_policy: cite-or-silence
+        privilege_policy: mitigate
+      evaluation:
+        metrics:
+          - required_documents
+          - minimum_citations

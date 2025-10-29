@@ -1,0 +1,84 @@
+{
+  "name": "knowledgeops_compliance_baseline",
+  "version": "2025.11.18",
+  "agent_type": "compliance",
+  "seed": 991,
+  "metadata": {
+    "programme": "KnowledgeOps Compliance",
+    "regimes": ["SEC", "GDPR"]
+  },
+  "cases": [
+    {
+      "id": "privilege_hotlist",
+      "question": "Identify privileged content in the Beacon diligence workspace and recommend escalation paths.",
+      "context": "Workspace includes board decks, attorney communications, and customer migration plans. Privilege review must be completed before data room disclosure.",
+      "documents": [
+        {
+          "id": "doc-A",
+          "title": "Outside Counsel Email — 18 February 2023",
+          "snippets": [
+            "Attorney-client analysis of potential indemnities; marked privileged and confidential.",
+            "Contains draft negotiation language not yet shared with counterparty."
+          ],
+          "source": "local"
+        },
+        {
+          "id": "doc-B",
+          "title": "Migration Plan Summary — 22 February 2023",
+          "snippets": [
+            "Operational runbook for data warehouse cutover with customer communication templates.",
+            "No legal commentary present; suitable for cross-functional review once customer consent refresh completes."
+          ],
+          "source": "local"
+        }
+      ],
+      "expected": {
+        "contains": ["escalate", "privileged"],
+        "minimum_citations": 2,
+        "required_documents": ["doc-A"],
+        "max_privileged_documents": 1,
+        "max_latency_ms": 1200
+      },
+      "metadata": {
+        "tags": ["privilege", "escalation"],
+        "owner": "Legal Ops"
+      }
+    },
+    {
+      "id": "regulatory_gap_tracker",
+      "question": "Map outstanding regulatory obligations for the Acme/Beacon integration and propose remediation owners.",
+      "context": "Integration programme runs in the US and EU; regulators expect updated DPIA and refreshed customer notices prior to close.",
+      "documents": [
+        {
+          "id": "doc-C",
+          "title": "Regulatory Checklist — 01 March 2023",
+          "snippets": [
+            "SEC Form 8-K draft complete; awaiting CFO sign-off.",
+            "GDPR DPIA pending; privacy team assigned to deliver final review by 28 March."
+          ],
+          "source": "local"
+        },
+        {
+          "id": "doc-D",
+          "title": "Customer Notice Plan — 05 March 2023",
+          "snippets": [
+            "Consent refresh emails prepared for EU data subjects with rollout scheduled 20 March.",
+            "Includes mitigation plan if opt-out volume exceeds five percent."
+          ],
+          "source": "local"
+        }
+      ],
+      "expected": {
+        "contains": ["DPIA", "Form 8-K"],
+        "minimum_citations": 2,
+        "required_documents": ["doc-C", "doc-D"],
+        "max_privileged_documents": 0,
+        "max_latency_ms": 1300
+      },
+      "metadata": {
+        "tags": ["regulatory", "remediation"],
+        "owner": "Compliance PMO"
+      }
+    }
+  ]
+}

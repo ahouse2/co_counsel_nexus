@@ -33,11 +33,17 @@ def _wait_for_job_completion(job_dir: Path, job_id: str, timeout: float = 10.0) 
         time.sleep(0.05)
 
 
-def _wait_for_job(client: TestClient, job_id: str, timeout: float = 5.0) -> Dict[str, object]:
+def _wait_for_job(
+    client: TestClient,
+    job_id: str,
+    *,
+    timeout: float = 5.0,
+    headers: Dict[str, str] | None = None,
+) -> Dict[str, object]:
     deadline = time.time() + timeout
     last_payload: Dict[str, object] | None = None
     while time.time() < deadline:
-        response = client.get(f"/ingest/{job_id}")
+        response = client.get(f"/ingest/{job_id}", headers=headers)
         assert response.status_code in {200, 202}
         last_payload = response.json()
         status_value = last_payload.get("status")
@@ -45,9 +51,6 @@ def _wait_for_job(client: TestClient, job_id: str, timeout: float = 5.0) -> Dict
             return last_payload
         time.sleep(0.1)
     pytest.fail(f"Ingestion job {job_id} did not reach terminal state; last payload={last_payload}")
-
-
-def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp_path: Path) -> None:
 def test_ingestion_and_retrieval(
     client: TestClient,
     sample_workspace: Path,
@@ -55,6 +58,11 @@ def test_ingestion_and_retrieval(
     auth_headers_factory,
 ) -> None:
     headers = auth_headers_factory()
+    status_headers = auth_headers_factory(
+        scopes=["ingest:status"],
+        roles=["CaseCoordinator", "PlatformEngineer"],
+        audience=["co-counsel.ingest"],
+    )
     response = client.post(
         "/ingest",
         json={"sources": [{"type": "local", "path": str(sample_workspace)}]},
@@ -63,10 +71,9 @@ def test_ingestion_and_retrieval(
     assert response.status_code == 202
     job_id = response.json()["job_id"]
 
-    status_payload = _wait_for_job(client, job_id)
+    status_payload = _wait_for_job(client, job_id, headers=status_headers)
     assert status_payload["status"] == "succeeded"
 
-    job_manifest = _read_job_manifest(Path(os.environ["JOB_STORE_DIR"]), job_id)
     job_manifest = _wait_for_job_completion(Path(os.environ["JOB_STORE_DIR"]), job_id)
     documents = job_manifest["documents"]
     assert len(documents) == 3
@@ -154,8 +161,8 @@ def test_ingestion_and_retrieval(
     totals = financial_forensics.json()["data"]["totals"]
     assert Decimal(totals["amount"]) == Decimal("600.0")
 
-    status_payload = _wait_for_job(client, job_id)
-    status_response = client.get(f"/ingest/{job_id}", headers=headers)
+    status_payload = _wait_for_job(client, job_id, headers=status_headers)
+    status_response = client.get(f"/ingest/{job_id}", headers=status_headers)
     assert status_response.status_code == 200
     status_payload = status_response.json()
     assert status_payload["job_id"] == job_id
@@ -305,6 +312,10 @@ def test_timeline_pagination_and_filters(
 
     invalid_cursor = client.get("/timeline", params={"cursor": "@@bad"}, headers=headers)
     assert invalid_cursor.status_code == 400
+    invalid_payload = invalid_cursor.json()["detail"]
+    assert invalid_payload["code"] == "TIMELINE_CURSOR_INVALID"
+    assert invalid_payload["component"] == "timeline"
+    assert invalid_payload["retryable"] is False
 
     aware_filter = client.get(
         "/timeline",
@@ -312,7 +323,9 @@ def test_timeline_pagination_and_filters(
         headers=headers,
     )
     assert aware_filter.status_code == 400
-    assert "timezone-naive" in aware_filter.json()["detail"]
+    aware_payload = aware_filter.json()["detail"]
+    assert aware_payload["code"] == "TIMELINE_TIMEZONE_AWARE"
+    assert "timezone-naive" in aware_payload["message"]
 
 
 def test_ingestion_validation_errors(client: TestClient, auth_headers_factory) -> None:

@@ -78,6 +78,8 @@ Run
 ## 9) Docs & Resources
 - PRP templates under `AgentsMD_PRPs_and_AgentMemory/PRPs/templates/`
 - Process commands under `AgentsMD_PRPs_and_AgentMemory/.codex/commands/` (e.g., `validate-doc-links`, `sync-reference-assets`; see `rapid-development/experimental/prp-analyze-run.md` for the analysis log template)
+- KnowledgeOps toolkit overview in `agents/toolkit/README.md`
+- Runbooks: [Research Agent](AgentsMD_PRPs_and_AgentMemory/PRPs/RUNBOOK_KnowledgeOps_Research_Agent.md) · [Compliance Agent](AgentsMD_PRPs_and_AgentMemory/PRPs/RUNBOOK_KnowledgeOps_Compliance_Agent.md)
 
 ## 10) Next Steps Checklist
 1. Read PRP base/spec/planning/tasks
