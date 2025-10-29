@@ -10,11 +10,20 @@ from fastapi import HTTPException, status
 from backend.app import config
 from backend.app.models.api import IngestionSource
 from backend.app.services.ingestion_sources import (
+    CourtListenerSourceConnector,
     OneDriveSourceConnector,
     S3SourceConnector,
     SharePointSourceConnector,
+    WebSearchSourceConnector,
 )
 from backend.app.utils.credentials import CredentialRegistry
+
+
+def _test_logger(name: str = "test.ingestion") -> logging.Logger:
+    logger = logging.getLogger(name)
+    if not any(isinstance(handler, logging.NullHandler) for handler in logger.handlers):
+        logger.addHandler(logging.NullHandler())
+    return logger
 
 
 class FakeResponse:
@@ -42,6 +51,34 @@ def _prime_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registry_pa
     settings = config.get_settings()
     registry = CredentialRegistry(settings.credentials_registry_path)
     return settings, registry
+
+
+class FakeAsyncResponse:
+    def __init__(self, status_code: int, payload: dict):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = json.dumps(payload)
+
+    def json(self) -> dict:
+        return dict(self._payload)
+
+
+class FakeAsyncClient:
+    def __init__(self, responses: list[FakeAsyncResponse]) -> None:
+        self._responses = responses
+        self.calls: list[tuple[str, dict | None]] = []
+
+    async def __aenter__(self) -> "FakeAsyncClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    async def get(self, url: str, *, headers: dict | None = None, params: dict | None = None) -> FakeAsyncResponse:
+        self.calls.append((url, params))
+        if not self._responses:
+            raise AssertionError("No more responses primed for FakeAsyncClient")
+        return self._responses.pop(0)
 
 
 def test_s3_connector_materializes_objects(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -89,13 +126,277 @@ def test_s3_connector_materializes_objects(monkeypatch: pytest.MonkeyPatch, tmp_
 
     monkeypatch.setattr(boto3.session, "Session", FakeSession)
 
-    connector = S3SourceConnector(settings, registry, logging.getLogger("test"))
+    connector = S3SourceConnector(settings, registry, _test_logger())
     source = IngestionSource(type="s3", path="folder/", credRef="s3-default")
     materialized = connector.materialize("job-1", 0, source)
 
     files = sorted(str(path.relative_to(materialized.root)) for path in materialized.root.rglob("*") if path.is_file())
     assert files == ["nested/notes.txt", "report.txt"]
     assert materialized.origin == "s3://case-bucket/folder/"
+
+
+def test_courtlistener_connector_requires_credref(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings, registry = _prime_settings(tmp_path, monkeypatch, {})
+    connector = CourtListenerSourceConnector(settings, registry, _test_logger())
+    source = IngestionSource(type="courtlistener", path="Miranda")
+
+    with pytest.raises(HTTPException) as excinfo:
+        connector.materialize("job-99", 0, source)
+
+    assert excinfo.value.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_courtlistener_connector_missing_credential_reference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    settings, registry = _prime_settings(
+        tmp_path,
+        monkeypatch,
+        {"cl-existing": {"token": "abc", "endpoint": "https://example.test/opinions/", "page_size": 1}},
+    )
+
+    connector = CourtListenerSourceConnector(settings, registry, _test_logger())
+    source = IngestionSource(type="courtlistener", path="Miranda", credRef="missing")
+
+    with pytest.raises(HTTPException) as excinfo:
+        connector.materialize("job-100", 1, source)
+
+    assert excinfo.value.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_courtlistener_connector_retries_after_429(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings, registry = _prime_settings(
+        tmp_path,
+        monkeypatch,
+        {
+            "cl-default": {
+                "token": "token-123",
+                "endpoint": "https://example.test/opinions/",
+                "page_size": 2,
+            }
+        },
+    )
+
+    responses = [
+        FakeAsyncResponse(429, {"detail": "rate limited"}),
+        FakeAsyncResponse(
+            200,
+            {
+                "results": [
+                    {
+                        "id": 202,
+                        "case_name": "People v. Taylor",
+                        "plain_text": "Opinion body for Taylor",
+                        "sha1": "1234567890abcdef",
+                        "absolute_url": "https://example.test/opinions/202/",
+                    }
+                ],
+                "next": None,
+            },
+        ),
+    ]
+    client = FakeAsyncClient(responses)
+
+    connector = CourtListenerSourceConnector(
+        settings,
+        registry,
+        _test_logger(),
+        client_factory=lambda: client,
+    )
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    connector._sleep = _no_sleep  # type: ignore[assignment]
+
+    source = IngestionSource(type="courtlistener", path="Miranda", credRef="cl-default")
+    materialized = connector.materialize("job-101", 2, source)
+
+    files = list(materialized.root.glob("*.json"))
+    assert len(files) == 1
+    assert len(client.calls) == 2
+
+    cached_responses = [
+        FakeAsyncResponse(
+            200,
+            {
+                "results": [
+                    {
+                        "id": 202,
+                        "case_name": "People v. Taylor",
+                        "plain_text": "",
+                        "sha1": "1234567890abcdef",
+                        "absolute_url": "https://example.test/opinions/202/",
+                    }
+                ],
+                "next": None,
+            },
+        )
+    ]
+    cached_client = FakeAsyncClient(cached_responses)
+    connector_cached = CourtListenerSourceConnector(
+        settings,
+        registry,
+        _test_logger("test.ingestion.cached"),
+        client_factory=lambda: cached_client,
+    )
+    connector_cached._sleep = _no_sleep  # type: ignore[assignment]
+    cached_materialized = connector_cached.materialize("job-102", 3, source)
+    cached_files = list(cached_materialized.root.glob("*.json"))
+    assert len(cached_files) == 1
+    cached_payload = json.loads(cached_files[0].read_text())
+    assert cached_payload["text"].startswith("Opinion body for Taylor")
+    assert len(cached_client.calls) == 1
+
+
+def test_courtlistener_connector_materializes_opinions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings, registry = _prime_settings(
+        tmp_path,
+        monkeypatch,
+        {
+            "cl-default": {
+                "token": "token-123",
+                "endpoint": "https://example.test/opinions/",
+                "page_size": 2,
+            }
+        },
+    )
+
+    responses = [
+        FakeAsyncResponse(
+            200,
+            {
+                "results": [
+                    {
+                        "id": 101,
+                        "case_name": "People v. Smith",
+                        "plain_text": "Opinion body for Smith",
+                        "sha1": "abcdef1234567890",
+                        "absolute_url": "https://example.test/opinions/101/",
+                    }
+                ],
+                "next": None,
+            },
+        )
+    ]
+
+    connector = CourtListenerSourceConnector(
+        settings,
+        registry,
+        _test_logger(),
+        client_factory=lambda: FakeAsyncClient(responses),
+    )
+
+    source = IngestionSource(type="courtlistener", path="Miranda", credRef="cl-default")
+    materialized = connector.materialize("job-42", 0, source)
+
+    files = list(materialized.root.glob("*.json"))
+    assert len(files) == 1
+    payload = json.loads(files[0].read_text())
+    assert payload["case_name"] == "People v. Smith"
+    assert payload["text"].startswith("Opinion body")
+
+    cache_dir = settings.ingestion_workspace_dir / "_cache" / "courtlistener"
+    cache_files = list(cache_dir.glob("*.json"))
+    assert cache_files, "Expected cache artifact for CourtListener opinion"
+
+
+def test_websearch_connector_requires_api_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings, registry = _prime_settings(
+        tmp_path,
+        monkeypatch,
+        {"web-default": {"endpoint": "https://search.example.test/web"}},
+    )
+
+    connector = WebSearchSourceConnector(settings, registry, _test_logger())
+    source = IngestionSource(type="websearch", path="Acme acquisition", credRef="web-default")
+
+    with pytest.raises(HTTPException) as excinfo:
+        connector.materialize("job-200", 0, source)
+
+    assert excinfo.value.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+def test_websearch_connector_raises_on_http_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings, registry = _prime_settings(
+        tmp_path,
+        monkeypatch,
+        {
+            "web-default": {
+                "api_key": "secret-key",
+                "endpoint": "https://search.example.test/web",
+            }
+        },
+    )
+
+    responses = [FakeAsyncResponse(500, {"error": "upstream failure"})]
+    client = FakeAsyncClient(responses)
+
+    connector = WebSearchSourceConnector(
+        settings,
+        registry,
+        _test_logger(),
+        client_factory=lambda: client,
+    )
+
+    source = IngestionSource(type="websearch", path="Acme acquisition", credRef="web-default")
+
+    with pytest.raises(HTTPException) as excinfo:
+        connector.materialize("job-201", 1, source)
+
+    assert excinfo.value.status_code == status.HTTP_502_BAD_GATEWAY
+
+
+def test_websearch_connector_materializes_results(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings, registry = _prime_settings(
+        tmp_path,
+        monkeypatch,
+        {
+            "web-default": {
+                "api_key": "secret-key",
+                "endpoint": "https://search.example.test/web",
+            }
+        },
+    )
+
+    responses = [
+        FakeAsyncResponse(
+            200,
+            {
+                "results": [
+                    {
+                        "title": "Acme acquisition timeline",
+                        "url": "https://example.com/acme",
+                        "snippet": "Detailed review of the Acme acquisition",
+                    },
+                    {
+                        "title": "Background on Acme",
+                        "url": "https://example.com/acme-background",
+                        "snippet": "History of Acme Corporation",
+                    },
+                ]
+            },
+        )
+    ]
+
+    connector = WebSearchSourceConnector(
+        settings,
+        registry,
+        _test_logger(),
+        client_factory=lambda: FakeAsyncClient(responses),
+    )
+
+    source = IngestionSource(type="websearch", path="Acme acquisition", credRef="web-default")
+    materialized = connector.materialize("job-77", 1, source)
+
+    files = sorted(materialized.root.glob("*.json"))
+    assert len(files) == 2
+    payload = json.loads(files[0].read_text())
+    assert payload["query"] == "Acme acquisition"
+    assert payload["title"]
+
+    cache_dir = settings.ingestion_workspace_dir / "_cache" / "websearch"
+    assert list(cache_dir.glob("*.json")), "Expected cached web search entries"
 
 
 class FakeFile:
@@ -193,7 +494,7 @@ def test_sharepoint_connector_materializes_folders(monkeypatch: pytest.MonkeyPat
         SimpleNamespace(ClientContext=FakeClientContext),
     )
 
-    connector = SharePointSourceConnector(settings, registry, logging.getLogger("test"))
+    connector = SharePointSourceConnector(settings, registry, _test_logger())
     source = IngestionSource(type="SharePoint", path="/sites/legal/CaseFiles", credRef="sp-default")
     materialized = connector.materialize("job-2", 1, source)
 
@@ -261,7 +562,7 @@ def test_onedrive_connector_materializes_hierarchy(monkeypatch: pytest.MonkeyPat
     FakeHttpxClient.instances = []
     monkeypatch.setattr("backend.app.services.ingestion_sources.httpx.Client", FakeHttpxClient)
 
-    connector = OneDriveSourceConnector(settings, registry, logging.getLogger("test"))
+    connector = OneDriveSourceConnector(settings, registry, _test_logger())
     connector._sleep = lambda _delay: None
     source = IngestionSource(type="OneDrive", path="cases", credRef="od-default")
     materialized = connector.materialize("job-3", 2, source)
@@ -285,7 +586,7 @@ def test_onedrive_missing_required_fields(monkeypatch: pytest.MonkeyPatch, tmp_p
             }
         },
     )
-    connector = OneDriveSourceConnector(settings, registry, logging.getLogger("test"))
+    connector = OneDriveSourceConnector(settings, registry, _test_logger())
     source = IngestionSource(type="OneDrive", credRef="od-missing")
     with pytest.raises(HTTPException) as excinfo:
         connector.materialize("job-4", 0, source)
@@ -323,7 +624,7 @@ def test_onedrive_token_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
         },
     )
     monkeypatch.setattr("backend.app.services.ingestion_sources.httpx.Client", TokenFailureClient)
-    connector = OneDriveSourceConnector(settings, registry, logging.getLogger("test"))
+    connector = OneDriveSourceConnector(settings, registry, _test_logger())
     source = IngestionSource(type="OneDrive", credRef="od-token")
     with pytest.raises(HTTPException) as excinfo:
         connector.materialize("job-5", 0, source)

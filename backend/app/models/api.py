@@ -93,6 +93,7 @@ class TraceModel(BaseModel):
     vector: List[dict]
     graph: dict
     forensics: List[dict] = Field(default_factory=list)
+    privilege: Optional[dict] = None
 
 
 class QueryPaginationModel(BaseModel):

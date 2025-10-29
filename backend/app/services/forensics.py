@@ -27,6 +27,7 @@ from pypdf import PdfReader
 from sklearn.ensemble import IsolationForest
 
 from ..config import get_settings
+from ..storage.forensics_chain import ForensicsChainLedger
 from ..utils.text import read_text
 
 
@@ -149,6 +150,7 @@ class ForensicsService:
         self.settings = get_settings()
         self.base_dir = self.settings.forensics_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.chain_ledger = ForensicsChainLedger(self.settings.forensics_chain_path)
 
     # region public API
     def build_document_artifact(self, file_id: str, path: Path) -> ForensicsReport:
@@ -782,6 +784,19 @@ class ForensicsService:
         payload["generated_at"] = report.generated_at
         payload.setdefault("artifacts", {})[report.artifact_type] = report.artifact_mapping()
         report_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        checksum = sha256(report_path.read_bytes()).hexdigest()
+        self.chain_ledger.append(
+            actor="forensics.service",
+            action=f"persist:{report.artifact_type}",
+            payload={
+                "file_id": report.file_id,
+                "artifact_type": report.artifact_type,
+                "report_path": report_path,
+                "generated_at": report.generated_at,
+                "checksum_sha256": checksum,
+                "signals": [signal.to_dict() for signal in report.signals],
+            },
+        )
         return report_path
 
     @staticmethod

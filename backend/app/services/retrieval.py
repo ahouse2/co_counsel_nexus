@@ -15,6 +15,11 @@ from ..utils.text import hashed_embedding
 from ..utils.triples import extract_entities, normalise_entity_id
 from .forensics import ForensicsService, get_forensics_service
 from .graph import GraphEdge, GraphNode, GraphService, get_graph_service
+from .privilege import (
+    PrivilegeClassifierService,
+    PrivilegeDecision,
+    get_privilege_classifier_service,
+)
 from .vector import VectorService, get_vector_service
 
 
@@ -55,9 +60,17 @@ class Trace:
     vector: List[Dict[str, object]]
     graph: Dict[str, List[Dict[str, object]]]
     forensics: List[Dict[str, object]]
+    privilege: Dict[str, object] | None = None
 
     def to_dict(self) -> Dict[str, object]:
-        return {"vector": self.vector, "graph": self.graph, "forensics": self.forensics}
+        payload = {
+            "vector": self.vector,
+            "graph": self.graph,
+            "forensics": self.forensics,
+        }
+        if self.privilege is not None:
+            payload["privilege"] = self.privilege
+        return payload
 
 
 @dataclass
@@ -100,12 +113,14 @@ class RetrievalService:
         graph_service: GraphService | None = None,
         document_store: DocumentStore | None = None,
         forensics_service: ForensicsService | None = None,
+        privilege_classifier: PrivilegeClassifierService | None = None,
     ) -> None:
         self.settings = get_settings()
         self.vector_service = vector_service or get_vector_service()
         self.graph_service = graph_service or get_graph_service()
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.forensics_service = forensics_service or get_forensics_service()
+        self.privilege_classifier = privilege_classifier or get_privilege_classifier_service()
 
     def query(
         self,
@@ -122,7 +137,7 @@ class RetrievalService:
             raise ValueError("page_size must be between 1 and 50")
         start_time = perf_counter()
         filters = filters or {}
-        allowed_sources = {"local", "s3", "sharepoint"}
+        allowed_sources = {"local", "s3", "sharepoint", "onedrive", "courtlistener", "websearch"}
 
         with _tracer.start_as_current_span("retrieval.query") as span:
             span.set_attribute("retrieval.page", page)
@@ -261,11 +276,24 @@ class RetrievalService:
                 if doc_id is None or doc_id in doc_ids_page
             ]
 
+            privilege_full = trace_full.privilege or {
+                "decisions": [],
+                "aggregate": {"label": "unknown", "score": 0.0, "flagged": []},
+            }
+            privilege_page = self._page_privilege_trace(privilege_full, doc_ids_page)
+
             trace_page = Trace(
                 vector=vector_trace_page,
                 graph={"nodes": graph_nodes_page, "edges": graph_edges_page},
                 forensics=forensics_trace_page,
+                privilege=privilege_page,
             )
+            privilege_label = privilege_page.get("aggregate", {}).get("label", "unknown")
+            privilege_flagged = privilege_page.get("aggregate", {}).get("flagged", [])
+            span.set_attribute("retrieval.privilege.label", privilege_label)
+            span.set_attribute("retrieval.privilege.flagged", len(privilege_flagged))
+            metric_attrs["privilege_label"] = privilege_label
+            metric_attrs["privilege_flagged"] = bool(privilege_flagged)
 
             answer = self._compose_answer(question, page_results, relation_statements_page)
             if start >= total_items:
@@ -398,7 +426,54 @@ class RetrievalService:
                 for edge in edge_bucket.values()
             ],
         }
-        return Trace(vector=vector_trace, graph=graph_trace, forensics=forensics_trace), relation_statements
+        privilege_trace = self._build_privilege_trace(results)
+        trace = Trace(
+            vector=vector_trace,
+            graph=graph_trace,
+            forensics=forensics_trace,
+            privilege=privilege_trace,
+        )
+        return trace, relation_statements
+
+    def _build_privilege_trace(self, results: List[qmodels.ScoredPoint]) -> Dict[str, object]:
+        decisions: List[PrivilegeDecision] = []
+        for point in results:
+            payload = point.payload or {}
+            doc_id = payload.get("doc_id")
+            if doc_id is None:
+                continue
+            text = payload.get("text")
+            metadata = {key: value for key, value in payload.items() if key != "text"}
+            decision = self.privilege_classifier.classify(str(doc_id), str(text or ""), metadata)
+            decisions.append(decision)
+        return self.privilege_classifier.format_trace(decisions)
+
+    def _page_privilege_trace(
+        self, privilege_trace: Dict[str, object], doc_ids: Set[str]
+    ) -> Dict[str, object]:
+        if not doc_ids:
+            return {"decisions": [], "aggregate": privilege_trace.get("aggregate", {})}
+        decisions_payload = privilege_trace.get("decisions", [])
+        filtered_payload = [
+            decision
+            for decision in decisions_payload
+            if str(decision.get("doc_id")) in doc_ids
+        ]
+        decisions = [
+            PrivilegeDecision(
+                doc_id=str(item.get("doc_id", "")),
+                label=str(item.get("label", "unknown")),
+                score=float(item.get("score", 0.0)),
+                explanation=str(item.get("explanation", "")),
+                source=str(item.get("source", "classifier")),
+            )
+            for item in filtered_payload
+        ]
+        summary = self.privilege_classifier.aggregate(decisions)
+        return {
+            "decisions": filtered_payload,
+            "aggregate": summary.to_dict(),
+        }
 
     def _build_forensics_trace(
         self, results: List[qmodels.ScoredPoint]
