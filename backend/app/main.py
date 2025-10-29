@@ -40,8 +40,6 @@ from .models.api import (
     DevAgentProposalListResponse,
     DevAgentProposalModel,
     DevAgentTaskModel,
-    SandboxCommandResultModel,
-    SandboxExecutionModel,
     ForensicsResponse,
     GraphEdgeModel,
     GraphNeighborResponse,
@@ -49,9 +47,19 @@ from .models.api import (
     IngestionRequest,
     IngestionResponse,
     IngestionStatusResponse,
+    KnowledgeBookmarkRequest,
+    KnowledgeBookmarkResponse,
+    KnowledgeLessonDetailResponse,
+    KnowledgeLessonListResponse,
+    KnowledgeProgressUpdateRequest,
+    KnowledgeProgressUpdateResponse,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
     OnboardingSubmission,
     OnboardingSubmissionResponse,
     QueryResponse,
+    SandboxCommandResultModel,
+    SandboxExecutionModel,
     TimelineEventModel,
     TimelinePaginationModel,
     TimelineResponse,
@@ -70,6 +78,7 @@ from .services.ingestion import (
     get_ingestion_worker,
     shutdown_ingestion_worker,
 )
+from .services.knowledge import KnowledgeService, get_knowledge_service
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
 from .services.timeline import TimelineService, get_timeline_service
 from .services.voice import VoiceService, VoiceServiceError, VoiceSessionOutcome, get_voice_service
@@ -85,6 +94,8 @@ from .security.dependencies import (
     authorize_billing_admin,
     authorize_ingest_enqueue,
     authorize_ingest_status,
+    authorize_knowledge_read,
+    authorize_knowledge_write,
     authorize_query,
     authorize_timeline,
     create_mtls_config,
@@ -365,6 +376,97 @@ def ingest_status(
     terminal_statuses = {"succeeded", "failed", "cancelled"}
     status_code = status.HTTP_200_OK if response.status in terminal_statuses else status.HTTP_202_ACCEPTED
     return JSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
+
+
+@app.post(
+    "/knowledge/search",
+    response_model=KnowledgeSearchResponse,
+)
+def knowledge_search(
+    payload: KnowledgeSearchRequest,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_read),
+) -> JSONResponse:
+    filters = payload.filters.model_dump(exclude_none=True) if payload.filters else None
+    result = service.search(
+        payload.query,
+        limit=payload.limit,
+        filters=filters,
+        principal=principal,
+    )
+    response = KnowledgeSearchResponse(**result)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.get(
+    "/knowledge/lessons",
+    response_model=KnowledgeLessonListResponse,
+)
+def knowledge_lessons(
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_read),
+) -> JSONResponse:
+    payload = service.list_lessons(principal)
+    response = KnowledgeLessonListResponse(**payload)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.get(
+    "/knowledge/lessons/{lesson_id}",
+    response_model=KnowledgeLessonDetailResponse,
+)
+def knowledge_lesson_detail(
+    lesson_id: str,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_read),
+) -> JSONResponse:
+    try:
+        payload = service.get_lesson(lesson_id, principal)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    response = KnowledgeLessonDetailResponse(**payload)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.post(
+    "/knowledge/lessons/{lesson_id}/progress",
+    response_model=KnowledgeProgressUpdateResponse,
+)
+def knowledge_progress_update(
+    lesson_id: str,
+    payload: KnowledgeProgressUpdateRequest,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_write),
+) -> JSONResponse:
+    try:
+        result = service.record_progress(
+            lesson_id,
+            payload.section_id,
+            payload.completed,
+            principal,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    response = KnowledgeProgressUpdateResponse(**result)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.post(
+    "/knowledge/lessons/{lesson_id}/bookmark",
+    response_model=KnowledgeBookmarkResponse,
+)
+def knowledge_toggle_bookmark(
+    lesson_id: str,
+    payload: KnowledgeBookmarkRequest,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_write),
+) -> JSONResponse:
+    try:
+        result = service.set_bookmark(lesson_id, payload.bookmarked, principal)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    response = KnowledgeBookmarkResponse(**result)
+    return JSONResponse(content=response.model_dump(mode="json"))
 
 
 @app.get("/query", response_model=QueryResponse)

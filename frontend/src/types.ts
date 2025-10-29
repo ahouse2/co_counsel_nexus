@@ -141,6 +141,80 @@ export interface OnboardingSubmissionResponse {
   received_at: string;
 }
 
+export interface KnowledgeMedia {
+  type: string;
+  title: string;
+  url: string;
+  provider?: string | null;
+}
+
+export interface KnowledgeProgress {
+  completed_sections: string[];
+  total_sections: number;
+  percent_complete: number;
+  last_viewed_at?: string | null;
+}
+
+export interface KnowledgeLessonSection {
+  id: string;
+  title: string;
+  content: string;
+  completed: boolean;
+}
+
+export interface KnowledgeLessonSummary {
+  lesson_id: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  difficulty: string;
+  estimated_minutes: number;
+  jurisdictions: string[];
+  media: KnowledgeMedia[];
+  progress: KnowledgeProgress;
+  bookmarked: boolean;
+}
+
+export interface KnowledgeLessonDetail extends KnowledgeLessonSummary {
+  sections: KnowledgeLessonSection[];
+}
+
+export interface KnowledgeLessonListResponse {
+  lessons: KnowledgeLessonSummary[];
+  filters: {
+    tags: string[];
+    difficulty: string[];
+    media_types: string[];
+  };
+}
+
+export interface KnowledgeSearchResult {
+  lesson_id: string;
+  lesson_title: string;
+  section_id: string;
+  section_title: string;
+  snippet: string;
+  score: number;
+  tags: string[];
+  difficulty: string;
+  media: KnowledgeMedia[];
+}
+
+export interface KnowledgeSearchResponse {
+  results: KnowledgeSearchResult[];
+  elapsed_ms: number;
+  applied_filters: Record<string, string[]>;
+}
+
+export interface KnowledgeProgressUpdateResponse extends KnowledgeProgress {
+  lesson_id: string;
+  section_id: string;
+}
+
+export interface KnowledgeBookmarkResponse {
+  lesson_id: string;
+  bookmarked: boolean;
+  bookmarks: string[];
 export interface VoicePersona {
   persona_id: string;
   label: string;

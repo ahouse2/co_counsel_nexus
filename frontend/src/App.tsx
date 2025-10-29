@@ -4,6 +4,7 @@ import { CitationPanel } from '@/components/CitationPanel';
 import { TimelineView } from '@/components/TimelineView';
 import { OnboardingFlow } from '@/components/OnboardingFlow';
 import { CustomerHealthDashboard } from '@/components/CustomerHealthDashboard';
+import { KnowledgeHub } from '@/components/KnowledgeHub';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useQueryContext } from '@/context/QueryContext';
@@ -14,6 +15,7 @@ const sections = [
   { id: 'citations', label: 'Citations' },
   { id: 'onboarding', label: 'Onboarding' },
   { id: 'success', label: 'Customer Success' },
+  { id: 'knowledge', label: 'Knowledge' },
 ] as const;
 
 type SectionId = (typeof sections)[number]['id'];
@@ -122,6 +124,14 @@ function App(): JSX.Element {
           hidden={activeSection !== 'success'}
         >
           <CustomerHealthDashboard />
+        </section>
+        <section
+          id={`${panelId}-knowledge`}
+          role="tabpanel"
+          aria-labelledby={`${tabsId}-knowledge`}
+          hidden={activeSection !== 'knowledge'}
+        >
+          <KnowledgeHub />
         </section>
       </main>
       <footer className="app-footer" role="contentinfo">

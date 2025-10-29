@@ -1,0 +1,64 @@
+{
+  "lessons": [
+    {
+      "id": "civil-discovery-foundations",
+      "title": "Civil Discovery Foundations",
+      "summary": "Operational blueprint for proportional discovery that survives judicial scrutiny and client audits.",
+      "tags": ["discovery", "litigation", "project-management"],
+      "difficulty": "intermediate",
+      "estimated_minutes": 35,
+      "jurisdictions": ["Federal"],
+      "media": [
+        {
+          "type": "video",
+          "title": "FRCP 26 Proportionality Refresher",
+          "url": "https://www.fjc.gov/content/310716/federal-rules-civil-procedure-rule-26-discovery", 
+          "provider": "Federal Judicial Center"
+        },
+        {
+          "type": "pdf",
+          "title": "Sedona Cooperation Proclamation",
+          "url": "https://thesedonaconference.org/download-pub/81", 
+          "provider": "The Sedona Conference"
+        }
+      ],
+      "content_path": "best_practices/civil_discovery_foundations.md"
+    },
+    {
+      "id": "deposition-preparation-playbook",
+      "title": "Deposition Preparation Playbook",
+      "summary": "Structured coaching programme for high-stakes witnesses with technology, exhibit, and follow-through controls.",
+      "tags": ["depositions", "advocacy", "witness-prep"],
+      "difficulty": "advanced",
+      "estimated_minutes": 30,
+      "jurisdictions": ["Federal", "State"],
+      "media": [
+        {
+          "type": "checklist",
+          "title": "ABA Remote Deposition Checklist",
+          "url": "https://www.americanbar.org/groups/litigation/publications/practice_points/2020/remote-deposition-checklist/",
+          "provider": "American Bar Association"
+        }
+      ],
+      "content_path": "best_practices/deposition_preparation_playbook.md"
+    },
+    {
+      "id": "privilege-log-quality-manual",
+      "title": "Privilege Log Quality Manual",
+      "summary": "Controls and validation routines that make privilege calls defensible and efficient.",
+      "tags": ["privilege", "discovery", "compliance"],
+      "difficulty": "foundational",
+      "estimated_minutes": 25,
+      "jurisdictions": ["Federal", "State"],
+      "media": [
+        {
+          "type": "article",
+          "title": "Practical Guidance on Privilege Logs",
+          "url": "https://www.ediscoverytoday.com/2023/05/24/creating-an-effective-privilege-log-practical-guidance/",
+          "provider": "EDiscovery Today"
+        }
+      ],
+      "content_path": "best_practices/privilege_log_quality_manual.md"
+    }
+  ]
+}
