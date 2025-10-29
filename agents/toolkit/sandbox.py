@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List, Sequence
@@ -74,6 +75,9 @@ def _default_runner(command: Sequence[str], cwd: Path) -> subprocess.CompletedPr
     return subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
 
 
+GIT_APPLY_COMMAND: List[str] = ["git", "apply", "--whitespace=nowarn"]
+
+
 class SandboxExecutionHarness:
     """Creates a disposable workspace, applies a diff, and runs lint/tests."""
 
@@ -92,13 +96,21 @@ class SandboxExecutionHarness:
 
     def validate(self, diff: str) -> SandboxExecutionResult:
         with tempfile.TemporaryDirectory(prefix="dev-agent-") as tmpdir:
-            workspace = Path(tmpdir) / "workspace"
+            workspace_root = Path(tmpdir)
+            workspace = workspace_root / "workspace"
             self._materialise_workspace(workspace)
-            workspace_id = workspace.name
-            if diff.strip():
-                self._apply_diff(workspace, diff)
+            workspace_id = workspace_root.name
             results: List[SandboxCommandResult] = []
             success = True
+            if diff.strip():
+                apply_result = self._apply_diff(workspace, diff)
+                results.append(apply_result)
+                if apply_result.return_code != 0:
+                    return SandboxExecutionResult(
+                        success=False,
+                        commands=results,
+                        workspace_id=workspace_id,
+                    )
             for command in self.commands:
                 result = self._run_command(workspace, command)
                 results.append(result)
@@ -110,19 +122,24 @@ class SandboxExecutionHarness:
     def _materialise_workspace(self, workspace: Path) -> None:
         shutil.copytree(self.repo_root, workspace, dirs_exist_ok=True)
 
-    def _apply_diff(self, workspace: Path, diff: str) -> None:
+    def _apply_diff(self, workspace: Path, diff: str) -> SandboxCommandResult:
+        started = time.perf_counter()
         process = subprocess.run(
-            ["git", "apply", "--whitespace=nowarn"],
+            GIT_APPLY_COMMAND,
             input=diff.encode("utf-8"),
             cwd=workspace,
             capture_output=True,
             text=True,
             check=False,
         )
-        if process.returncode != 0:
-            raise SandboxExecutionError(
-                "Failed to apply diff",
-            ) from RuntimeError(process.stderr or process.stdout)
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        return SandboxCommandResult(
+            command=list(GIT_APPLY_COMMAND),
+            return_code=process.returncode,
+            stdout=process.stdout or "",
+            stderr=process.stderr or "",
+            duration_ms=round(duration_ms, 2),
+        )
 
     def _run_command(self, workspace: Path, command: Sequence[str]) -> SandboxCommandResult:
         started = time.perf_counter()
