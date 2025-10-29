@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
@@ -295,4 +295,62 @@ class OnboardingSubmissionResponse(BaseModel):
     recommended_plan: str
     message: str
     received_at: datetime
+
+
+class SandboxCommandResultModel(BaseModel):
+    command: List[str]
+    return_code: int
+    stdout: str
+    stderr: str
+    duration_ms: float
+
+
+class SandboxExecutionModel(BaseModel):
+    success: bool
+    workspace_id: str
+    commands: List[SandboxCommandResultModel]
+
+
+class DevAgentProposalModel(BaseModel):
+    proposal_id: str
+    task_id: str
+    feature_request_id: str
+    title: str
+    summary: str
+    diff: str
+    status: str
+    created_at: datetime
+    created_by: Dict[str, Any]
+    validation: Dict[str, Any]
+    approvals: List[Dict[str, Any]] = Field(default_factory=list)
+    rationale: List[str] = Field(default_factory=list)
+
+
+class DevAgentTaskModel(BaseModel):
+    task_id: str
+    feature_request_id: str
+    title: str
+    description: str
+    priority: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    planner_notes: List[str] = Field(default_factory=list)
+    risk_score: float | None = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    proposals: List[DevAgentProposalModel] = Field(default_factory=list)
+
+
+class DevAgentProposalListResponse(BaseModel):
+    backlog: List[DevAgentTaskModel]
+
+
+class DevAgentApplyRequest(BaseModel):
+    proposal_id: str
+
+
+class DevAgentApplyResponse(BaseModel):
+    proposal: DevAgentProposalModel
+    task: DevAgentTaskModel
+    execution: SandboxExecutionModel
 

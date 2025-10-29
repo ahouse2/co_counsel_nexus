@@ -368,6 +368,14 @@ authorize_billing_admin = _dependency(
     allowed_roles=["CustomerSuccessManager", "PlatformEngineer", "ExecutiveSponsor"],
 )
 
+authorize_dev_agent_admin = _dependency(
+    resource_name="dev_agent.admin",
+    action="dev_agent:admin",
+    audience=settings.security_audience_dev_agent,
+    required_scopes=settings.dev_agent_required_scopes,
+    allowed_roles=settings.dev_agent_admin_roles,
+)
+
 
 def reset_security_caches() -> None:
     _get_oauth_validator.cache_clear()

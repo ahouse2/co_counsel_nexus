@@ -59,6 +59,25 @@ class Settings(BaseSettings):
     security_audience_forensics: str = Field(default="co-counsel.forensics")
     security_audience_agents: str = Field(default="co-counsel.agents")
     security_audience_billing: str = Field(default="co-counsel.billing")
+    security_audience_dev_agent: str = Field(default="co-counsel.dev-agent")
+
+    dev_agent_validation_commands: tuple[tuple[str, ...], ...] = Field(
+        default=(
+            (
+                "python",
+                "-m",
+                "tools.qa.quality_gate",
+                "--threshold",
+                "85",
+                "--",
+                "backend/tests",
+                "-q",
+            ),
+            ("ruff", "check", "backend"),
+        )
+    )
+    dev_agent_required_scopes: tuple[str, ...] = Field(default=("dev-agent:admin",))
+    dev_agent_admin_roles: tuple[str, ...] = Field(default=("PlatformEngineer", "AutomationService"))
     telemetry_enabled: bool = Field(default=False)
     telemetry_service_name: str = Field(default="cocounsel-backend")
     telemetry_environment: str = Field(default="local")
