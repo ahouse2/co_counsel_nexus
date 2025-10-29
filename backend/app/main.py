@@ -78,6 +78,7 @@ def _raise_workflow_exception(exc: WorkflowException) -> None:
 @app.on_event("startup")
 def start_background_workers() -> None:
     get_ingestion_worker()
+    get_agents_service()
 
 
 @app.on_event("shutdown")

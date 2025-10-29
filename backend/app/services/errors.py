@@ -10,6 +10,8 @@ class WorkflowComponent(str, Enum):
     """Enumeration of orchestrator components participating in agent workflows."""
 
     ORCHESTRATOR = "orchestrator"
+    STRATEGY = "strategy"
+    INGESTION = "ingestion"
     RETRIEVAL = "retrieval"
     FORENSICS = "forensics"
     QA = "qa"

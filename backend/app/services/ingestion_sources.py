@@ -172,10 +172,6 @@ class S3SourceConnector(BaseSourceConnector):
             import boto3  # type: ignore
         except ImportError as exc:  # pragma: no cover - dependency guard
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="boto3 is required for S3 sources",
-        except ImportError as exc:
-            raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="S3 ingestion requires boto3; install optional dependency",
             ) from exc
@@ -688,8 +684,6 @@ class OneDriveSourceConnector(BaseSourceConnector):
 
         with httpx_module.Client(timeout=self._client_timeout) as client:
             base_item = self._resolve_base_item(client, drive_id, folder_path, headers)
-        with httpx.Client(timeout=self._client_timeout) as client:
-            base_item = self._resolve_base_item(client, drive_id, base_folder, headers)
             files_downloaded = self._download_tree(client, drive_id, base_item, workspace, headers)
 
         if not files_downloaded:
@@ -702,10 +696,6 @@ class OneDriveSourceConnector(BaseSourceConnector):
         return MaterializedSource(root=workspace, source=source, origin=f"onedrive:{drive_id}/{origin_suffix}")
 
     def _ensure_dependencies(self):
-                extra={"drive_id": drive_id, "folder": base_folder or "<root>", "credRef": source.credRef},
-            )
-
-        origin_suffix = base_folder or "root"
         return MaterializedSource(root=workspace, source=source, origin=f"onedrive:{drive_id}/{origin_suffix}")
 
     def _workspace(self, job_id: str, index: int) -> Path:

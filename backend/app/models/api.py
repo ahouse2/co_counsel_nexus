@@ -217,6 +217,7 @@ class AgentRunResponse(BaseModel):
     turns: List[AgentTurnModel]
     errors: List[AgentErrorModel]
     telemetry: dict
+    memory: dict = Field(default_factory=dict)
 
 
 class AgentThreadListResponse(BaseModel):

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -45,8 +47,8 @@ def test_agents_workflow_generates_thread(
     assert payload["question"] == question
     assert payload["final_answer"]
     assert payload["citations"], "Expected citations in agent run response"
-    assert len(payload["turns"]) == 3
-    assert {turn["role"] for turn in payload["turns"]} == {"research", "forensics", "qa"}
+    roles = [turn["role"] for turn in payload["turns"]]
+    assert roles == ["strategy", "ingestion", "research", "cocounsel", "qa"]
     assert payload["status"] == "succeeded"
     assert payload["errors"] == []
 
@@ -58,6 +60,13 @@ def test_agents_workflow_generates_thread(
     assert telemetry["status"] == "succeeded"
     assert telemetry["errors"] == []
     assert telemetry["retries"] == {}
+    assert telemetry["turn_roles"] == roles
+    assert telemetry["hand_offs"] == [["strategy", "ingestion"], ["ingestion", "research"], ["research", "cocounsel"], ["cocounsel", "qa"]]
+
+    memory = payload["memory"]
+    assert "plan" in memory and memory["plan"]["steps"]
+    assert memory["insights"].get("ingestion", {}).get("status") in {"ready", "empty"}
+    assert len(memory.get("turns", [])) == len(roles)
 
     thread_id = payload["thread_id"]
 
@@ -75,11 +84,15 @@ def test_agents_workflow_generates_thread(
 
     expected_average = sum(qa_scores.values()) / len(qa_scores)
     assert payload["telemetry"].get("qa_average") == pytest.approx(expected_average, rel=1e-3)
+    assert thread_payload["memory"]["plan"] == memory["plan"]
 
 
 class _StubDocumentStore:
     def read_document(self, doc_id: str) -> dict[str, str]:
         return {"type": "text"}
+
+    def list_documents(self) -> list[dict[str, str]]:
+        return [{"id": "doc-001", "type": "text"}]
 
 
 class _StubForensicsService:
@@ -141,6 +154,9 @@ def test_agents_service_retries_transient_error(tmp_path: Path) -> None:
     assert telemetry["status"] == "degraded"
     assert telemetry["retries"].get("retrieval") == 1
     assert telemetry["errors"]
+    assert telemetry["turn_roles"] == ["strategy", "ingestion", "research", "cocounsel", "qa"]
+    memory = response["memory"]
+    assert memory["plan"]["steps"]
     assert service.memory_store.list_threads()
 
 
@@ -162,3 +178,4 @@ def test_agents_service_records_failure(tmp_path: Path) -> None:
     assert payload["errors"][0]["code"] == "RETRIEVAL_INVALID_INPUT"
     assert payload["telemetry"]["status"] == "failed"
     assert payload["telemetry"]["errors"]
+    assert [turn["role"] for turn in payload["turns"]] == ["strategy", "ingestion"]

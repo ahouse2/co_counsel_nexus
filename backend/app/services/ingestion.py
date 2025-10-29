@@ -167,6 +167,7 @@ class IngestionService:
                     metadata={"source_type": source.type, "index": index},
                     actor=actor,
                     severity="error",
+                )
                 self._record_error(
                     job_record,
                     {
