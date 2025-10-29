@@ -8,7 +8,7 @@
 ## 2. Governance & Approval Gates
 1. **Triage Gate** – Planner ingests a feature request, dedupes by `feature_request_id`, annotates risk, and marks task `triaged`.
 2. **Proposal Gate** – Executor publishes a patch proposal with rationale and diff reference; status remains `pending` until sandbox validation is executed.
-3. **Validation Gate** – `/dev-agent/apply` triggers sandbox execution. Commands must exit `0` or the proposal is stamped `failed` and the task flips to `needs_revision`.
+3. **Validation Gate** – `/dev-agent/apply` triggers sandbox execution. `git apply --whitespace=nowarn` runs first and is logged as the leading command record. Any non-zero exit (diff application or validation command) stamps the proposal `failed` and flips the task to `needs_revision` while preserving full stdout/stderr for remediation.
 4. **Approval Gate** – Successful validation upgrades proposal status to `validated`, appends an approval entry with actor metadata, and moves task status to `approved`.
 5. **Audit Gate** – Every gate interaction appends to the audit ledger (`category=dev_agent`, action `dev_agent.proposal.applied`) to satisfy compliance reviews.
 
@@ -21,7 +21,7 @@
 
 ## 4. Sandbox Workflow
 1. **Workspace Fabrication:** Copy repo (including `.git`) into an ephemeral directory under `/tmp/dev-agent-*/workspace`.
-2. **Diff Application:** Apply provided diff via `git apply --whitespace=nowarn`; failures raise `SandboxExecutionError` with captured stdout/stderr.
+2. **Diff Application:** Apply provided diff via `git apply --whitespace=nowarn`; the result is emitted as a `SandboxCommandResult` even on failure so API consumers receive structured stdout/stderr without exceptions.
 3. **Command Orchestration:** Execute `settings.dev_agent_validation_commands` sequentially. Results capture command, exit code, stdout/stderr, and duration.
 4. **Result Envelope:** Validation results stored on the proposal (`validation`) and surfaced through API responses for operator review.
 
