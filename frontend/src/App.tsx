@@ -2,6 +2,8 @@ import { useEffect, useId, useState } from 'react';
 import { ChatView } from '@/components/ChatView';
 import { CitationPanel } from '@/components/CitationPanel';
 import { TimelineView } from '@/components/TimelineView';
+import { OnboardingFlow } from '@/components/OnboardingFlow';
+import { CustomerHealthDashboard } from '@/components/CustomerHealthDashboard';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { useQueryContext } from '@/context/QueryContext';
@@ -10,6 +12,8 @@ const sections = [
   { id: 'chat', label: 'Chat' },
   { id: 'timeline', label: 'Timeline' },
   { id: 'citations', label: 'Citations' },
+  { id: 'onboarding', label: 'Onboarding' },
+  { id: 'success', label: 'Customer Success' },
 ] as const;
 
 type SectionId = (typeof sections)[number]['id'];
@@ -102,6 +106,22 @@ function App(): JSX.Element {
           hidden={activeSection !== 'citations'}
         >
           <CitationPanel />
+        </section>
+        <section
+          id={`${panelId}-onboarding`}
+          role="tabpanel"
+          aria-labelledby={`${tabsId}-onboarding`}
+          hidden={activeSection !== 'onboarding'}
+        >
+          <OnboardingFlow />
+        </section>
+        <section
+          id={`${panelId}-success`}
+          role="tabpanel"
+          aria-labelledby={`${tabsId}-success`}
+          hidden={activeSection !== 'success'}
+        >
+          <CustomerHealthDashboard />
         </section>
       </main>
       <footer className="app-footer" role="contentinfo">

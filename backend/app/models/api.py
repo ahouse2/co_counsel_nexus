@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
 
 class IngestionSource(BaseModel):
@@ -208,4 +208,77 @@ class AgentRunResponse(BaseModel):
 
 class AgentThreadListResponse(BaseModel):
     threads: List[str]
+
+
+class BillingPlanModel(BaseModel):
+    plan_id: str
+    label: str
+    monthly_price_usd: float
+    included_queries: int
+    included_ingest_gb: float
+    included_seats: int
+    support_tier: str
+    support_response_sla_hours: int
+    support_contact: str
+    overage_per_query_usd: float
+    overage_per_gb_usd: float
+    onboarding_sla_hours: int
+    description: str
+
+
+class BillingPlanListResponse(BaseModel):
+    generated_at: datetime
+    plans: List[BillingPlanModel]
+
+
+class BillingUsageSnapshotModel(BaseModel):
+    tenant_id: str
+    plan_id: str
+    plan_label: str
+    support_tier: str
+    support_sla_hours: int
+    support_channel: str
+    total_events: float
+    success_rate: float
+    usage_ratio: float
+    health_score: float
+    ingestion_jobs: float
+    ingestion_gb: float
+    query_count: float
+    average_query_latency_ms: float
+    timeline_requests: float
+    agent_runs: float
+    projected_monthly_cost: float
+    seats_requested: int
+    onboarding_completed: bool
+    last_event_at: datetime
+    metadata: dict
+
+
+class BillingUsageResponse(BaseModel):
+    generated_at: datetime
+    tenants: List[BillingUsageSnapshotModel]
+
+
+class OnboardingSubmission(BaseModel):
+    tenant_id: str = Field(min_length=3, description="Unique tenant identifier or slug")
+    organization: str = Field(min_length=2, description="Legal name of the organisation")
+    contact_name: str = Field(min_length=2)
+    contact_email: EmailStr
+    seats: int = Field(ge=1, le=500)
+    primary_use_case: str = Field(min_length=3)
+    departments: List[str] = Field(default_factory=list)
+    estimated_matters_per_month: int = Field(ge=0)
+    roi_baseline_hours_per_matter: float = Field(ge=0.0)
+    automation_target_percent: float = Field(default=0.25, ge=0.0, le=1.0)
+    go_live_date: datetime | None = Field(default=None)
+    notes: Optional[str] = Field(default=None)
+    success_criteria: List[str] = Field(default_factory=list)
+
+
+class OnboardingSubmissionResponse(BaseModel):
+    tenant_id: str
+    recommended_plan: str
+    message: str
+    received_at: datetime
 

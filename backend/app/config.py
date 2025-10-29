@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     manifest_encryption_key_path: Path = Field(default=Path("storage/manifest.key"))
     manifest_retention_days: int = Field(default=30)
     audit_log_path: Path = Field(default=Path("storage/audit.log"))
+    billing_usage_path: Path = Field(default=Path("storage/billing/usage.json"))
 
     privilege_classifier_threshold: float = Field(default=0.68)
 
@@ -52,6 +53,7 @@ class Settings(BaseSettings):
     security_audience_graph: str = Field(default="co-counsel.graph")
     security_audience_forensics: str = Field(default="co-counsel.forensics")
     security_audience_agents: str = Field(default="co-counsel.agents")
+    security_audience_billing: str = Field(default="co-counsel.billing")
     telemetry_enabled: bool = Field(default=False)
     telemetry_service_name: str = Field(default="cocounsel-backend")
     telemetry_environment: str = Field(default="local")
@@ -59,6 +61,12 @@ class Settings(BaseSettings):
     telemetry_otlp_insecure: bool = Field(default=True)
     telemetry_metrics_interval: float = Field(default=30.0)
     telemetry_console_fallback: bool = Field(default=True)
+
+    billing_default_plan: str = Field(default="community")
+    billing_plan_overrides: Dict[str, str] = Field(default_factory=dict)
+    billing_support_overrides: Dict[str, str] = Field(default_factory=dict)
+    billing_health_soft_threshold: float = Field(default=0.8)
+    billing_health_hard_threshold: float = Field(default=0.95)
 
     qdrant_collection: str = Field(default="cocounsel_documents")
     qdrant_vector_size: int = Field(default=128)
@@ -84,6 +92,7 @@ class Settings(BaseSettings):
         self.ingestion_workspace_dir.mkdir(parents=True, exist_ok=True)
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.billing_usage_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

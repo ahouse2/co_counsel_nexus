@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 from typing import Any, Callable, Coroutine, Dict, List, Tuple
 from urllib.parse import urljoin
 
@@ -170,10 +170,12 @@ class S3SourceConnector(BaseSourceConnector):
     def _ensure_boto3(self):
         try:
             import boto3  # type: ignore
-            credentials = self.registry.get(reference)
-        except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Credential {reference} not found") from exc
-        return {key: str(value) for key, value in credentials.items()}
+        except ImportError as exc:  # pragma: no cover - dependency guard
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="boto3 is required for S3 sources",
+            ) from exc
+        return boto3
 
     def _workspace(self, job_id: str, index: int, label: str) -> Path:
         workspace = self.settings.ingestion_workspace_dir / job_id / f"{index:02d}_{label}"
@@ -636,26 +638,6 @@ class SharePointSourceConnector(BaseSourceConnector):
 
 class OneDriveSourceConnector(BaseSourceConnector):
     GRAPH_SCOPE = ["https://graph.microsoft.com/.default"]
-
-    def preflight(self, source: IngestionSource) -> None:
-        self._ensure_dependencies()
-        if not source.credRef:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OneDrive source requires credRef")
-        credentials = self._load_credentials(source.credRef)
-        required = {"tenant_id", "client_id", "client_secret", "drive_id"}
-        missing = sorted(required - set(credentials))
-        if missing:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"OneDrive credential missing fields: {', '.join(missing)}",
-            )
-
-    def materialize(self, job_id: str, index: int, source: IngestionSource) -> MaterializedSource:
-        httpx, msal = self._ensure_dependencies()
-
-        if not source.credRef:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OneDrive source requires credRef")
-    _TOKEN_SCOPE = "https://graph.microsoft.com/.default"
     _GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
     _MAX_RETRIES = 3
 
@@ -671,7 +653,22 @@ class OneDriveSourceConnector(BaseSourceConnector):
         self._client_timeout = client_timeout
         self._sleep = time.sleep
 
+    def preflight(self, source: IngestionSource) -> None:
+        self._ensure_dependencies()
+        if not source.credRef:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OneDrive source requires credRef")
+        credentials = self._load_credentials(source.credRef)
+        required = {"tenant_id", "client_id", "client_secret", "drive_id"}
+        missing = sorted(required - set(credentials))
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"OneDrive credential missing fields: {', '.join(missing)}",
+            )
+
     def materialize(self, job_id: str, index: int, source: IngestionSource) -> MaterializedSource:
+        httpx_module = self._ensure_dependencies()
+
         if not source.credRef:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OneDrive source requires credRef")
 
@@ -689,149 +686,172 @@ class OneDriveSourceConnector(BaseSourceConnector):
         folder = source.path or credentials.get("folder", "")
         workspace = self._workspace(job_id, index, "onedrive")
 
-        authority = f"https://login.microsoftonline.com/{tenant_id}"
-        app = msal.ConfidentialClientApplication(
-            client_id,
-            authority=authority,
-            client_credential=client_secret,
-        )
-        token_result = app.acquire_token_for_client(scopes=self.GRAPH_SCOPE)
-        access_token = token_result.get("access_token")
-        if not access_token:
-            description = token_result.get("error_description") or token_result.get("error") or "unknown"
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Unable to acquire OneDrive token: {description}",
+        token = self._acquire_token(httpx_module, tenant_id, client_id, client_secret)
+        headers = {"Authorization": f"Bearer {token}"}
+        folder_path = folder.strip("/")
+
+        with httpx_module.Client(timeout=self._client_timeout) as client:
+            base_item = self._resolve_base_item(client, drive_id, folder_path, headers)
+            files_downloaded = self._download_tree(client, drive_id, base_item, workspace, headers)
+
+        if not files_downloaded:
+            self.logger.warning(
+                "OneDrive source produced no files",
+                extra={"drive_id": drive_id, "folder": folder_path or "<root>", "credRef": source.credRef},
             )
 
-        base_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}"
-        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
-
-        with httpx.Client(timeout=60.0) as client:
-            try:
-                iterator = self._list_items(client, base_url, folder, headers, workspace)
-                for item in iterator:
-                    relative_path = workspace / item["relative"]
-                    if item["is_folder"]:
-                        relative_path.mkdir(parents=True, exist_ok=True)
-                        continue
-                    relative_path.parent.mkdir(parents=True, exist_ok=True)
-                    download_url = item.get("download_url")
-                    if not download_url:
-                        self.logger.warning(
-                            "Skipping OneDrive file without download URL",
-                            extra={"item": item.get("name"), "path": folder},
-                        )
-                        continue
-                    try:
-                        response = client.get(download_url, headers=None)
-                    except Exception as exc:  # pylint: disable=broad-except
-                        self.logger.exception(
-                            "Failed to download OneDrive file",
-                            extra={"drive_id": drive_id, "name": item.get("name")},
-                        )
-                        raise HTTPException(
-                            status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail=f"Unable to download OneDrive file {item.get('name')}",
-                        ) from exc
-                    if response.status_code >= 400:
-                        raise HTTPException(
-                            status_code=status.HTTP_502_BAD_GATEWAY,
-                            detail=f"OneDrive returned HTTP {response.status_code} for {item.get('name')}",
-                        )
-                    relative_path.write_bytes(response.content)
-                    self.logger.info(
-                        "Downloaded OneDrive file",
-                        extra={"drive_id": drive_id, "name": item.get("name"), "path": str(relative_path)},
-                    )
-            except HTTPException:
-                raise
-            except Exception as exc:  # pylint: disable=broad-except
-                self.logger.exception("Failed to enumerate OneDrive items", extra={"folder": folder})
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Unable to enumerate OneDrive folder {folder or '/'}: {exc}",
-                ) from exc
-
-        origin = f"onedrive:{folder}" if folder else "onedrive:/"
-        return MaterializedSource(root=workspace, source=source, origin=origin)
+        origin_suffix = folder_path if folder_path else "root"
+        return MaterializedSource(root=workspace, source=source, origin=f"onedrive:{drive_id}/{origin_suffix}")
 
     def _ensure_dependencies(self):
         try:
-            import httpx
-            import msal  # type: ignore
+            import httpx as httpx_module  # type: ignore
         except ImportError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="OneDrive ingestion requires msal and httpx; install optional dependency",
+                detail="OneDrive ingestion requires httpx; install optional dependency",
             ) from exc
-        return httpx, msal
+        return httpx_module
 
-    def _list_items(
+    def _acquire_token(
         self,
-        client,
-        base_url: str,
-        folder: str,
-        headers: Dict[str, str],
-        workspace: Path,
-    ) -> Iterator[Dict[str, object]]:
-        stack: List[tuple[str, Path]] = []
-        initial_path = folder.strip("/")
-        initial_relative = Path(initial_path) if initial_path else Path()
-        if initial_path:
-            (workspace / initial_relative).mkdir(parents=True, exist_ok=True)
-        stack.append((initial_path, initial_relative))
-        while stack:
-            current_path, relative = stack.pop()
-            for entry in self._list_children(client, base_url, current_path, headers):
-                name = entry.get("name") or "unnamed"
-                child_relative = relative / name
-                if entry.get("folder") is not None:
-                    stack.append(((current_path + "/" + name).strip("/"), child_relative))
-                    yield {
-                        "is_folder": True,
-                        "name": name,
-                        "relative": child_relative,
-                    }
-                else:
-                    yield {
-                        "is_folder": False,
-                        "name": name,
-                        "relative": child_relative,
-                        "download_url": entry.get("@microsoft.graph.downloadUrl"),
-                    }
+        httpx_module,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+    ) -> str:
+        token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": " ".join(self.GRAPH_SCOPE),
+            "grant_type": "client_credentials",
+        }
+        try:
+            with httpx_module.Client(timeout=self._client_timeout) as client:
+                response = client.post(token_url, data=data)
+        except Exception as exc:  # pylint: disable=broad-except
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="OneDrive token request failed: network error",
+            ) from exc
 
-    def _list_children(
-        self,
-        client,
-        base_url: str,
-        folder: str,
-        headers: Dict[str, str],
-    ) -> Iterable[Dict[str, object]]:
-        if folder:
-            encoded = quote(folder, safe="/")
-            url = f"{base_url}/root:/{encoded}:/children"
-        else:
-            url = f"{base_url}/root/children"
-        while url:
-            try:
-                response = client.get(url, headers=headers)
-            except Exception as exc:  # pylint: disable=broad-except
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Unable to request OneDrive path '{folder or '/'}': {exc}",
-                ) from exc
-            if response.status_code == status.HTTP_404_NOT_FOUND:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"OneDrive folder '{folder}' not found")
-            if response.status_code >= 400:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"OneDrive returned HTTP {response.status_code} for path '{folder or '/'}'",
-                )
+        if response.status_code >= 400:
+            message = getattr(response, "text", "") or f"HTTP {response.status_code}"
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"OneDrive token request failed: {message}",
+            )
+
+        try:
             payload = response.json()
-            for entry in payload.get("value", []):
-                yield entry
-            url = payload.get("@odata.nextLink")
+        except Exception as exc:  # pylint: disable=broad-except
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="OneDrive token request failed: invalid response",
+            ) from exc
+
+        token = payload.get("access_token")
+        if not token:
+            description = payload.get("error_description") or payload.get("error") or "unknown error"
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"OneDrive token request failed: {description}",
+            )
+        return token
+
+    def _resolve_base_item(
+        self,
+        client,
+        drive_id: str,
+        folder_path: str,
+        headers: Dict[str, str],
+    ) -> Dict[str, str]:
+        if folder_path:
+            url = f"{self._GRAPH_ROOT}/drives/{drive_id}/root:/{folder_path}"
+        else:
+            url = f"{self._GRAPH_ROOT}/drives/{drive_id}/root"
+        response = self._request(client.get, url, headers=headers)
+        payload = response.json()
+        item_id = payload.get("id")
+        if not item_id:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="OneDrive folder resolution failed: missing id",
+            )
+        name = payload.get("name") or (folder_path.split("/")[-1] if folder_path else "root")
+        return {"id": str(item_id), "name": str(name)}
+
+    def _download_tree(
+        self,
+        client,
+        drive_id: str,
+        base_item: Dict[str, str],
+        workspace: Path,
+        headers: Dict[str, str],
+    ) -> bool:
+        queue: List[tuple[str, Path]] = [(base_item["id"], Path())]
+        files_downloaded = False
+
+        while queue:
+            item_id, relative_path = queue.pop(0)
+            children_url = f"{self._GRAPH_ROOT}/drives/{drive_id}/items/{item_id}/children"
+            next_url: str | None = children_url
+            while next_url:
+                response = self._request(client.get, next_url, headers=headers)
+                payload = response.json()
+                for child in payload.get("value", []):
+                    name = child.get("name")
+                    child_id = child.get("id")
+                    if not name or not child_id:
+                        continue
+                    if child.get("folder") is not None:
+                        queue.append((str(child_id), relative_path / name))
+                        continue
+                    if child.get("file") is None:
+                        continue
+                    destination = workspace / relative_path / name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    download_url = f"{self._GRAPH_ROOT}/drives/{drive_id}/items/{child_id}/content"
+                    download_response = self._request(client.get, download_url, headers=headers)
+                    destination.write_bytes(download_response.content)
+                    files_downloaded = True
+                    self.logger.info(
+                        "Downloaded OneDrive file",
+                        extra={"drive_id": drive_id, "item_id": child_id, "path": str(destination)},
+                    )
+                next_url = payload.get("@odata.nextLink")
+        return files_downloaded
+
+    def _request(
+        self,
+        method,
+        url: str,
+        *,
+        headers: Dict[str, str] | None = None,
+    ):
+        last_response = None
+        for attempt in range(self._MAX_RETRIES):
+            response = method(url, headers=headers, follow_redirects=True)
+            status_code = response.status_code
+            if status_code < 400:
+                return response
+            if status_code in (429, 500, 502, 503, 504) and attempt < self._MAX_RETRIES - 1:
+                delay = 0.25 * (2**attempt)
+                self.logger.warning(
+                    "Retrying OneDrive request",
+                    extra={"url": url, "status_code": status_code, "attempt": attempt + 1},
+                )
+                self._sleep(delay)
+                continue
+            last_response = response
+            break
+        assert last_response is not None
+        detail = last_response.text or f"HTTP {last_response.status_code}"
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OneDrive request to {url} failed: {detail}",
+        )
 
 
 class WebSourceConnector(BaseSourceConnector):
@@ -893,176 +913,6 @@ class WebSourceConnector(BaseSourceConnector):
         if "." not in name:
             name = f"{name}.html"
         return name
-        folder = source.path or credentials.get("folder", "")
-
-        missing_fields = [
-            key
-            for key, value in {
-                "tenant_id": tenant_id,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "drive_id": drive_id,
-            }.items()
-            if not value
-        ]
-        if missing_fields:
-            detail = ", ".join(sorted(missing_fields))
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"OneDrive credential missing required fields: {detail}",
-            )
-
-        token = self._acquire_token(tenant_id, client_id, client_secret)  # type: ignore[arg-type]
-        headers = {"Authorization": f"Bearer {token}"}
-        workspace = self._workspace(job_id, index)
-        folder_path = folder.strip("/")
-
-        with httpx.Client(timeout=self._client_timeout) as client:
-            base_item = self._resolve_base_item(client, drive_id, folder_path, headers)
-            files_downloaded = self._download_tree(client, drive_id, base_item, workspace, headers)
-
-        if not files_downloaded:
-            self.logger.warning(
-                "OneDrive source produced no files",
-                extra={"drive_id": drive_id, "folder": folder_path or "<root>", "credRef": source.credRef},
-            )
-
-        origin_suffix = folder_path if folder_path else "root"
-        return MaterializedSource(root=workspace, source=source, origin=f"onedrive:{drive_id}/{origin_suffix}")
-
-    def _workspace(self, job_id: str, index: int) -> Path:
-        workspace = self.settings.ingestion_workspace_dir / job_id / f"{index:02d}_onedrive"
-        workspace.mkdir(parents=True, exist_ok=True)
-        return workspace
-
-    def _load_credentials(self, reference: str) -> Dict[str, str]:
-        try:
-            credentials = self.registry.get(reference)
-        except KeyError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Credential {reference} not found") from exc
-        return {key: str(value) for key, value in credentials.items()}
-
-    def _acquire_token(self, tenant_id: str, client_id: str, client_secret: str) -> str:
-        url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-        data = {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "grant_type": "client_credentials",
-            "scope": self._TOKEN_SCOPE,
-        }
-        with httpx.Client(timeout=self._client_timeout) as client:
-            response = client.post(url, data=data)
-        if response.status_code != status.HTTP_200_OK:
-            detail = response.text or "unable to obtain token"
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"OneDrive token request failed ({response.status_code}): {detail}",
-            )
-        payload = response.json()
-        token = payload.get("access_token")
-        if not token:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="OneDrive token response missing access_token",
-            )
-        return str(token)
-
-    def _resolve_base_item(
-        self,
-        client: httpx.Client,
-        drive_id: str,
-        folder_path: str,
-        headers: Dict[str, str],
-    ) -> Dict[str, str]:
-        if folder_path:
-            url = f"{self._GRAPH_ROOT}/drives/{drive_id}/root:/{folder_path}"
-        else:
-            url = f"{self._GRAPH_ROOT}/drives/{drive_id}/root"
-        response = self._request(client.get, url, headers=headers)
-        payload = response.json()
-        item_id = payload.get("id")
-        if not item_id:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="OneDrive folder resolution failed: missing id",
-            )
-        name = payload.get("name") or (folder_path.split("/")[-1] if folder_path else "root")
-        return {"id": str(item_id), "name": str(name)}
-
-    def _download_tree(
-        self,
-        client: httpx.Client,
-        drive_id: str,
-        base_item: Dict[str, str],
-        workspace: Path,
-        headers: Dict[str, str],
-    ) -> bool:
-        queue: list[Tuple[str, Path]] = [(base_item["id"], Path(""))]
-        files_downloaded = False
-
-        while queue:
-            item_id, relative_path = queue.pop(0)
-            children_url = f"{self._GRAPH_ROOT}/drives/{drive_id}/items/{item_id}/children"
-            next_url: str | None = children_url
-            while next_url:
-                response = self._request(client.get, next_url, headers=headers)
-                payload = response.json()
-                for child in payload.get("value", []):
-                    name = child.get("name")
-                    child_id = child.get("id")
-                    if not name or not child_id:
-                        continue
-                    if child.get("folder") is not None:
-                        queue.append((str(child_id), relative_path / name))
-                        continue
-                    if child.get("file") is None:
-                        continue
-                    destination = workspace / relative_path / name
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    download_url = f"{self._GRAPH_ROOT}/drives/{drive_id}/items/{child_id}/content"
-                    download_response = self._request(client.get, download_url, headers=headers)
-                    destination.write_bytes(download_response.content)
-                    files_downloaded = True
-                    self.logger.info(
-                        "Downloaded OneDrive file",
-                        extra={
-                            "drive_id": drive_id,
-                            "item_id": child_id,
-                            "path": str(destination),
-                        },
-                    )
-                next_url = payload.get("@odata.nextLink")
-        return files_downloaded
-
-    def _request(
-        self,
-        method,
-        url: str,
-        *,
-        headers: Dict[str, str] | None = None,
-    ) -> httpx.Response:
-        last_response: httpx.Response | None = None
-        for attempt in range(self._MAX_RETRIES):
-            response = method(url, headers=headers, follow_redirects=True)
-            status_code = response.status_code
-            if status_code < 400:
-                return response
-            if status_code in (429, 500, 502, 503, 504) and attempt < self._MAX_RETRIES - 1:
-                delay = 0.25 * (2**attempt)
-                self.logger.warning(
-                    "Retrying OneDrive request",
-                    extra={"url": url, "status_code": status_code, "attempt": attempt + 1},
-                )
-                self._sleep(delay)
-                continue
-            last_response = response
-            break
-        assert last_response is not None
-        detail = last_response.text or f"HTTP {last_response.status_code}"
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"OneDrive request to {url} failed: {detail}",
-        )
 
 
 def build_connector(source_type: str, settings: Settings, registry: CredentialRegistry, logger: logging.Logger) -> BaseSourceConnector:

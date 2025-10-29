@@ -360,6 +360,14 @@ authorize_agents_read = _dependency(
     allowed_roles=["ResearchAnalyst", "CaseCoordinator", "ComplianceAuditor", "PlatformEngineer"],
 )
 
+authorize_billing_admin = _dependency(
+    resource_name="billing.dashboard",
+    action="billing:read",
+    audience=settings.security_audience_billing,
+    required_scopes=["billing:read"],
+    allowed_roles=["CustomerSuccessManager", "PlatformEngineer", "ExecutiveSponsor"],
+)
+
 
 def reset_security_caches() -> None:
     _get_oauth_validator.cache_clear()
