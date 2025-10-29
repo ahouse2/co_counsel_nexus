@@ -23,6 +23,7 @@ class CaseThreadMemory:
         self.state.setdefault("qa", {})
         self.state.setdefault("notes", [])
         self.state.setdefault("directives", {})
+        self.state.setdefault("conversation", [])
 
     def update(self, namespace: str, payload: Dict[str, Any]) -> None:
         entry = self.state.setdefault(namespace, {})
@@ -36,6 +37,10 @@ class CaseThreadMemory:
         turns = self.state.setdefault("turns", [])
         turns.append(turn_payload)
 
+    def append_conversation(self, entry: Dict[str, Any]) -> None:
+        transcript = self.state.setdefault("conversation", [])
+        transcript.append(entry)
+
     def snapshot(self) -> Dict[str, Any]:
         return {
             "plan": dict(self.state.get("plan", {})),
@@ -45,6 +50,7 @@ class CaseThreadMemory:
             "notes": list(self.state.get("notes", [])),
             "directives": dict(self.state.get("directives", {})),
             "turns": list(self.state.get("turns", [])),
+            "conversation": list(self.state.get("conversation", [])),
         }
 
     def persist(self) -> None:

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     agent_circuit_threshold: int = Field(default=4, ge=1)
     agent_circuit_window_seconds: float = Field(default=30.0, ge=1.0)
     agent_circuit_cooldown_seconds: float = Field(default=45.0, ge=1.0)
+    agent_default_autonomy: Literal["low", "balanced", "high"] = Field(default="balanced")
+    agent_max_turns: int = Field(default=12, ge=5, le=40)
     credentials_registry_path: Path | None = Field(default=None)
     manifest_encryption_key_path: Path = Field(default=Path("storage/manifest.key"))
     manifest_retention_days: int = Field(default=30)

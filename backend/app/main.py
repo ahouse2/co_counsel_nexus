@@ -715,7 +715,14 @@ def agents_run(
     principal: Principal = Depends(authorize_agents_run),
 ) -> AgentRunResponse:
     top_k = payload.top_k or 5
-    response = service.run_case(payload.case_id, payload.question, top_k=top_k, principal=principal)
+    response = service.run_case(
+        payload.case_id,
+        payload.question,
+        top_k=top_k,
+        principal=principal,
+        autonomy_level=payload.autonomy_level,
+        max_turns=payload.max_turns,
+    )
     payload_model = AgentRunResponse(**response)
     record_billing_event(
         principal,

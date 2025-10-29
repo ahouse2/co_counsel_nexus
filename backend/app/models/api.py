@@ -184,6 +184,8 @@ class AgentRunRequest(BaseModel):
     case_id: str
     question: str
     top_k: Optional[int] = Field(default=None, ge=1, le=20)
+    autonomy_level: Optional[Literal["low", "balanced", "high"]] = Field(default=None)
+    max_turns: Optional[int] = Field(default=None, ge=5, le=40)
 
 
 class AgentTurnModel(BaseModel):

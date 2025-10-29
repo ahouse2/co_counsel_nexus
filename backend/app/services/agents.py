@@ -10,9 +10,8 @@ from uuid import uuid4
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
-from ..agents import get_orchestrator
+from ..agents import AdaptiveAgentsOrchestrator, get_orchestrator
 from ..agents.qa import QAAgent
-from ..agents.runner import MicrosoftAgentsOrchestrator
 from ..agents.types import AgentThread, AgentTurn
 from ..config import get_settings
 from ..security.authz import Principal
@@ -132,7 +131,7 @@ class AgentsService:
         memory_store: AgentMemoryStore | None = None,
         document_store: DocumentStore | None = None,
         qa_agent: QAAgent | None = None,
-        orchestrator: MicrosoftAgentsOrchestrator | None = None,
+        orchestrator: AdaptiveAgentsOrchestrator | None = None,
     ) -> None:
         self.settings = get_settings()
         self.retrieval_service = retrieval_service or get_retrieval_service()
@@ -150,6 +149,8 @@ class AgentsService:
         self.audit = get_audit_trail()
         self.retry_attempts = max(1, self.settings.agent_retry_attempts)
         self.retry_backoff_ms = max(0, self.settings.agent_retry_backoff_ms)
+        self.default_autonomy_level = getattr(self.settings, "agent_default_autonomy", "balanced")
+        self.default_max_turns = getattr(self.settings, "agent_max_turns", 12)
         breaker_config = {
             "threshold": self.settings.agent_circuit_threshold,
             "window_seconds": self.settings.agent_circuit_window_seconds,
@@ -170,6 +171,8 @@ class AgentsService:
         *,
         top_k: int = 5,
         principal: Principal | None = None,
+        autonomy_level: str | None = None,
+        max_turns: int | None = None,
     ) -> Dict[str, Any]:
         actor = self._actor_from_principal(principal)
         thread = AgentThread(
@@ -180,6 +183,10 @@ class AgentsService:
             updated_at=_now(),
         )
         telemetry_context = self._initial_telemetry()
+        if autonomy_level:
+            telemetry_context["autonomy_level"] = autonomy_level
+        else:
+            telemetry_context["autonomy_level"] = self.default_autonomy_level
         self._audit_agents_event(
             action="agents.thread.created",
             outcome="accepted",
@@ -224,12 +231,18 @@ class AgentsService:
                     thread_id=thread.thread_id,
                     thread=thread,
                     telemetry=telemetry_context,
+                    autonomy_level=telemetry_context["autonomy_level"],
+                    max_turns=max_turns or self.default_max_turns,
                 )
-                if result_thread.errors:
-                    result_thread.status = "degraded"
-                    result_thread.telemetry["status"] = "degraded"
-                else:
-                    result_thread.status = "succeeded"
+                if result_thread.status in {"", "pending"}:
+                    if result_thread.errors:
+                        result_thread.status = "degraded"
+                        result_thread.telemetry["status"] = "degraded"
+                    else:
+                        result_thread.status = "succeeded"
+                elif result_thread.errors and result_thread.status == "succeeded":
+                    notes = result_thread.telemetry.setdefault("notes", [])
+                    notes.append("Recovered from intermediate agent failures during execution.")
                 result_thread.updated_at = _now()
                 duration_ms = (time.perf_counter() - run_started) * 1000.0
                 attributes = {"status": result_thread.status}
@@ -299,6 +312,7 @@ class AgentsService:
             "status": "pending",
             "sequence_valid": False,
             "hand_offs": [],
+            "autonomy_level": self.default_autonomy_level,
         }
 
     def _normalise_thread_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
