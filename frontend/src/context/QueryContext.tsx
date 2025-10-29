@@ -30,6 +30,8 @@ type QueryContextValue = {
   refreshTimelineOnDemand: () => Promise<void>;
   timelineEntityFilter: string | null;
   setTimelineEntityFilter: (entity: string | null) => void;
+  retrievalMode: 'precision' | 'recall';
+  setRetrievalMode: (mode: 'precision' | 'recall') => void;
 };
 
 const QueryContext = createContext<QueryContextValue | undefined>(undefined);
@@ -46,6 +48,7 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  const [retrievalMode, setRetrievalMode] = useState<'precision' | 'recall'>('precision');
   const currentStreamId = useRef<string | null>(null);
   const pendingPromptRef = useRef<string | null>(null);
 
@@ -64,13 +67,10 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
     });
   }, []);
 
-  const persistChat = useCallback(
-    (nextMessages: ChatMessage[]) => {
-      setMessages(nextMessages);
-      void saveChatHistory(nextMessages);
-    },
-    []
-  );
+  const persistChat = useCallback((nextMessages: ChatMessage[]) => {
+    setMessages(nextMessages);
+    void saveChatHistory(nextMessages);
+  }, []);
 
   const persistTimeline = useCallback((events: TimelineEvent[]) => {
     setTimelineEvents(events);
@@ -104,7 +104,7 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
     messagesRef.current = messages;
   }, [messages]);
 
-  const streamUrl = useMemo(() => buildStreamUrl(), []);
+  const streamUrl = useMemo(() => buildStreamUrl({ mode: retrievalMode }), [retrievalMode]);
 
   const { start: startStream, stop: stopStream } = useWebSocket({
     url: streamUrl,
@@ -152,10 +152,23 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
     },
   });
 
+  const refreshTimelineOnDemand = useCallback(async () => {
+    setTimelineLoading(true);
+    try {
+      const response = await fetchTimeline({ entity: timelineEntityFilter ?? undefined, limit: 20 });
+      persistTimeline(response.events);
+      setTimelineMeta(response.meta);
+      setTimelineLoading(false);
+    } catch (timelineError) {
+      console.warn('Timeline refresh failed', timelineError);
+      setTimelineLoading(false);
+    }
+  }, [persistTimeline, timelineEntityFilter]);
+
   const completeViaHttp = useCallback(
     async (assistantId: string, prompt: string) => {
       try {
-        const response = await postQuery({ q: prompt });
+        const response = await postQuery({ q: prompt, mode: retrievalMode });
         setMessages((prev) => {
           const updated = prev.map((message) =>
             message.id === assistantId
@@ -188,7 +201,7 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         setLoading(false);
       }
     },
-    []
+    [refreshTimelineOnDemand, retrievalMode]
   );
 
   const sendMessage = useCallback(
@@ -203,6 +216,7 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         content: prompt,
         citations: [],
         createdAt: timestamp,
+        mode: retrievalMode,
       };
       const assistantId = uuid();
       const assistantMessage: ChatMessage = {
@@ -212,12 +226,17 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         citations: [],
         createdAt: timestamp,
         streaming: true,
+        mode: retrievalMode,
       };
       currentStreamId.current = assistantId;
       pendingPromptRef.current = prompt;
       persistChat([...messagesRef.current, userMessage, assistantMessage]);
       try {
-        startStream({ q: prompt, history: messagesRef.current.map((message) => ({ role: message.role, content: message.content })) });
+        startStream({
+          q: prompt,
+          mode: retrievalMode,
+          history: messagesRef.current.map((message) => ({ role: message.role, content: message.content })),
+        });
       } catch (errorStream) {
         const detail = errorStream instanceof Error ? errorStream.message : 'Streaming unavailable';
         setMessages((prev) => {
@@ -231,7 +250,7 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         await completeViaHttp(assistantId, prompt);
       }
     },
-    [completeViaHttp, persistChat, startStream]
+    [completeViaHttp, persistChat, retrievalMode, startStream]
   );
 
   const retryLast = useCallback(async () => {
@@ -240,19 +259,6 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       await sendMessage(lastUser.content);
     }
   }, [sendMessage]);
-
-  const refreshTimelineOnDemand = useCallback(async () => {
-    setTimelineLoading(true);
-    try {
-      const response = await fetchTimeline({ entity: timelineEntityFilter ?? undefined, limit: 20 });
-      persistTimeline(response.events);
-      setTimelineMeta(response.meta);
-      setTimelineLoading(false);
-    } catch (timelineError) {
-      console.warn('Timeline refresh failed', timelineError);
-      setTimelineLoading(false);
-    }
-  }, [persistTimeline, timelineEntityFilter]);
 
   const loadMoreTimeline = useCallback(async () => {
     if (!timelineMeta?.has_more) return;
@@ -290,6 +296,8 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       refreshTimelineOnDemand,
       timelineEntityFilter,
       setTimelineEntityFilter,
+      retrievalMode,
+      setRetrievalMode,
     }),
     [
       messages,
@@ -305,6 +313,8 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       loadMoreTimeline,
       refreshTimelineOnDemand,
       timelineEntityFilter,
+      retrievalMode,
+      setRetrievalMode,
     ]
   );
 

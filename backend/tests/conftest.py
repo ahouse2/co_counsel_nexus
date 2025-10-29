@@ -327,6 +327,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
     monkeypatch.setenv("KNOWLEDGE_PROGRESS_PATH", str(storage_root / "knowledge" / "progress.json"))
     monkeypatch.setenv("VOICE_SESSIONS_DIR", str(storage_root / "voice" / "sessions"))
     monkeypatch.setenv("VOICE_CACHE_DIR", str(storage_root / "voice" / "cache"))
+    monkeypatch.setenv("COST_TRACKING_PATH", str(storage_root / "costs" / "events.jsonl"))
     monkeypatch.setenv("VECTOR_BACKEND", "memory")
     monkeypatch.setenv("INGESTION_COST_MODE", "community")
     monkeypatch.setenv("INGESTION_HF_MODEL", "local://tests")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import dataclass
+import time
 from io import BytesIO
 from pathlib import Path
 from typing import Iterable, List, Sequence
@@ -67,9 +69,14 @@ class WhisperTranscriber:
         self._device = device
         return device
 
+    @property
+    def device(self) -> str:
+        return self._resolve_device()
+
     def _load_model(self):
         if self._model is not None:
             return self._model
+        load_started = time.perf_counter()
         try:
             from faster_whisper import WhisperModel  # type: ignore
         except ImportError as exc:  # pragma: no cover - dependency guard
@@ -84,6 +91,19 @@ class WhisperTranscriber:
             compute_type=self.compute_type,
             download_root=str(self.cache_dir),
         )
+        load_duration = (time.perf_counter() - load_started) * 1000.0
+        try:
+            from ..costs import get_cost_tracking_service
+
+            service = get_cost_tracking_service()
+            service.record_model_load(
+                model_name=self.model_id,
+                framework="faster-whisper",
+                device=device,
+                duration_ms=load_duration,
+            )
+        except Exception:  # pragma: no cover - optional instrumentation
+            pass
         return self._model
 
     def transcribe(self, audio_bytes: bytes, *, language: str | None = None) -> TranscriptionResult:
@@ -181,9 +201,14 @@ class CoquiSynthesizer:
         self._device = device
         return device
 
+    @property
+    def device(self) -> str:
+        return self._resolve_device()
+
     def _load_model(self):
         if self._tts is not None:
             return self._tts
+        load_started = time.perf_counter()
         try:
             from TTS.api import TTS  # type: ignore
         except ImportError as exc:  # pragma: no cover - dependency guard
@@ -198,6 +223,19 @@ class CoquiSynthesizer:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             kwargs["cache_dir"] = str(self.cache_dir)
         self._tts = TTS(**kwargs)
+        load_duration = (time.perf_counter() - load_started) * 1000.0
+        try:
+            from ..costs import get_cost_tracking_service
+
+            service = get_cost_tracking_service()
+            service.record_model_load(
+                model_name=self.model_id,
+                framework="coqui-tts",
+                device=device,
+                duration_ms=load_duration,
+            )
+        except Exception:  # pragma: no cover - optional instrumentation
+            pass
         return self._tts
 
     def available_speakers(self) -> Iterable[str]:

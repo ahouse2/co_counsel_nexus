@@ -30,6 +30,7 @@ export interface ChatMessage {
   createdAt: string;
   streaming?: boolean;
   error?: string;
+  mode?: 'precision' | 'recall';
 }
 
 export interface TimelineEvent {

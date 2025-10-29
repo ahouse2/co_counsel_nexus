@@ -5,6 +5,7 @@ import { TimelineView } from '@/components/TimelineView';
 import { KnowledgeHub } from '@/components/KnowledgeHub';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { RetrievalSettings } from '@/components/RetrievalSettings';
 import { SimulationWorkbench } from '@/components/simulation/SimulationWorkbench';
 import { useQueryContext } from '@/context/QueryContext';
 
@@ -73,6 +74,7 @@ function App(): JSX.Element {
           </div>
         </div>
         <div className="header-controls">
+          <RetrievalSettings />
           <ThemeToggle />
           <OfflineIndicator />
         </div>

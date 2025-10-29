@@ -34,14 +34,24 @@ function withBase(path: string): string {
   return `${BASE}${path}`;
 }
 
-export async function postQuery(payload: { q: string; filters?: Record<string, string> }): Promise<QueryResponse> {
-  const response = await fetch(withBase('/query'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
+type QueryPayload = {
+  q: string;
+  filters?: Record<string, string>;
+  mode?: 'precision' | 'recall';
+};
+
+export async function postQuery(payload: QueryPayload): Promise<QueryResponse> {
+  const params = new URLSearchParams();
+  params.set('q', payload.q);
+  params.set('mode', payload.mode ?? 'precision');
+  if (payload.filters) {
+    Object.entries(payload.filters).forEach(([key, value]) => {
+      if (value) {
+        params.set(`filters[${key}]`, value);
+      }
+    });
+  }
+  const response = await fetch(withBase(`/query?${params.toString()}`));
   if (response.status === 204) {
     return {
       answer: 'No supporting evidence found for the supplied query.',
@@ -112,14 +122,36 @@ export async function fetchTimeline(
   return (await response.json()) as TimelineResponse;
 }
 
-export function buildStreamUrl(): string {
+export function buildStreamUrl(params?: { mode?: string; filters?: Record<string, string> }): string {
   const base = BASE || (typeof window !== 'undefined' ? window.location.origin : '');
   if (!base) {
-    return '/query/stream';
+    const search = new URLSearchParams();
+    if (params?.mode) {
+      search.set('mode', params.mode);
+    }
+    if (params?.filters) {
+      Object.entries(params.filters).forEach(([key, value]) => {
+        if (value) {
+          search.set(`filters[${key}]`, value);
+        }
+      });
+    }
+    const suffix = search.toString();
+    return suffix ? `/query/stream?${suffix}` : '/query/stream';
   }
   const url = new URL(base);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/query/stream';
+  if (params?.mode) {
+    url.searchParams.set('mode', params.mode);
+  }
+  if (params?.filters) {
+    Object.entries(params.filters).forEach(([key, value]) => {
+      if (value) {
+        url.searchParams.set(`filters[${key}]`, value);
+      }
+    });
+  }
   return url.toString();
 }
 

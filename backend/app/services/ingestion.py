@@ -9,12 +9,16 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock
+from time import perf_counter
 from typing import Any, Dict, List, Sequence, Set, Tuple
 from uuid import uuid4
 
 from fastapi import HTTPException, status
 from qdrant_client.http import models as qmodels
 import numpy as np
+
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
 
 from ..config import get_settings
 from ..models.api import IngestionRequest, IngestionSource
@@ -92,6 +96,36 @@ class GraphMutation:
 _DEFAULT_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+
+_ingestion_jobs_counter = _meter.create_counter(
+    "ingestion_jobs_total",
+    unit="1",
+    description="Ingestion job lifecycle events",
+)
+_ingestion_job_duration = _meter.create_histogram(
+    "ingestion_job_duration_ms",
+    unit="ms",
+    description="Total duration of ingestion jobs",
+)
+_ingestion_source_duration = _meter.create_histogram(
+    "ingestion_source_duration_ms",
+    unit="ms",
+    description="Duration to process each ingestion source",
+)
+_ingestion_documents_counter = _meter.create_counter(
+    "ingestion_documents_total",
+    unit="1",
+    description="Documents processed during ingestion",
+)
+_ingestion_errors_counter = _meter.create_counter(
+    "ingestion_job_errors_total",
+    unit="1",
+    description="Ingestion jobs ending in failure",
+)
+
+
 class IngestionService:
     def __init__(
         self,
@@ -132,6 +166,7 @@ class IngestionService:
                 detail="At least one source must be provided",
             )
 
+        actor = self._actor_from_principal(principal)
         connectors = [
             (
                 build_connector(source.type, self.settings, self.credential_registry, self.logger),
@@ -142,61 +177,64 @@ class IngestionService:
 
         job_id = str(uuid4())
         submitted_at = datetime.now(timezone.utc)
-        actor = self._actor_from_principal(principal)
         job_record = self._initialise_job_record(job_id, submitted_at, request.sources, actor)
         self.job_store.write_job(job_id, job_record)
 
-        for index, source in enumerate(request.sources):
-            connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
-        for connector, source in connectors:
-            try:
-                connector.preflight(source)
-            except HTTPException as exc:
-                message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-                error_payload = {
-                    "code": str(getattr(exc, "status_code", "INGESTION_ERROR")),
-                    "message": message,
-                    "source": f"preflight::{source.type.lower()}",
-                }
-                self._record_error(job_record, error_payload)
-                job_record.setdefault("status_details", {}).setdefault("ingestion", {}).setdefault("skipped", []).append(
-                    {"index": index, "source": source.type, "reason": message}
-                )
-                self._transition_job(job_record, "failed")
-                self.job_store.write_job(job_id, job_record)
-                self._audit_job_event(
-                    job_id,
-                    action="ingest.queue.preflight_failed",
-                    outcome="error",
-                    metadata={"source_type": source.type, "index": index},
-                    actor=actor,
-                    severity="error",
-                )
-                self._record_error(
-                    job_record,
-                    {
-                        "code": str(exc.status_code),
-                        "message": message,
-                        "source": source.type,
-                    },
-                )
-                self._transition_job(job_record, "failed")
-                self._touch_job(job_record)
-                self.job_store.write_job(job_id, job_record)
-                severity = "error" if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR else "warning"
-                self._audit_job_event(
-                    job_id,
-                    action="ingest.job.preflight_failed",
-                    outcome="error",
-                    metadata={"source_type": source.type, "status_code": exc.status_code},
-                    actor=actor,
-                    severity=severity,
-                )
-                return job_id
+        sources_attribute = ",".join(sorted({source.type for source in request.sources}))
+        with _tracer.start_as_current_span("ingestion.enqueue") as span:
+            span.set_attribute("ingestion.job_id", job_id)
+            span.set_attribute("ingestion.source_count", len(request.sources))
+            span.set_attribute("ingestion.sources", sources_attribute)
+            _ingestion_jobs_counter.add(1, attributes={"state": "accepted"})
 
-        request_copy = request.model_copy(deep=True)
-        future = self.executor.submit(self._run_job, job_id, request_copy, job_record)
-        future.add_done_callback(self._log_job_failure(job_id))
+            for index, (connector, source) in enumerate(connectors):
+                try:
+                    connector.preflight(source)
+                except HTTPException as exc:
+                    message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                    span.record_exception(exc)
+                    span.set_status(Status(StatusCode.ERROR, description=message))
+                    _ingestion_errors_counter.add(
+                        1,
+                        attributes={"phase": "preflight", "source_type": source.type},
+                    )
+                    error_payload = {
+                        "code": str(getattr(exc, "status_code", "INGESTION_ERROR")),
+                        "message": message,
+                        "source": f"preflight::{source.type.lower()}",
+                    }
+                    self._record_error(job_record, error_payload)
+                    job_record.setdefault("status_details", {}).setdefault("ingestion", {}).setdefault("skipped", []).append(
+                        {"index": index, "source": source.type, "reason": message}
+                    )
+                    self._transition_job(job_record, "failed")
+                    self.job_store.write_job(job_id, job_record)
+                    self._audit_job_event(
+                        job_id,
+                        action="ingest.queue.preflight_failed",
+                        outcome="error",
+                        metadata={"source_type": source.type, "index": index},
+                        actor=actor,
+                        severity="error",
+                    )
+                    severity = "error" if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR else "warning"
+                    self._audit_job_event(
+                        job_id,
+                        action="ingest.job.preflight_failed",
+                        outcome="error",
+                        metadata={"source_type": source.type, "status_code": exc.status_code},
+                        actor=actor,
+                        severity=severity,
+                    )
+                    return job_id
+
+            try:
+                request_copy = request.model_copy(deep=True)
+                future = self.executor.submit(self._run_job, job_id, request_copy, job_record)
+                future.add_done_callback(self._log_job_failure(job_id))
+            finally:
+                span.set_status(Status(StatusCode.OK))
+            _ingestion_jobs_counter.add(1, attributes={"state": "enqueued"})
         return job_id
 
     def get_job(self, job_id: str) -> Dict[str, object]:
@@ -336,102 +374,145 @@ class IngestionService:
         graph_edges: Set[Tuple[str, str, str, str | None]] = set()
         triple_count = 0
         current_source_type: str | None = None
+        job_started = perf_counter()
 
-        try:
-            for index, source in enumerate(request.sources):
-                current_source_type = source.type
-                self.logger.info(
-                    "Processing ingestion source",
-                    extra={"job_id": job_id, "source_type": source.type, "index": index},
-                )
-                connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
-                materialized = connector.materialize(job_id, index, source)
-                documents, events, skipped, mutation, reports = self._ingest_materialized_source(job_id, materialized)
-                all_documents.extend(documents)
-                all_events.extend(events)
-                graph_nodes.update(mutation.nodes)
-                graph_edges.update(mutation.edges)
-                triple_count += mutation.triples
+        with _tracer.start_as_current_span("ingestion.execute") as span:
+            span.set_attribute("ingestion.job_id", job_id)
+            span.set_attribute("ingestion.source_count", len(request.sources))
+            try:
+                for index, source in enumerate(request.sources):
+                    current_source_type = source.type
+                    source_started = perf_counter()
+                    self.logger.info(
+                        "Processing ingestion source",
+                        extra={"job_id": job_id, "source_type": source.type, "index": index},
+                    )
+                    connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
+                    materialized = connector.materialize(job_id, index, source)
+                    with _tracer.start_as_current_span(
+                        "ingestion.source",
+                        attributes={"ingestion.source_type": source.type, "ingestion.job_id": job_id},
+                    ):
+                        documents, events, skipped, mutation, reports = self._ingest_materialized_source(
+                            job_id, materialized
+                        )
+                    source_duration = (perf_counter() - source_started) * 1000.0
+                    _ingestion_source_duration.record(
+                        source_duration,
+                        attributes={"source_type": source.type},
+                    )
+                    if documents:
+                        _ingestion_documents_counter.add(
+                            len(documents), attributes={"source_type": source.type}
+                        )
+                    all_documents.extend(documents)
+                    all_events.extend(events)
+                    graph_nodes.update(mutation.nodes)
+                    graph_edges.update(mutation.edges)
+                    triple_count += mutation.triples
 
-                job_record.setdefault("documents", [])
-                job_record["documents"].extend(doc.to_dict() for doc in documents)
-                job_record["status_details"]["ingestion"]["documents"] += len(documents)
-                job_record["status_details"]["ingestion"]["skipped"].extend(skipped)
-                job_record["status_details"]["timeline"]["events"] += len(events)
-                job_record["status_details"]["forensics"]["artifacts"].extend(
-                    self._format_forensics_status(report) for report in reports
+                    job_record.setdefault("documents", [])
+                    job_record["documents"].extend(doc.to_dict() for doc in documents)
+                    job_record["status_details"]["ingestion"]["documents"] += len(documents)
+                    job_record["status_details"]["ingestion"]["skipped"].extend(skipped)
+                    job_record["status_details"]["timeline"]["events"] += len(events)
+                    job_record["status_details"]["forensics"]["artifacts"].extend(
+                        self._format_forensics_status(report) for report in reports
+                    )
+                    if reports:
+                        job_record["status_details"]["forensics"]["last_run_at"] = reports[-1].generated_at
+                    job_record["status_details"]["graph"]["nodes"] = len(graph_nodes)
+                    job_record["status_details"]["graph"]["edges"] = len(graph_edges)
+                    job_record["status_details"]["graph"]["triples"] = triple_count
+                    self._touch_job(job_record)
+                    self.job_store.write_job(job_id, job_record)
+                    self._audit_job_event(
+                        job_id,
+                        action="ingest.source.processed",
+                        outcome="success",
+                        metadata={
+                            "source_type": source.type,
+                            "index": index,
+                            "documents": len(documents),
+                            "timeline_events": len(events),
+                            "skipped": len(skipped),
+                            "graph_nodes": len(graph_nodes),
+                            "graph_edges": len(graph_edges),
+                            "triples": triple_count,
+                        },
+                        actor=self._job_actor(job_record),
+                    )
+            except HTTPException as exc:
+                _ingestion_errors_counter.add(
+                    1,
+                    attributes={"phase": "execute", "source_type": current_source_type or "unknown"},
                 )
-                if reports:
-                    job_record["status_details"]["forensics"]["last_run_at"] = reports[-1].generated_at
-                job_record["status_details"]["graph"]["nodes"] = len(graph_nodes)
-                job_record["status_details"]["graph"]["edges"] = len(graph_edges)
-                job_record["status_details"]["graph"]["triples"] = triple_count
-                self._touch_job(job_record)
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, description=str(exc.detail)))
+                _ingestion_jobs_counter.add(
+                    1, attributes={"state": "completed", "status": "failed"}
+                )
+                self._record_error(
+                    job_record,
+                    {
+                        "code": str(exc.status_code),
+                        "message": exc.detail,
+                        "source": current_source_type or "unknown",
+                    },
+                )
+                self._transition_job(job_record, "failed")
                 self.job_store.write_job(job_id, job_record)
+                self.logger.warning(
+                    "Ingestion failed with HTTP error",
+                    extra={"job_id": job_id, "status_code": exc.status_code},
+                )
                 self._audit_job_event(
                     job_id,
-                    action="ingest.source.processed",
-                    outcome="success",
-                    metadata={
-                        "source_type": source.type,
-                        "index": index,
-                        "documents": len(documents),
-                        "timeline_events": len(events),
-                        "skipped": len(skipped),
-                        "graph_nodes": len(graph_nodes),
-                        "graph_edges": len(graph_edges),
-                        "triples": triple_count,
-                    },
+                    action="ingest.job.failed",
+                    outcome="error",
+                    metadata={"status_code": exc.status_code, "detail": exc.detail},
                     actor=self._job_actor(job_record),
+                    severity="error",
                 )
-        except HTTPException as exc:
-            self._record_error(
-                job_record,
-                {
-                    "code": str(exc.status_code),
-                    "message": exc.detail,
-                    "source": current_source_type or "unknown",
-                },
-            )
-            self._transition_job(job_record, "failed")
-            self.job_store.write_job(job_id, job_record)
-            self.logger.warning(
-                "Ingestion failed with HTTP error",
-                extra={"job_id": job_id, "status_code": exc.status_code},
-            )
-            self._audit_job_event(
-                job_id,
-                action="ingest.job.failed",
-                outcome="error",
-                metadata={"status_code": exc.status_code, "detail": exc.detail},
-                actor=self._job_actor(job_record),
-                severity="error",
-            )
-            raise
-        except Exception as exc:  # pylint: disable=broad-except
-            self._record_error(
-                job_record,
-                {
-                    "code": "INGESTION_ERROR",
-                    "message": str(exc),
-                    "source": current_source_type or "unknown",
-                },
-            )
-            self._transition_job(job_record, "failed")
-            self.job_store.write_job(job_id, job_record)
-            self.logger.exception("Unexpected ingestion failure", extra={"job_id": job_id})
-            self._audit_job_event(
-                job_id,
-                action="ingest.job.failed",
-                outcome="error",
-                metadata={"error": str(exc)},
-                actor=self._job_actor(job_record),
-                severity="error",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Ingestion failed unexpectedly",
-            ) from exc
+                raise
+            except Exception as exc:  # pylint: disable=broad-except
+                _ingestion_errors_counter.add(
+                    1,
+                    attributes={"phase": "execute", "source_type": current_source_type or "unknown"},
+                )
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, description=str(exc)))
+                _ingestion_jobs_counter.add(
+                    1, attributes={"state": "completed", "status": "failed"}
+                )
+                self._record_error(
+                    job_record,
+                    {
+                        "code": "INGESTION_ERROR",
+                        "message": str(exc),
+                        "source": current_source_type or "unknown",
+                    },
+                )
+                self._transition_job(job_record, "failed")
+                self.job_store.write_job(job_id, job_record)
+                self.logger.exception("Unexpected ingestion failure", extra={"job_id": job_id})
+                self._audit_job_event(
+                    job_id,
+                    action="ingest.job.failed",
+                    outcome="error",
+                    metadata={"error": str(exc)},
+                    actor=self._job_actor(job_record),
+                    severity="error",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Ingestion failed unexpectedly",
+                ) from exc
+            else:
+                duration_ms = (perf_counter() - job_started) * 1000.0
+                _ingestion_job_duration.record(duration_ms, attributes={"status": "succeeded"})
+                _ingestion_jobs_counter.add(1, attributes={"state": "completed", "status": "succeeded"})
+                span.set_status(Status(StatusCode.OK))
 
         if all_events:
             self.timeline_store.append(all_events)

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import time
-from datetime import datetime, timezone
-from typing import List
-
 import base64
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
-from typing import Any, Dict
+import time
+from dataclasses import asdict
+from datetime import datetime, timezone
+from typing import Any, Dict, List
 
 from fastapi import (
     Depends,
@@ -44,6 +42,9 @@ from .models.api import (
     DevAgentProposalListResponse,
     DevAgentProposalModel,
     DevAgentTaskModel,
+    CostEventModel,
+    CostSummaryMetricModel,
+    CostSummaryResponse,
     ForensicsResponse,
     GraphEdgeModel,
     GraphNeighborResponse,
@@ -87,6 +88,7 @@ from .models.api import (
 )
 from .scenarios.schema import ScenarioDefinition, ScenarioEvidenceRequirement, ScenarioMetadata, ScenarioParticipant, ScenarioVariable
 from .services.agents import AgentsService, get_agents_service
+from .services.costs import CostEventCategory, CostTrackingService, get_cost_tracking_service
 from .services.dev_agent import DevAgentService, get_dev_agent_service
 from .services.errors import WorkflowAbort, WorkflowException, http_status_for_error
 from .services.forensics import ForensicsService, get_forensics_service
@@ -112,11 +114,11 @@ from .security.dependencies import (
     authorize_agents_read,
     authorize_agents_run,
     authorize_dev_agent_admin,
+    authorize_billing_admin,
     authorize_forensics_document,
     authorize_forensics_financial,
     authorize_forensics_image,
     authorize_graph_read,
-    authorize_billing_admin,
     authorize_ingest_enqueue,
     authorize_ingest_status,
     authorize_knowledge_read,
@@ -359,6 +361,8 @@ def ingest(
         BillingEventType.INGESTION,
         units=float(max(1, len(payload.sources))),
         attributes={
+            "endpoint": "/ingest",
+            "method": "POST",
             "job_id": job_id,
             "source_types": sorted({source.type for source in payload.sources}),
         },
@@ -549,6 +553,8 @@ def query(
     if "CaseCoordinator" in principal.roles and "query:trace" not in principal.scopes:
         payload["traces"] = {"vector": [], "graph": {"nodes": [], "edges": []}, "forensics": []}
     billing_attrs = {
+        "endpoint": "/query",
+        "method": "GET",
         "latency_ms": latency_ms,
         "page": page,
         "page_size": page_size,
@@ -596,6 +602,8 @@ def timeline(
         principal,
         BillingEventType.TIMELINE,
         attributes={
+            "endpoint": "/timeline",
+            "method": "GET",
             "limit": limit,
             "cursor": bool(cursor),
             "entity": bool(entity),
@@ -713,6 +721,8 @@ def agents_run(
         principal,
         BillingEventType.AGENT,
         attributes={
+            "endpoint": "/agents/run",
+            "method": "POST",
             "case_id": payload.case_id,
             "thread_id": payload_model.thread_id,
             "turns": len(payload_model.turns),
@@ -863,6 +873,59 @@ def billing_usage(
     )
 
 
+@app.get("/costs/summary", response_model=CostSummaryResponse)
+def cost_summary(
+    window_hours: float = Query(24.0, ge=0.5, le=720.0, description="Lookback window in hours"),
+    tenant_id: str | None = Query(default=None, description="Tenant identifier to filter summary"),
+    service: CostTrackingService = Depends(get_cost_tracking_service),
+    principal: Principal = Depends(authorize_billing_admin),
+) -> JSONResponse:
+    _ = principal
+    summary = service.summarise(window_hours=window_hours, tenant_id=tenant_id)
+    response = CostSummaryResponse(
+        generated_at=summary.generated_at,
+        window_hours=summary.window_hours,
+        tenant_id=summary.tenant_id,
+        api_calls=CostSummaryMetricModel(**asdict(summary.api_calls)),
+        model_loads=CostSummaryMetricModel(**asdict(summary.model_loads)),
+        gpu_utilisation=CostSummaryMetricModel(**asdict(summary.gpu_utilisation)),
+    )
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.get("/costs/events", response_model=List[CostEventModel])
+def cost_events(
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of events to return"),
+    tenant_id: str | None = Query(default=None, description="Filter events by tenant"),
+    category: str | None = Query(default=None, description="Filter by category: api, model, gpu"),
+    service: CostTrackingService = Depends(get_cost_tracking_service),
+    principal: Principal = Depends(authorize_billing_admin),
+) -> JSONResponse:
+    _ = principal
+    category_value = None
+    if category:
+        try:
+            category_value = CostEventCategory(category)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid category") from exc
+    records = service.list_events(limit=limit, tenant_id=tenant_id, category=category_value)
+    events = [
+        CostEventModel(
+            event_id=record.event_id,
+            timestamp=record.timestamp,
+            tenant_id=record.tenant_id,
+            category=record.category,  # type: ignore[arg-type]
+            name=record.name,
+            amount=record.amount,
+            unit=record.unit,
+            metadata=record.metadata,
+        )
+        for record in records
+    ]
+    payload = [event.model_dump(mode="json") for event in events]
+    return JSONResponse(content=payload)
+
+
 def _recommend_plan(submission: OnboardingSubmission) -> str:
     seat_count = submission.seats
     matters = submission.estimated_matters_per_month
@@ -882,6 +945,8 @@ def onboarding_submission(payload: OnboardingSubmission) -> OnboardingSubmission
         None,
         BillingEventType.SIGNUP,
         attributes={
+            "endpoint": "/onboarding",
+            "method": "POST",
             "tenant_id": payload.tenant_id,
             "organization": payload.organization,
             "contact_email": payload.contact_email,
