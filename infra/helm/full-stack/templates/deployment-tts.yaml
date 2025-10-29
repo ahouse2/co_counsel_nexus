@@ -1,0 +1,71 @@
+{{- $name := include "full-stack.fullname" . -}}
+{{- $resources := deepCopy (default (dict) .Values.tts.resources) -}}
+{{- if .Values.tts.gpu.enabled }}
+  {{- if not (hasKey $resources "limits") }}
+    {{- $_ := set $resources "limits" (dict) }}
+  {{- end }}
+  {{- range $k, $v := .Values.tts.gpu.resourceLimits }}
+    {{- $_ := set $resources.limits $k $v }}
+  {{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-tts
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.tts.replicas }}
+  selector:
+    matchLabels:
+      {{- include "full-stack.selectorLabels" . | nindent 6 }}
+      component: tts
+  template:
+    metadata:
+      labels:
+        {{- include "full-stack.labels" . | nindent 8 }}
+        component: tts
+    spec:
+      containers:
+        - name: tts
+          image: {{ .Values.tts.image }}
+          ports:
+            - containerPort: 5002
+              name: http
+          env:
+            - name: LARYNX_VOICE
+              value: {{ .Values.tts.voice | quote }}
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /models/huggingface
+            - name: LARYNX_OUTPUT_DIR
+              value: /output
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: output
+              mountPath: /output
+          {{- if $resources }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ $name }}-models
+        - name: output
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-tts
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "full-stack.selectorLabels" . | nindent 4 }}
+    component: tts
+  ports:
+    - name: http
+      port: 5002
+      targetPort: http
