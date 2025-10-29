@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 
+from agents.toolkit.sandbox import SandboxExecutionResult
+
 from .config import get_settings
 from .telemetry import setup_telemetry
 from .telemetry.billing import (
@@ -21,6 +23,13 @@ from .models.api import (
     AgentThreadListResponse,
     BillingPlanListResponse,
     BillingUsageResponse,
+    DevAgentApplyRequest,
+    DevAgentApplyResponse,
+    DevAgentProposalListResponse,
+    DevAgentProposalModel,
+    DevAgentTaskModel,
+    SandboxCommandResultModel,
+    SandboxExecutionModel,
     ForensicsResponse,
     GraphEdgeModel,
     GraphNeighborResponse,
@@ -36,6 +45,7 @@ from .models.api import (
     TimelineResponse,
 )
 from .services.agents import AgentsService, get_agents_service
+from .services.dev_agent import DevAgentService, get_dev_agent_service
 from .services.errors import WorkflowException, http_status_for_error
 from .services.forensics import ForensicsService, get_forensics_service
 from .services.graph import GraphService, get_graph_service
@@ -51,6 +61,7 @@ from .security.authz import Principal
 from .security.dependencies import (
     authorize_agents_read,
     authorize_agents_run,
+    authorize_dev_agent_admin,
     authorize_forensics_document,
     authorize_forensics_financial,
     authorize_forensics_image,
@@ -63,6 +74,7 @@ from .security.dependencies import (
     create_mtls_config,
 )
 from .security.mtls import MTLSMiddleware
+from .storage.agent_memory_store import ImprovementTaskRecord, PatchProposalRecord
 
 settings = get_settings()
 setup_telemetry(settings)
@@ -73,6 +85,61 @@ app.add_middleware(MTLSMiddleware, config=create_mtls_config())
 def _raise_workflow_exception(exc: WorkflowException) -> None:
     status_code = exc.status_code or http_status_for_error(exc.error)
     raise HTTPException(status_code=status_code, detail=exc.error.to_dict()) from exc
+
+
+def _proposal_from_record(
+    task: ImprovementTaskRecord,
+    proposal: PatchProposalRecord,
+) -> DevAgentProposalModel:
+    return DevAgentProposalModel(
+        proposal_id=proposal.proposal_id,
+        task_id=proposal.task_id,
+        feature_request_id=task.feature_request_id,
+        title=proposal.title,
+        summary=proposal.summary,
+        diff=proposal.diff,
+        status=proposal.status,
+        created_at=proposal.created_at,
+        created_by=dict(proposal.created_by),
+        validation=dict(proposal.validation),
+        approvals=[dict(entry) for entry in proposal.approvals],
+        rationale=list(proposal.rationale),
+    )
+
+
+def _task_from_record(task: ImprovementTaskRecord) -> DevAgentTaskModel:
+    proposals = [_proposal_from_record(task, proposal) for proposal in task.proposals]
+    return DevAgentTaskModel(
+        task_id=task.task_id,
+        feature_request_id=task.feature_request_id,
+        title=task.title,
+        description=task.description,
+        priority=task.priority,
+        status=task.status,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+        planner_notes=list(task.planner_notes),
+        risk_score=task.risk_score,
+        metadata=dict(task.metadata),
+        proposals=proposals,
+    )
+
+
+def _execution_from_result(result: SandboxExecutionResult) -> SandboxExecutionModel:
+    return SandboxExecutionModel(
+        success=result.success,
+        workspace_id=result.workspace_id,
+        commands=[
+            SandboxCommandResultModel(
+                command=list(command.command),
+                return_code=command.return_code,
+                stdout=command.stdout,
+                stderr=command.stderr,
+                duration_ms=command.duration_ms,
+            )
+            for command in result.commands
+        ],
+    )
 
 
 @app.on_event("startup")
@@ -384,6 +451,33 @@ def agents_threads(
 ) -> AgentThreadListResponse:
     threads = service.list_threads()
     return AgentThreadListResponse(threads=threads)
+
+
+@app.get("/dev-agent/proposals", response_model=DevAgentProposalListResponse)
+def dev_agent_proposals(
+    service: DevAgentService = Depends(get_dev_agent_service),
+    principal: Principal = Depends(authorize_dev_agent_admin),
+) -> DevAgentProposalListResponse:
+    _ = principal
+    backlog_models = [_task_from_record(task) for task in service.list_backlog()]
+    return DevAgentProposalListResponse(backlog=backlog_models)
+
+
+@app.post("/dev-agent/apply", response_model=DevAgentApplyResponse)
+def dev_agent_apply(
+    payload: DevAgentApplyRequest,
+    service: DevAgentService = Depends(get_dev_agent_service),
+    principal: Principal = Depends(authorize_dev_agent_admin),
+) -> DevAgentApplyResponse:
+    result = service.apply_proposal(payload.proposal_id, principal)
+    task_model = _task_from_record(result.task)
+    proposal_model = _proposal_from_record(result.task, result.proposal)
+    execution_model = _execution_from_result(result.execution)
+    return DevAgentApplyResponse(
+        proposal=proposal_model,
+        task=task_model,
+        execution=execution_model,
+    )
 
 
 @app.get("/billing/plans", response_model=BillingPlanListResponse)
