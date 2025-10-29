@@ -72,6 +72,60 @@ def test_merge_properties_handles_evidence_lists() -> None:
     assert appended["evidence"] == ["a", "b", "c"]
 
 
+def test_compute_community_summary(memory_graph: graph_module.GraphService) -> None:
+    memory_graph.upsert_document("doc-community", "Community Doc", {"category": "test"})
+    memory_graph.upsert_entity("entity-alpha", "Entity", {"label": "Alpha"})
+    memory_graph.upsert_entity("entity-beta", "Entity", {"label": "Beta"})
+    memory_graph.merge_relation("doc-community", "MENTIONS", "entity-alpha", {"doc_id": "doc-community"})
+    memory_graph.merge_relation("doc-community", "MENTIONS", "entity-beta", {"doc_id": "doc-community"})
+    memory_graph.merge_relation("entity-alpha", "ASSOCIATED_WITH", "entity-beta", {"doc_id": "doc-community"})
+
+    summary = memory_graph.compute_community_summary({"doc-community", "entity-alpha"})
+    assert summary.total_nodes >= 2
+    assert summary.communities
+    community = summary.communities[0]
+    node_ids = {node["id"] for node in community.nodes}
+    assert {"doc-community", "entity-alpha"}.issubset(node_ids)
+
+
+def test_subgraph_payload(memory_graph: graph_module.GraphService) -> None:
+    memory_graph.upsert_document("doc-subgraph", "Subgraph Doc", {"category": "graph"})
+    memory_graph.upsert_entity("entity-source", "Entity", {"label": "Source"})
+    memory_graph.upsert_entity("entity-target", "Entity", {"label": "Target"})
+    memory_graph.merge_relation(
+        "doc-subgraph",
+        "MENTIONS",
+        "entity-source",
+        {"doc_id": "doc-subgraph", "evidence": ["pg-1"]},
+    )
+    memory_graph.merge_relation(
+        "entity-source",
+        "ASSOCIATED_WITH",
+        "entity-target",
+        {"doc_id": "doc-subgraph", "predicate": "ASSOCIATED_WITH"},
+    )
+
+    subgraph = memory_graph.subgraph(["entity-source", "entity-target"])
+    payload = subgraph.to_payload()
+    node_ids = {node["id"] for node in payload["nodes"]}
+    assert {"entity-source", "entity-target", "doc-subgraph"} <= node_ids
+    assert any(edge["type"] == "ASSOCIATED_WITH" for edge in payload["edges"])
+    assert "doc-subgraph" in subgraph.document_ids()
+
+
+def test_run_cypher_memory(memory_graph: graph_module.GraphService) -> None:
+    memory_graph.upsert_document("doc-cypher", "Cypher Doc", {})
+    result = memory_graph.run_cypher("MATCH (n) RETURN n")
+    assert result["summary"]["mode"] == "memory"
+    assert any(record["n"]["id"] == "doc-cypher" for record in result["records"])
+
+
+def test_build_text_to_cypher_prompt(memory_graph: graph_module.GraphService) -> None:
+    prompt = memory_graph.build_text_to_cypher_prompt("List all documents")
+    assert "List all documents" in prompt
+    assert "Node types" in prompt
+
+
 class _DummyNode(dict):
     def __init__(self, node_id: str, labels: list[str], props: dict[str, object]):
         super().__init__(props)

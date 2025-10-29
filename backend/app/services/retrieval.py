@@ -13,9 +13,10 @@ from ..config import get_settings
 from backend.ingestion.llama_index_factory import create_embedding_model, configure_global_settings
 from backend.ingestion.settings import build_runtime_config
 from ..storage.document_store import DocumentStore
+from ..storage.timeline_store import TimelineStore
 from ..utils.triples import extract_entities, normalise_entity_id
 from .forensics import ForensicsService, get_forensics_service
-from .graph import GraphEdge, GraphNode, GraphService, get_graph_service
+from .graph import GraphEdge, GraphNode, GraphService, GraphSubgraph, get_graph_service
 from .privilege import (
     PrivilegeClassifierService,
     PrivilegeDecision,
@@ -125,6 +126,7 @@ class RetrievalService:
         self.runtime_config = build_runtime_config(self.settings)
         configure_global_settings(self.runtime_config)
         self.embedding_model = create_embedding_model(self.runtime_config.embedding)
+        self.timeline_store = TimelineStore(self.settings.timeline_path)
 
     def query(
         self,
@@ -390,46 +392,36 @@ class RetrievalService:
             for point in results
         ]
         forensics_trace = self._build_forensics_trace(results)
-        node_map: Dict[str, GraphNode] = {}
-        edge_bucket: Dict[Tuple[str, str, str, object], GraphEdge] = {}
+        subgraph: GraphSubgraph = self.graph_service.subgraph(entity_ids)
+        node_map: Dict[str, GraphNode] = dict(subgraph.nodes)
+        edge_bucket: Dict[Tuple[str, str, str, str | None], GraphEdge] = dict(subgraph.edges)
         relation_statements: List[Tuple[str, str | None]] = []
         statement_seen: Set[Tuple[str, str | None]] = set()
-        for entity_id in entity_ids:
-            try:
-                node_list, edge_list = self.graph_service.neighbors(entity_id)
-            except KeyError:
+        for edge in edge_bucket.values():
+            if edge.type == "MENTIONS":
                 continue
-            for node in node_list:
-                node_map[node.id] = node
-            for edge in edge_list:
-                key = (edge.source, edge.type, edge.target, edge.properties.get("doc_id"))
-                if key not in edge_bucket:
-                    edge_bucket[key] = edge
-                if edge.type != "MENTIONS":
-                    statement = self._format_relation_statement(edge, node_map)
-                    if not statement:
-                        continue
-                    doc_id_raw = edge.properties.get("doc_id")
-                    doc_id = str(doc_id_raw) if doc_id_raw is not None else None
-                    statement_key = (statement, doc_id)
-                    if statement_key not in statement_seen:
-                        statement_seen.add(statement_key)
-                        relation_statements.append(statement_key)
-        graph_trace = {
-            "nodes": [
-                {"id": node.id, "type": node.type, "properties": node.properties}
-                for node in node_map.values()
-            ],
-            "edges": [
-                {
-                    "source": edge.source,
-                    "target": edge.target,
-                    "type": edge.type,
-                    "properties": edge.properties,
-                }
-                for edge in edge_bucket.values()
-            ],
+            statement = self._format_relation_statement(edge, node_map)
+            if not statement:
+                continue
+            doc_id_raw = edge.properties.get("doc_id")
+            doc_id = str(doc_id_raw) if doc_id_raw is not None else None
+            statement_key = (statement, doc_id)
+            if statement_key in statement_seen:
+                continue
+            statement_seen.add(statement_key)
+            relation_statements.append(statement_key)
+        graph_trace = subgraph.to_payload()
+        doc_ids_from_results: Set[str] = {
+            str(point.payload.get("doc_id"))
+            for point in results
+            if point.payload and point.payload.get("doc_id") is not None
         }
+        doc_scope = doc_ids_from_results | subgraph.document_ids()
+        graph_trace["communities"] = [
+            community.to_dict()
+            for community in self.graph_service.communities_for_nodes(node_map.keys())
+        ]
+        graph_trace["events"] = self._timeline_events_for_docs(doc_scope)
         privilege_trace = self._build_privilege_trace(results)
         trace = Trace(
             vector=vector_trace,
@@ -519,6 +511,28 @@ class RetrievalService:
                 }
             )
         return entries
+
+    def _timeline_events_for_docs(self, doc_ids: Set[str]) -> List[Dict[str, object]]:
+        if not doc_ids:
+            return []
+        events = self.timeline_store.read_all()
+        payload: List[Dict[str, object]] = []
+        for event in events:
+            if not any(citation in doc_ids for citation in event.citations):
+                continue
+            payload.append(
+                {
+                    "id": event.id,
+                    "ts": event.ts.isoformat(),
+                    "title": event.title,
+                    "summary": event.summary,
+                    "citations": list(event.citations),
+                    "entity_highlights": list(event.entity_highlights),
+                    "relation_tags": list(event.relation_tags),
+                    "confidence": event.confidence,
+                }
+            )
+        return payload
 
     def _apply_filters(
         self,
