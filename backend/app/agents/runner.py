@@ -151,9 +151,14 @@ class MicrosoftAgentsOrchestrator:
 
         telemetry["sequence_valid"] = True
         telemetry["total_duration_ms"] = round(sum(telemetry["durations_ms"]), 2)
-        telemetry["status"] = "succeeded"
         telemetry.setdefault("errors", [])
-        thread.status = "succeeded"
+        gating = telemetry.get("gating", {})
+        if gating.get("requires_privilege_review"):
+            telemetry["status"] = "needs_privilege_review"
+            thread.status = "needs_privilege_review"
+        else:
+            telemetry["status"] = "succeeded"
+            thread.status = "succeeded"
         thread.telemetry = telemetry
         memory.persist()
         thread.updated_at = _utcnow()

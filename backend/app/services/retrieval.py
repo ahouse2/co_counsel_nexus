@@ -4,7 +4,7 @@ import json
 from enum import Enum
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 from qdrant_client.http import models as qmodels
 
@@ -498,14 +498,7 @@ class RetrievalService:
     def _build_trace(
         self, results: List[qmodels.ScoredPoint], entity_ids: List[str]
     ) -> Tuple[Trace, List[Tuple[str, str | None]]]:
-        vector_trace = [
-            {
-                "id": str(point.id),
-                "score": point.score,
-                "docId": point.payload.get("doc_id") if point.payload else None,
-            }
-            for point in results
-        ]
+        vector_trace = [self._vector_trace_entry(point) for point in results]
         forensics_trace = self._build_forensics_trace(results)
         subgraph: GraphSubgraph = self.graph_service.subgraph(entity_ids)
         node_map: Dict[str, GraphNode] = dict(subgraph.nodes)
@@ -546,6 +539,36 @@ class RetrievalService:
         )
         return trace, relation_statements
 
+    def _vector_trace_entry(self, point: qmodels.ScoredPoint) -> Dict[str, object]:
+        payload = point.payload or {}
+        raw_doc = payload.get("doc_id")
+        doc_id = str(raw_doc) if raw_doc is not None else None
+        text = str(payload.get("text", ""))
+        preview = text[:180] + ("..." if len(text) > 180 else "")
+        entry = {
+            "id": str(point.id),
+            "score": float(point.score),
+            "docId": doc_id,
+            "chunkIndex": payload.get("chunk_index"),
+            "sourceType": payload.get("source_type"),
+            "embeddingNorm": payload.get("embedding_norm"),
+            "textPreview": preview,
+            "metadata": self._compact_vector_metadata(payload),
+        }
+        return entry
+
+    @staticmethod
+    def _compact_vector_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+        keys = {
+            "origin",
+            "doc_type",
+            "source_type",
+            "entity_ids",
+            "entity_labels",
+            "checksum_sha256",
+        }
+        compact = {key: payload.get(key) for key in keys if payload.get(key) is not None}
+        return ForensicsService.to_jsonable(compact) if compact else {}
     def _merge_relation_statements(
         self,
         primary: List[Tuple[str, str | None]],

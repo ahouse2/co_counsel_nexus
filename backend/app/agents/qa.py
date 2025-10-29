@@ -153,4 +153,12 @@ class QAAgent:
         if privileged_docs:
             doc_list = ", ".join(item.get("doc_id", "?") for item in privileged_docs)
             notes.append(f"Privilege alerts: {len(privileged_docs)} document(s) flagged ({doc_list}).")
+        gating = telemetry.setdefault("gating", {})
+        if privileged_docs:
+            gating["requires_privilege_review"] = True
+            gating["flagged_documents"] = [item.get("doc_id") for item in privileged_docs]
+            gating["max_privilege_score"] = round(privilege_max, 4)
+            telemetry["status"] = "needs_privilege_review"
+        else:
+            gating.setdefault("requires_privilege_review", False)
         return scores, notes, average

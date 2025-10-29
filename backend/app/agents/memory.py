@@ -22,6 +22,7 @@ class CaseThreadMemory:
         self.state.setdefault("artifacts", {})
         self.state.setdefault("qa", {})
         self.state.setdefault("notes", [])
+        self.state.setdefault("directives", {})
 
     def update(self, namespace: str, payload: Dict[str, Any]) -> None:
         entry = self.state.setdefault(namespace, {})
@@ -42,6 +43,7 @@ class CaseThreadMemory:
             "artifacts": dict(self.state.get("artifacts", {})),
             "qa": dict(self.state.get("qa", {})),
             "notes": list(self.state.get("notes", [])),
+            "directives": dict(self.state.get("directives", {})),
             "turns": list(self.state.get("turns", [])),
         }
 

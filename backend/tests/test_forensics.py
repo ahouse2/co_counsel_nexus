@@ -31,7 +31,12 @@ def test_document_pipeline_stages(forensics_service: ForensicsService, tmp_path:
     )
     report = forensics_service.build_document_artifact("doc-1", text_file)
     assert report.schema_version == SCHEMA_VERSION
-    assert [stage.name for stage in report.stages] == ["canonicalise", "metadata", "analyse"]
+    assert [stage.name for stage in report.stages] == [
+        "canonicalise",
+        "llama_index",
+        "metadata",
+        "analyse",
+    ]
     assert report.data["hashes"]["sha256"]
     assert report.metadata["mime_type"].startswith("text/")
     assert report.summary
@@ -64,8 +69,45 @@ def test_financial_anomaly_detection(forensics_service: ForensicsService, tmp_pa
     totals = report.data["totals"]
     assert Decimal(totals["amount"]) == Decimal("5700")
     assert report.data["anomalies"], "Expected anomalies to be flagged"
+    assert report.data.get("remediation"), "Remediation guidance should be populated"
     stored = forensics_service.load_artifact("fin-1", "financial")
     assert stored["signals"]
+
+
+def test_document_llama_index_enrichment(
+    forensics_service: ForensicsService, tmp_path: Path
+) -> None:
+    text_file = tmp_path / "incident.txt"
+    text_file.write_text("Alpha Bravo\nCredentials suspected leak\n")
+    base_chunk = {
+        "text": "Alpha Bravo",
+        "metadata": {"source_type": "local"},
+        "embedding": [1.0, 0.0, 0.0],
+    }
+    nodes = [
+        {"node_id": f"n{i}", "chunk_index": i, **base_chunk}
+        for i in range(5)
+    ]
+    nodes.append(
+        {
+            "node_id": "n-outlier",
+            "chunk_index": 5,
+            "text": "P@s$w0rd exfil dump with entropy",
+            "metadata": {"source_type": "local"},
+            "embedding": [10.0, 10.0, 10.0],
+        }
+    )
+    expected_count = len(nodes)
+    report = forensics_service.build_document_artifact(
+        "doc-llama", text_file, nodes=nodes, ingestion_metadata={"origin": "unit-test"}
+    )
+    llama_payload = report.data.get("llama_index", {})
+    assert llama_payload.get("node_count") == expected_count
+    assert llama_payload.get("duplicate_chunks")
+    assert any(alert["type"] == "llama.embedding.outlier" for alert in llama_payload.get("alerts", []))
+    assert any(signal.type == "llama.embedding.outlier" for signal in report.signals)
+    stored = forensics_service.load_artifact("doc-llama", "document")
+    assert stored["data"]["llama_index"]["node_count"] == expected_count
 
 
 def test_document_pdf_branch(forensics_service: ForensicsService, tmp_path: Path) -> None:

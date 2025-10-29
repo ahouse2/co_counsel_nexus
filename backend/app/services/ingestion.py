@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 from qdrant_client.http import models as qmodels
+import numpy as np
 
 from ..config import get_settings
 from ..models.api import IngestionRequest, IngestionSource
@@ -648,6 +649,7 @@ class IngestionService:
             }
 
             points: List[qmodels.PointStruct] = []
+            node_snapshots: List[Dict[str, Any]] = []
             for node in doc_result.nodes:
                 payload = {
                     **node.metadata,
@@ -658,12 +660,23 @@ class IngestionService:
                     "source_type": source_type,
                     "doc_type": doc_type,
                 }
+                embedding_norm = float(np.linalg.norm(node.embedding)) if node.embedding else 0.0
+                payload["embedding_norm"] = embedding_norm
                 points.append(
                     qmodels.PointStruct(
                         id=str(uuid4()),
                         vector=list(node.embedding),
                         payload=payload,
                     )
+                )
+                node_snapshots.append(
+                    {
+                        "node_id": node.node_id,
+                        "chunk_index": node.chunk_index,
+                        "text": node.text,
+                        "metadata": node.metadata,
+                        "embedding": list(node.embedding),
+                    }
                 )
 
             if points:
@@ -682,7 +695,13 @@ class IngestionService:
 
             self._update_document_metadata(document.id, metadata_updates)
 
-            report = self._build_forensics_report(doc_type, document.id, path)
+            report = self._build_forensics_report(
+                doc_type,
+                document.id,
+                path,
+                nodes=node_snapshots,
+                ingestion_metadata=metadata,
+            )
             if report is not None:
                 reports.append(report)
 
@@ -840,13 +859,24 @@ class IngestionService:
         return pairs
 
     def _build_forensics_report(
-        self, doc_type: str, doc_id: str, path: Path
+        self,
+        doc_type: str,
+        doc_id: str,
+        path: Path,
+        *,
+        nodes: List[Dict[str, Any]] | None = None,
+        ingestion_metadata: Dict[str, Any] | None = None,
     ) -> ForensicsReport | None:
         if doc_type == "image":
             return self.forensics_service.build_image_artifact(doc_id, path)
         if doc_type == "financial":
             return self.forensics_service.build_financial_artifact(doc_id, path)
-        return self.forensics_service.build_document_artifact(doc_id, path)
+        return self.forensics_service.build_document_artifact(
+            doc_id,
+            path,
+            nodes=nodes,
+            ingestion_metadata=ingestion_metadata,
+        )
 
     def _build_timeline_events(self, doc_id: str, text: str) -> List[TimelineEvent]:
         events: List[TimelineEvent] = []

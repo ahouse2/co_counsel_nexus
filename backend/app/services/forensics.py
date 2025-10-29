@@ -139,6 +139,7 @@ class PipelineContext:
     summary_lines: List[str] = field(default_factory=list)
     signals: List[ForensicsSignal] = field(default_factory=list)
     fallback_applied: bool = False
+    llama_nodes: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -153,10 +154,24 @@ class ForensicsService:
         self.chain_ledger = ForensicsChainLedger(self.settings.forensics_chain_path)
 
     # region public API
-    def build_document_artifact(self, file_id: str, path: Path) -> ForensicsReport:
-        ctx = PipelineContext(file_id=file_id, artifact_type="document", source_path=path)
+    def build_document_artifact(
+        self,
+        file_id: str,
+        path: Path,
+        *,
+        nodes: List[Dict[str, Any]] | None = None,
+        ingestion_metadata: Dict[str, Any] | None = None,
+    ) -> ForensicsReport:
+        ctx = PipelineContext(
+            file_id=file_id,
+            artifact_type="document",
+            source_path=path,
+            metadata=dict(ingestion_metadata or {}),
+            llama_nodes=list(nodes or []),
+        )
         stages = [
             PipelineStage("canonicalise", self._stage_canonicalise),
+            PipelineStage("llama_index", self._stage_llama_index, required=False),
             PipelineStage("metadata", self._stage_document_metadata),
             PipelineStage("analyse", self._stage_document_analyse, required=False),
         ]
@@ -410,6 +425,215 @@ class ForensicsService:
             f"Document hashed (SHA-256 {hashes['sha256'][:16]}…); MIME {ctx.metadata.get('mime_type', 'unknown')}"
         )
 
+        if ctx.llama_nodes:
+            llama_meta = ctx.metadata.setdefault("llama_index", {})
+            llama_meta.setdefault("node_count", len(ctx.llama_nodes))
+            llama_meta.setdefault("ingested", True)
+        else:
+            ctx.metadata.setdefault("llama_index", {"node_count": 0, "ingested": False})
+
+    def _stage_llama_index(self, ctx: PipelineContext, notes: List[str]) -> None:
+        if not ctx.llama_nodes:
+            notes.append("No LlamaIndex nodes supplied; stage skipped")
+            ctx.payload.setdefault("llama_index", {"node_count": 0, "alerts": []})
+            return
+
+        node_count = len(ctx.llama_nodes)
+        truncated_nodes: List[Dict[str, Any]] = []
+        chunk_lengths: List[int] = []
+        embedding_vectors: List[np.ndarray] = []
+        entropy_records: List[Tuple[str, float, int]] = []
+
+        for node in ctx.llama_nodes:
+            text = str(node.get("text", ""))
+            chunk_lengths.append(len(text))
+            entropy = self._shannon_entropy(text)
+            entropy_records.append((str(node.get("node_id")), entropy, int(node.get("chunk_index", 0))))
+            embedding_raw = node.get("embedding")
+            if isinstance(embedding_raw, (list, tuple)) and embedding_raw:
+                embedding_vectors.append(np.asarray(embedding_raw, dtype=np.float32))
+            truncated_nodes.append(
+                {
+                    "node_id": node.get("node_id"),
+                    "chunk_index": node.get("chunk_index"),
+                    "metadata": self.to_jsonable(node.get("metadata", {})),
+                    "preview": self._truncate_text(text),
+                    "entropy": round(entropy, 4),
+                    "embedding_head": [
+                        float(value)
+                        for value in list(embedding_raw)[:8]
+                    ]
+                    if isinstance(embedding_raw, (list, tuple))
+                    else [],
+                }
+            )
+
+        alerts: List[Dict[str, Any]] = []
+        duplicate_pairs: List[Dict[str, Any]] = []
+        outlier_nodes: List[Dict[str, Any]] = []
+
+        if embedding_vectors:
+            matrix = np.vstack(embedding_vectors)
+            norms = np.linalg.norm(matrix, axis=1)
+            norm_values = [float(value) for value in norms]
+            norm_stats = {
+                "min": float(np.min(norms)),
+                "max": float(np.max(norms)),
+                "mean": float(np.mean(norms)),
+                "stddev": float(np.std(norms)),
+            }
+            payload_norms = {
+                key: round(value, 6)
+                for key, value in norm_stats.items()
+            }
+            norm_samples = [round(value, 6) for value in norm_values[: min(len(norm_values), 50)]]
+        else:
+            payload_norms = {"min": 0.0, "max": 0.0, "mean": 0.0, "stddev": 0.0}
+            norm_samples = []
+
+        if embedding_vectors and 2 <= len(embedding_vectors) <= 256:
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            safe_norms = np.where(norms == 0, 1.0, norms)
+            normalised = matrix / safe_norms
+            similarity = normalised @ normalised.T
+            for idx in range(len(embedding_vectors)):
+                for jdx in range(idx + 1, len(embedding_vectors)):
+                    score = float(similarity[idx, jdx])
+                    if score >= 0.985:
+                        duplicate = {
+                            "node_a": truncated_nodes[idx]["node_id"],
+                            "node_b": truncated_nodes[jdx]["node_id"],
+                            "chunk_a": truncated_nodes[idx]["chunk_index"],
+                            "chunk_b": truncated_nodes[jdx]["chunk_index"],
+                            "similarity": round(score, 6),
+                        }
+                        duplicate_pairs.append(duplicate)
+                        alerts.append(
+                            {
+                                "type": "llama.duplicate.chunk",
+                                "level": "warning",
+                                "detail": f"Chunks {duplicate['chunk_a']} and {duplicate['chunk_b']} appear near-identical (cosine {score:.3f}).",
+                                "data": duplicate,
+                            }
+                        )
+                        if len(duplicate_pairs) >= 12:
+                            break
+                if len(duplicate_pairs) >= 12:
+                    break
+
+        if embedding_vectors:
+            vectors = matrix
+            try:
+                if len(vectors) >= 5:
+                    model = IsolationForest(random_state=42, contamination="auto")
+                    model.fit(vectors)
+                    scores = model.score_samples(vectors)
+                    threshold = float(np.quantile(scores, 0.15))
+                    for index, score in enumerate(scores):
+                        if score <= threshold:
+                            entry = {
+                                "node_id": truncated_nodes[index]["node_id"],
+                                "chunk_index": truncated_nodes[index]["chunk_index"],
+                                "isolation_score": round(float(score), 6),
+                            }
+                            outlier_nodes.append(entry)
+                else:
+                    norms = np.linalg.norm(vectors, axis=1)
+                    mean_norm = float(np.mean(norms))
+                    std_norm = float(np.std(norms))
+                    if std_norm > 0.0:
+                        for index, value in enumerate(norms):
+                            z = abs((value - mean_norm) / std_norm)
+                            if z >= 2.75:
+                                entry = {
+                                    "node_id": truncated_nodes[index]["node_id"],
+                                    "chunk_index": truncated_nodes[index]["chunk_index"],
+                                    "zscore": round(float(z), 6),
+                                }
+                                outlier_nodes.append(entry)
+            except Exception as exc:  # pylint: disable=broad-except
+                alerts.append(
+                    {
+                        "type": "llama.embedding.analysis_error",
+                        "level": "warning",
+                        "detail": f"Failed to evaluate embedding outliers: {exc}",
+                    }
+                )
+
+        if outlier_nodes:
+            alerts.append(
+                {
+                    "type": "llama.embedding.outlier",
+                    "level": "critical",
+                    "detail": f"Detected {len(outlier_nodes)} anomalous embedding chunk(s).",
+                    "data": outlier_nodes,
+                }
+            )
+            for outlier in outlier_nodes:
+                ctx.signals.append(
+                    ForensicsSignal(
+                        "llama.embedding.outlier",
+                        "warning",
+                        f"Chunk {outlier['chunk_index']} flagged as embedding outlier",
+                        outlier,
+                    )
+                )
+
+        if duplicate_pairs:
+            ctx.signals.append(
+                ForensicsSignal(
+                    "llama.duplicate.chunk",
+                    "info",
+                    f"{len(duplicate_pairs)} near-identical chunk pair(s) detected",
+                    duplicate_pairs,
+                )
+            )
+
+        high_entropy_nodes = [
+            {
+                "node_id": node_id,
+                "chunk_index": chunk_index,
+                "entropy": round(entropy, 6),
+            }
+            for node_id, entropy, chunk_index in entropy_records
+            if entropy >= 4.0
+        ]
+        if high_entropy_nodes:
+            alerts.append(
+                {
+                    "type": "llama.entropy.suspicious",
+                    "level": "warning",
+                    "detail": f"{len(high_entropy_nodes)} chunk(s) exhibit high Shannon entropy.",
+                    "data": high_entropy_nodes[:10],
+                }
+            )
+
+        llama_payload = {
+            "node_count": node_count,
+            "chunk_length": {
+                "min": min(chunk_lengths),
+                "max": max(chunk_lengths),
+                "mean": float(np.mean(chunk_lengths)) if chunk_lengths else 0.0,
+            },
+            "embedding_norms": payload_norms,
+            "norm_samples": norm_samples,
+            "nodes": truncated_nodes[:25],
+            "alerts": alerts,
+            "duplicate_chunks": duplicate_pairs,
+            "outliers": outlier_nodes,
+            "high_entropy_nodes": high_entropy_nodes[:10],
+        }
+
+        ctx.payload["llama_index"] = ForensicsService.to_jsonable(llama_payload)
+        ctx.summary_lines.append(
+            "LlamaIndex analysis: "
+            f"{node_count} chunk(s), mean embedding norm {payload_norms['mean']:.3f}, "
+            f"duplicates={len(duplicate_pairs)}, outliers={len(outlier_nodes)}"
+        )
+        notes.append(
+            f"Evaluated LlamaIndex nodes; alerts={len(alerts)}"
+        )
+
     def _stage_document_analyse(self, ctx: PipelineContext, notes: List[str]) -> None:
         path = ctx.canonical_path or ctx.source_path
         extension = ctx.metadata.get("extension", path.suffix.lower())
@@ -508,6 +732,24 @@ class ForensicsService:
         anomalies = self._financial_anomalies(df)
         ctx.payload["totals"] = totals
         ctx.payload["anomalies"] = anomalies
+        flagged_entities = sorted(
+            {
+                str(entry.get("entity"))
+                for entry in anomalies
+                if isinstance(entry, dict) and entry.get("entity")
+            }
+        )
+        remediation: List[str] = [
+            "Validate approval chain for each anomaly and document remediation actions.",
+            "Reconcile ledger totals against source system exports.",
+        ]
+        if flagged_entities:
+            remediation.append(
+                "Escalate high-risk entities: "
+                + ", ".join(flagged_entities[:6])
+                + ("…" if len(flagged_entities) > 6 else "")
+            )
+        ctx.payload["remediation"] = remediation
         ctx.summary_lines.append(
             f"Detected {len(anomalies)} anomalous rows across {len(ctx.payload['numeric_columns'])} numeric fields"
         )
@@ -748,6 +990,13 @@ class ForensicsService:
                     payload["zscore"] = zscores
                     anomalies.append(ForensicsService.to_jsonable(payload))
         return anomalies
+
+    @staticmethod
+    def _truncate_text(text: str, limit: int = 160) -> str:
+        snippet = text.strip()
+        if len(snippet) <= limit:
+            return snippet
+        return f"{snippet[: limit - 3].rstrip()}..."
 
     @staticmethod
     def _shannon_entropy(text: str) -> float:
