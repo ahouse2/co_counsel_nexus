@@ -44,8 +44,15 @@ version: 0.2
 | Field | Type | Required | Validation Rules | Notes |
 | --- | --- | --- | --- | --- |
 | `type` | string | yes | Enum: `local`, `sharepoint`, `s3`, `onedrive`, `web` | Drives downstream connector selection |
-| `path` | string | conditional | Required when `type == "local"`; must resolve under configured mount | Absolute or relative path |
-| `credRef` | string | conditional | Required when `type` is not `local`; must match credentials registry key | Secrets fetched server-side |
+| `path` | string | conditional | Required for `local`, `onedrive`, and `web` sources. For `local` it must resolve under configured mount; for `onedrive` supply folder relative to drive root; for `web` provide HTTP(S) URL | Absolute path, relative drive path, or URL |
+| `credRef` | string | conditional | Required for `sharepoint`, `s3`, and `onedrive`; must match credentials registry key | Secrets fetched server-side |
+
+**Connector behaviour**
+- `local` — Reads files from on-disk workspace. Validation ensures directory existence.
+- `s3` — Requires optional dependency `boto3`; downloads bucket objects into a per-job workspace. Credential payload must include `bucket` and key material.
+- `sharepoint` — Uses `Office365-REST-Python-Client` to traverse folders with client credentials.
+- `onedrive` — Uses Microsoft Graph via `msal` + `httpx`. Credential payload must include `tenant_id`, `client_id`, `client_secret`, and `drive_id`. The optional dependency `msal` must be installed.
+- `web` — Fetches a single HTTP(S) URL via `httpx` and stores the response body. Non-2xx responses fail the job with `502`.
 
 ```json
 {
@@ -92,7 +99,7 @@ version: 0.2
 | 422 | `{"detail": "Unsupported ingestion source type"}` |
 
 ### GET /ingest/{job_id}
-**Summary**: Poll ingestion status for asynchronous lifecycle. Response model to be introduced as `backend.app.models.api.IngestionStatusResponse`.
+**Summary**: Poll ingestion status for asynchronous lifecycle. Implemented via `backend.app.models.api.IngestionStatusResponse`.
 
 | Aspect | Value |
 | --- | --- |
@@ -104,7 +111,7 @@ version: 0.2
 | Success Codes | `200 OK` when terminal state reached, `202 Accepted` when still processing |
 | Error Codes | `404 Not Found` if job unknown, `410 Gone` if history expired |
 
-#### Response Schema — `IngestionStatusResponse` (planned)
+#### Response Schema — `IngestionStatusResponse`
 | Field | Type | Validation Rules | Notes |
 | --- | --- | --- | --- |
 | `job_id` | string | RFC 4122 UUID | Echoes request identifier |
@@ -140,8 +147,8 @@ version: 0.2
 #### Lifecycle Semantics
 | Stage | Description |
 | --- | --- |
-| Initial Response | `202 Accepted` with `status="queued"`; clients persist `job_id` for polling. |
-| Polling Loop | Continue requests until `status` is `succeeded` (all downstream artifacts materialized) or `failed` (see `errors`). |
+| Initial Response | `202 Accepted` with `status="queued"`; manifests persisted immediately for `/ingest/{job_id}`. |
+| Polling Loop | Service returns `202 Accepted` while `status` is `queued` or `running`; transitions to `200 OK` once job enters a terminal state (`succeeded`, `failed`, or `cancelled`). |
 | Caching | Clients MAY send `If-None-Match`; service SHOULD return `304 Not Modified` when status unchanged. |
 
 ### GET /query
