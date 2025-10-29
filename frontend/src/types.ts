@@ -140,3 +140,121 @@ export interface OnboardingSubmissionResponse {
   message: string;
   received_at: string;
 }
+
+export interface ScenarioParticipant {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  sprite: string;
+  accent_color: string;
+  voice?: string | null;
+  default: boolean;
+  optional: boolean;
+}
+
+export interface ScenarioVariable {
+  name: string;
+  description: string;
+  required: boolean;
+  default?: string | null;
+}
+
+export interface ScenarioEvidenceSpec {
+  id: string;
+  label: string;
+  description?: string | null;
+  required: boolean;
+  type: string;
+  document_id?: string | null;
+}
+
+export interface ScenarioBeatSpec {
+  id: string;
+  kind: 'scripted' | 'dynamic';
+  speaker: string;
+  stage_direction?: string | null;
+  emphasis?: string | null;
+  duration_ms?: number | null;
+  fallback_text?: string | null;
+  delegate?: string | null;
+  top_k?: number | null;
+}
+
+export interface ScenarioDefinition {
+  scenario_id: string;
+  title: string;
+  description: string;
+  category: string;
+  difficulty: string;
+  tags: string[];
+  participants: ScenarioParticipant[];
+  variables: Record<string, ScenarioVariable>;
+  evidence: ScenarioEvidenceSpec[];
+  beats: ScenarioBeatSpec[];
+}
+
+export interface ScenarioMetadata {
+  scenario_id: string;
+  title: string;
+  description: string;
+  category: string;
+  difficulty: string;
+  tags: string[];
+  participants: string[];
+}
+
+export interface ScenarioListResponse {
+  scenarios: ScenarioMetadata[];
+}
+
+export interface ScenarioEvidenceBinding {
+  value: string;
+  document_id?: string | null;
+  type?: string | null;
+}
+
+export interface ScenarioRunAudio {
+  voice: string;
+  mime_type: string;
+  base64: string;
+  cache_hit: boolean;
+  sha256: string;
+}
+
+export interface ScenarioRunTurn {
+  beat_id: string;
+  speaker_id: string;
+  speaker: ScenarioParticipant;
+  text: string;
+  kind: string;
+  stage_direction?: string | null;
+  emphasis?: string | null;
+  duration_ms?: number | null;
+  thread_id?: string | null;
+  audio?: ScenarioRunAudio | null;
+}
+
+export interface ScenarioRunResponse {
+  run_id: string;
+  scenario: ScenarioDefinition;
+  transcript: ScenarioRunTurn[];
+  telemetry: Record<string, unknown>;
+}
+
+export interface ScenarioRunRequestPayload {
+  scenario_id: string;
+  case_id: string;
+  participants: string[];
+  variables: Record<string, string>;
+  evidence: Record<string, ScenarioEvidenceBinding>;
+  enable_tts: boolean;
+}
+
+export interface TextToSpeechResponsePayload {
+  voice: string;
+  mime_type: string;
+  base64: string;
+  cache_hit: boolean;
+  sha256: string;
+}

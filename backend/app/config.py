@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     manifest_retention_days: int = Field(default=30)
     audit_log_path: Path = Field(default=Path("storage/audit.log"))
     billing_usage_path: Path = Field(default=Path("storage/billing/usage.json"))
+    scenario_library_path: Path | None = Field(default=None)
+    scenario_default_top_k: int = Field(default=4, ge=1, le=20)
+
+    tts_enabled: bool = Field(default=True)
+    tts_service_url: str | None = Field(default=None)
+    tts_timeout_seconds: float = Field(default=15.0, ge=1.0)
+    tts_cache_dir: Path = Field(default=Path("storage/audio_cache"))
+    tts_default_voice: str = Field(default="larynx:en-us-blizzard_lessac")
 
     privilege_classifier_threshold: float = Field(default=0.68)
 
@@ -148,6 +156,7 @@ class Settings(BaseSettings):
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.billing_usage_path.parent.mkdir(parents=True, exist_ok=True)
+        self.tts_cache_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

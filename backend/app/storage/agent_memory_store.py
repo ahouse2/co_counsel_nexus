@@ -34,6 +34,48 @@ class AgentThreadRecord:
 
 
 @dataclass
+class ScenarioRunRecord:
+    """Structured transcript for a scenario simulation run."""
+
+    run_id: str
+    scenario_id: str
+    case_id: str
+    created_at: datetime
+    actor: Dict[str, Any]
+    configuration: Dict[str, Any]
+    transcript: List[Dict[str, Any]]
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "scenario_id": self.scenario_id,
+            "case_id": self.case_id,
+            "created_at": _to_iso(self.created_at),
+            "actor": dict(self.actor),
+            "configuration": dict(self.configuration),
+            "transcript": [dict(entry) for entry in self.transcript],
+            "telemetry": dict(self.telemetry),
+        }
+
+    @classmethod
+    def from_json(cls, payload: Dict[str, Any]) -> "ScenarioRunRecord":
+        created_at_raw = payload.get("created_at")
+        if not isinstance(created_at_raw, str):
+            raise ValueError("Scenario run payload missing created_at timestamp")
+        return cls(
+            run_id=str(payload.get("run_id")),
+            scenario_id=str(payload.get("scenario_id")),
+            case_id=str(payload.get("case_id")),
+            created_at=_from_iso(created_at_raw),
+            actor=dict(payload.get("actor", {})),
+            configuration=dict(payload.get("configuration", {})),
+            transcript=[dict(entry) for entry in payload.get("transcript", [])],
+            telemetry=dict(payload.get("telemetry", {})),
+        )
+
+
+@dataclass
 class PatchProposalRecord:
     """Structured representation of a proposed patch for an improvement task."""
 
@@ -155,6 +197,8 @@ class AgentMemoryStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.tasks_root = self.root / "improvement_tasks"
         self.tasks_root.mkdir(parents=True, exist_ok=True)
+        self.scenario_root = self.root / "scenario_runs"
+        self.scenario_root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, thread_id: str) -> Path:
         return safe_path(self.root, thread_id)
@@ -228,4 +272,23 @@ class AgentMemoryStore:
     def update_task(self, record: ImprovementTaskRecord) -> None:
         record.updated_at = _utcnow()
         self.write_task(record)
+
+    def _scenario_path(self, run_id: str) -> Path:
+        return safe_path(self.scenario_root, run_id)
+
+    def write_scenario(self, record: ScenarioRunRecord) -> None:
+        path = self._scenario_path(record.run_id)
+        atomic_write_json(path, record.to_json())
+
+    def read_scenario(self, run_id: str) -> ScenarioRunRecord:
+        path = self._scenario_path(run_id)
+        if not path.exists():
+            raise FileNotFoundError(f"Scenario run {run_id} not found")
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError(f"Scenario run payload for {run_id} is not a JSON object")
+        return ScenarioRunRecord.from_json(data)
+
+    def list_scenarios(self) -> List[str]:
+        return sorted(path.stem for path in self.scenario_root.glob("*.json"))
 
