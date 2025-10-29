@@ -59,6 +59,13 @@ class TimelineService:
         self.store = store or TimelineStore(self.settings.timeline_path)
         self.graph_service = graph_service or get_graph_service()
 
+    def refresh_enrichments(self) -> EnrichmentStats:
+        events = self.store.read_all()
+        enriched, stats = self._enrich_events(events)
+        if stats.mutated:
+            self.store.write_all(enriched)
+        return stats
+
     def list_events(
         self,
         *,

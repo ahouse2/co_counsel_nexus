@@ -702,3 +702,9 @@ sequenceDiagram
 - Reference hardware: 8 vCPU (3.0 GHz Ryzen 7840HS class), 32 GB RAM, NVMe SSD (3.2 GB/s sequential read), no discrete GPU required.
 - Network: \<=40 ms RTT to vector and graph stores during validation, 1 Gbps LAN.
 - Detailed load profiles and execution guidance are catalogued in [docs/validation/nfr_validation_matrix.md](../../validation/nfr_validation_matrix.md).
+
+### 2025-11-21 · GraphRAG Operational Alignment
+- Integrate LlamaIndex `KnowledgeGraphIndex` abstractions with Neo4j + NetworkX backends via `GraphService` property graph adapters.
+- Post-ingestion pipeline executes community detection (greedy modularity with fallback) and persists summaries for retrieval + agent tooling.
+- Timeline enrichment now triggered immediately after ingestion with graph-aware highlights, tracked in job manifests.
+- Agents toolkit exposes `run_cypher`, schema description, and text-to-Cypher prompt builders for ad-hoc exploration.
