@@ -14,6 +14,9 @@ class TimelineEvent:
     title: str = field(compare=False)
     summary: str = field(compare=False)
     citations: List[str] = field(default_factory=list, compare=False)
+    entity_highlights: List[Dict[str, str]] = field(default_factory=list, compare=False)
+    relation_tags: List[Dict[str, str]] = field(default_factory=list, compare=False)
+    confidence: float | None = field(default=None, compare=False)
 
     def to_record(self) -> Dict[str, object]:
         return {
@@ -22,6 +25,9 @@ class TimelineEvent:
             "title": self.title,
             "summary": self.summary,
             "citations": list(self.citations),
+            "entity_highlights": list(self.entity_highlights),
+            "relation_tags": list(self.relation_tags),
+            "confidence": self.confidence,
         }
 
     @classmethod
@@ -32,6 +38,9 @@ class TimelineEvent:
             title=str(record["title"]),
             summary=str(record["summary"]),
             citations=list(record.get("citations", [])),
+            entity_highlights=list(record.get("entity_highlights", [])),
+            relation_tags=list(record.get("relation_tags", [])),
+            confidence=float(record["confidence"]) if record.get("confidence") is not None else None,
         )
 
 
@@ -47,6 +56,12 @@ class TimelineStore:
             return
         with self.path.open("a", encoding="utf-8") as handle:
             for event in events:
+                handle.write(json.dumps(event.to_record(), sort_keys=True) + "\n")
+
+    def write_all(self, events: Iterable[TimelineEvent]) -> None:
+        ordered = sorted(events)
+        with self.path.open("w", encoding="utf-8") as handle:
+            for event in ordered:
                 handle.write(json.dumps(event.to_record(), sort_keys=True) + "\n")
 
     def read_all(self) -> List[TimelineEvent]:

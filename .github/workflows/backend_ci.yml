@@ -1,0 +1,83 @@
+name: Backend CI
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "scripts/bootstrap_backend.sh"
+      - "mypy.ini"
+      - "backend/uv.lock"
+      - ".github/workflows/backend_ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "scripts/bootstrap_backend.sh"
+      - "mypy.ini"
+      - "backend/uv.lock"
+      - ".github/workflows/backend_ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: Lint, type-check, and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "0.9.5"
+
+      - name: Cache dependency wheels
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.cache/pip
+          key: backend-ci-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            backend-ci-${{ runner.os }}-
+
+      - name: Bootstrap backend environment
+        run: ./scripts/bootstrap_backend.sh
+
+      - name: Ruff lint
+        run: ruff check backend --output-format=github
+
+      - name: Mypy type check
+        run: mypy --config-file mypy.ini backend
+
+      - name: Pytest with coverage
+        env:
+          PYTHONPATH: .
+        run: |
+          coverage run -m pytest backend/tests -q --junitxml=pytest-backend.xml
+          coverage xml
+          coverage html
+
+      - name: Upload coverage artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            coverage.xml
+            htmlcov/**
+            pytest-backend.xml
+          if-no-files-found: error
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          coverage report

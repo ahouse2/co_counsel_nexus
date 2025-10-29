@@ -8,14 +8,17 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Dict
 
-import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.utils.storage import decrypt_manifest
 
 def _read_job_manifest(job_dir: Path, job_id: str) -> Dict[str, object]:
     manifest = job_dir / f"{job_id}.json"
     assert manifest.exists(), f"Expected manifest {manifest}"
-    return json.loads(manifest.read_text())
+    envelope = manifest.read_text()
+    key_path = Path(os.environ["MANIFEST_ENCRYPTION_KEY_PATH"])
+    key = key_path.read_bytes()
+    return decrypt_manifest(json.loads(envelope), key, associated_data=job_id)
 
 
 def _wait_for_job_completion(job_dir: Path, job_id: str, timeout: float = 10.0) -> Dict[str, object]:
@@ -271,6 +274,9 @@ def test_timeline_pagination_and_filters(
         "/timeline", params={"entity": "Acme Corporation"}, headers=headers
     ).json()
     assert all(event["id"] != neutral_event.id for event in entity_payload["events"])
+    assert "entity_highlights" in entity_payload["events"][0]
+    assert "relation_tags" in entity_payload["events"][0]
+    assert "confidence" in entity_payload["events"][0]
 
     ts_threshold = page_two_payload["events"][0]["ts"]
     range_payload = client.get(

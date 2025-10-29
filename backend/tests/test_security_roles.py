@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -34,6 +35,13 @@ def _perform_ingestion(client: TestClient, workspace: Path, auth_headers_factory
     _wait_for_job_completion(job_store, job_id)
 
 
+def _load_audit_events() -> list[dict]:
+    audit_path = Path(os.environ["AUDIT_LOG_PATH"])
+    if not audit_path.exists():
+        return []
+    return [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+
+
 def test_query_requires_scope(
     client: TestClient,
     sample_workspace: Path,
@@ -44,6 +52,13 @@ def test_query_requires_scope(
     response = client.get("/query", params={"q": "Acme"}, headers=headers)
     assert response.status_code == 403
     assert "scope" in response.json()["detail"].lower()
+    events = _load_audit_events()
+    assert any(
+        event["category"] == "security"
+        and event["outcome"] == "denied"
+        and event["metadata"].get("status_code") == 403
+        for event in events
+    )
 
 
 def test_case_coordinator_traces_redacted_without_trace_scope(
@@ -111,3 +126,26 @@ def test_automation_service_denied_query(
     )
     response = client.get("/query", params={"q": "Acme"}, headers=headers)
     assert response.status_code == 403
+    events = _load_audit_events()
+    assert any(
+        event["category"] == "security"
+        and event["outcome"] == "denied"
+        and event["metadata"].get("status_code") == 403
+        for event in events
+    )
+
+
+def test_ingestion_audit_records_lifecycle(
+    client: TestClient,
+    sample_workspace: Path,
+    auth_headers_factory,
+) -> None:
+    _perform_ingestion(client, sample_workspace, auth_headers_factory)
+    events = _load_audit_events()
+    assert any(
+        event["category"] == "ingestion"
+        and event["action"] == "ingest.job.completed"
+        and event["metadata"].get("documents")
+        for event in events
+    )
+    assert any(event["category"] == "security" and event["outcome"] == "allowed" for event in events)
