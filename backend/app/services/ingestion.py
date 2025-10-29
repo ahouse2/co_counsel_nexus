@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Sequence, Set, Tuple
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -23,20 +23,8 @@ from ..storage.job_store import JobStore
 from ..storage.timeline_store import TimelineEvent, TimelineStore
 from ..utils.audit import AuditEvent, get_audit_trail
 from ..utils.credentials import CredentialRegistry
-from ..utils.text import (
-    chunk_text,
-    find_dates,
-    hashed_embedding,
-    read_text,
-    sentence_containing,
-)
-from ..utils.triples import (
-    EntitySpan,
-    Triple,
-    extract_entities,
-    extract_triples,
-    normalise_entity_id,
-)
+from ..utils.text import find_dates, sentence_containing
+from ..utils.triples import EntitySpan, Triple, normalise_entity_id
 from .forensics import ForensicsReport, ForensicsService
 from .graph import GraphService, get_graph_service
 from .ingestion_sources import MaterializedSource, build_connector
@@ -47,10 +35,15 @@ from .ingestion_worker import (
     IngestionWorker,
 )
 from .vector import VectorService, get_vector_service
+from backend.ingestion.loader_registry import LoaderRegistry
+from backend.ingestion.ocr import OcrEngine
+from backend.ingestion.pipeline import run_ingestion_pipeline
+from backend.ingestion.settings import build_runtime_config
 
 _TEXT_EXTENSIONS = {".txt", ".md", ".json", ".log", ".rtf", ".html", ".htm"}
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 _FINANCIAL_EXTENSIONS = {".csv"}
+_EMAIL_EXTENSIONS = {".eml", ".msg"}
 
 LOGGER = logging.getLogger("backend.services.ingestion")
 
@@ -120,6 +113,14 @@ class IngestionService:
         self.executor = executor or _DEFAULT_EXECUTOR
         self.worker = worker
         self.audit = get_audit_trail()
+        self.runtime_config = build_runtime_config(self.settings)
+        self.ocr_engine = OcrEngine(self.runtime_config.ocr, self.logger.getChild("ocr"))
+        self.loader_registry = LoaderRegistry(
+            self.runtime_config,
+            self.ocr_engine,
+            logger=self.logger.getChild("loader"),
+            credential_resolver=self._resolve_credentials,
+        )
 
     def ingest(self, request: IngestionRequest, principal: Principal | None = None) -> str:
         if not request.sources:
@@ -338,7 +339,7 @@ class IngestionService:
                 )
                 connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
                 materialized = connector.materialize(job_id, index, source)
-                documents, events, skipped, mutation, reports = self._ingest_materialized_source(materialized)
+                documents, events, skipped, mutation, reports = self._ingest_materialized_source(job_id, materialized)
                 all_documents.extend(documents)
                 all_events.extend(events)
                 graph_nodes.update(mutation.nodes)
@@ -501,6 +502,15 @@ class IngestionService:
                 actor["lineage"] = lineage_hint
         return actor
 
+    def _resolve_credentials(self, reference: str) -> Dict[str, str]:
+        try:
+            return self.credential_registry.get(reference)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Credential {reference} not found",
+            ) from exc
+
     def _job_actor(self, job_record: Dict[str, object]) -> Dict[str, Any]:
         stored = job_record.get("requested_by")
         if isinstance(stored, dict):
@@ -545,7 +555,7 @@ class IngestionService:
     # region ingestion helpers
 
     def _ingest_materialized_source(
-        self, materialized: MaterializedSource
+        self, job_id: str, materialized: MaterializedSource
     ) -> Tuple[
         List[IngestedDocument],
         List[TimelineEvent],
@@ -556,124 +566,119 @@ class IngestionService:
         root = materialized.root
         if not root.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Source path {root} not found")
+        origin = materialized.origin or str(root)
+        source_type = materialized.source.type.lower()
+        pipeline_result = run_ingestion_pipeline(
+            job_id,
+            root,
+            materialized.source,
+            origin,
+            registry=self.loader_registry,
+            runtime_config=self.runtime_config,
+        )
+
         documents: List[IngestedDocument] = []
         events: List[TimelineEvent] = []
         skipped: List[Dict[str, str]] = []
         graph_mutation = GraphMutation()
         reports: List[ForensicsReport] = []
-        origin = materialized.origin or str(root)
-        source_type = materialized.source.type.lower()
-        for path in sorted(root.rglob("*")):
-            if not path.is_file():
-                continue
-            suffix = path.suffix.lower()
-            if suffix in _TEXT_EXTENSIONS:
-                document, timeline_events, mutation, report = self._ingest_text(
-                    path, origin, source_type
-                )
-                documents.append(document)
-                events.extend(timeline_events)
-                graph_mutation.merge(mutation)
-                reports.append(report)
-            elif suffix in _IMAGE_EXTENSIONS:
-                doc_meta = self._register_document(
-                    path, doc_type="image", origin=origin, source_type=source_type
-                )
-                report = self.forensics_service.build_image_artifact(doc_meta.id, path)
-                documents.append(doc_meta)
-                mutation = GraphMutation()
-                mutation.record_node(doc_meta.id)
-                graph_mutation.merge(mutation)
-                reports.append(report)
-            elif suffix in _FINANCIAL_EXTENSIONS:
-                doc_meta = self._register_document(
-                    path, doc_type="financial", origin=origin, source_type=source_type
-                )
-                report = self.forensics_service.build_financial_artifact(doc_meta.id, path)
-                documents.append(doc_meta)
-                mutation = GraphMutation()
-                mutation.record_node(doc_meta.id)
-                graph_mutation.merge(mutation)
-                reports.append(report)
-            else:
-                skipped.append({"path": str(path), "reason": "unsupported_extension"})
-                self.logger.debug(
-                    "Skipping unsupported file",
-                    extra={"job_source": materialized.source.type, "path": str(path)},
-                )
-        return documents, events, skipped, graph_mutation, reports
 
-    def _ingest_text(
-        self, path: Path, origin: str, source_type: str
-    ) -> Tuple[IngestedDocument, List[TimelineEvent], GraphMutation, ForensicsReport]:
-        document = self._register_document(
-            path, doc_type="text", origin=origin, source_type=source_type
-        )
-        mutation = GraphMutation()
-        mutation.record_node(document.id)
-
-        text = read_text(path)
-        chunks = chunk_text(
-            text, self.settings.ingestion_chunk_size, self.settings.ingestion_chunk_overlap
-        )
-        entity_spans = extract_entities(text)
-        entity_pairs: List[Tuple[str, str]] = []
-        seen_pairs: Set[Tuple[str, str]] = set()
-        for span in entity_spans:
-            label = span.label.strip()
-            if not label:
-                continue
-            normalised = normalise_entity_id(label)
-            key = (normalised, label)
-            if key in seen_pairs:
-                continue
-            seen_pairs.add(key)
-            entity_pairs.append(key)
-        entity_pairs.sort(key=lambda item: (item[0] or item[1].lower(), item[1].lower()))
-        entity_ids = [pair[0] for pair in entity_pairs if pair[0]]
-        entity_labels = [pair[1] for pair in entity_pairs]
-
-        points: List[qmodels.PointStruct] = []
-        for idx, chunk in enumerate(chunks):
-            vector = hashed_embedding(chunk, self.settings.qdrant_vector_size)
-            payload = {
-                "doc_id": document.id,
-                "chunk_index": idx,
-                "text": chunk,
-                "uri": document.uri,
-                "origin": origin,
-                "source_type": source_type,
-                "doc_type": "document",
-                "entity_ids": entity_ids,
-                "entity_labels": entity_labels,
-            }
-            points.append(
-                qmodels.PointStruct(
-                    id=str(uuid4()),
-                    vector=vector,
-                    payload=payload,
+        for doc_result in pipeline_result.documents:
+            path = doc_result.loaded.path
+            checksum = doc_result.loaded.checksum
+            doc_id = sha256_id(path)
+            if self._document_checksum_matches(doc_id, checksum):
+                skipped.append(
+                    {
+                        "path": str(path),
+                        "reason": "unchanged_checksum",
+                    }
                 )
+                self.logger.info(
+                    "Skipping document with unchanged checksum",
+                    extra={"doc_id": doc_id, "path": str(path)},
+                )
+                continue
+
+            doc_type = self._infer_doc_type(path)
+            metadata = dict(doc_result.loaded.metadata)
+            metadata.update(
+                {
+                    "checksum_sha256": checksum,
+                    "chunk_count": len(doc_result.nodes),
+                    "embedding_model": self.runtime_config.embedding.model,
+                    "embedding_provider": self.runtime_config.embedding.provider.value,
+                    "ocr_engine": doc_result.loaded.ocr.engine if doc_result.loaded.ocr else None,
+                    "ocr_confidence": doc_result.loaded.ocr.confidence if doc_result.loaded.ocr else None,
+                }
             )
-        if points:
-            self.vector_service.upsert(points)
 
-        for span in entity_spans:
-            self._commit_entity(document.id, span, mutation)
+            document = self._register_document(
+                path,
+                doc_type=doc_type,
+                origin=origin,
+                source_type=source_type,
+                extra_metadata=metadata,
+            )
+            graph_mutation.record_node(document.id)
 
-        triples = extract_triples(text)
-        if triples:
-            self._commit_triples(document.id, triples, mutation)
+            entity_pairs = self._entity_pairs(doc_result.entities)
+            metadata_updates: Dict[str, object] = {
+                "entity_ids": [entity_id for entity_id, _ in entity_pairs],
+                "entity_labels": [label for _, label in entity_pairs],
+                "chunk_count": len(doc_result.nodes),
+                "checksum_sha256": checksum,
+            }
 
-        timeline_events = self._build_timeline_events(document.id, text)
-        metadata_updates: Dict[str, object] = {
-            "entity_ids": entity_ids,
-            "entity_labels": entity_labels,
-            "chunk_count": len(chunks),
-        }
-        document.metadata.update(metadata_updates)
-        self._update_document_metadata(document.id, metadata_updates)
-        report = self.forensics_service.build_document_artifact(document.id, path)
-        return document, timeline_events, mutation, report
+            points: List[qmodels.PointStruct] = []
+            for node in doc_result.nodes:
+                payload = {
+                    **node.metadata,
+                    "doc_id": document.id,
+                    "chunk_index": node.chunk_index,
+                    "text": node.text,
+                    "origin": origin,
+                    "source_type": source_type,
+                    "doc_type": doc_type,
+                }
+                points.append(
+                    qmodels.PointStruct(
+                        id=str(uuid4()),
+                        vector=list(node.embedding),
+                        payload=payload,
+                    )
+                )
+
+            if points:
+                self.vector_service.upsert(points)
+
+            for span in doc_result.entities:
+                self._commit_entity(document.id, span, graph_mutation)
+
+            self._commit_triples(document.id, doc_result.triples, graph_mutation)
+            timeline_events = self._build_timeline_events(document.id, doc_result.loaded.text)
+            events.extend(timeline_events)
+            metadata_updates["timeline_events"] = len(timeline_events)
+
+            if doc_result.loaded.ocr and doc_result.loaded.ocr.tokens:
+                metadata_updates["ocr_token_count"] = len(doc_result.loaded.ocr.tokens)
+
+            self._update_document_metadata(document.id, metadata_updates)
+
+            report = self._build_forensics_report(doc_type, document.id, path)
+            if report is not None:
+                reports.append(report)
+
+            documents.append(document)
+
+        documents.sort(
+            key=lambda item: (
+                item.metadata.get("ocr_confidence") is not None,
+                float(item.metadata.get("ocr_confidence") or 0.0),
+            ),
+            reverse=True,
+        )
+        return documents, events, skipped, graph_mutation, reports
 
     def _commit_entity(self, doc_id: str, span: EntitySpan, mutation: GraphMutation) -> None:
         entity_id = normalise_entity_id(span.label)
@@ -782,6 +787,49 @@ class IngestionService:
         title = str(merged.get("title", doc_id))
         metadata = {key: value for key, value in merged.items() if key not in {"id", "title"}}
         self.graph_service.upsert_document(doc_id, title, metadata)
+
+    def _document_checksum_matches(self, doc_id: str, checksum: str) -> bool:
+        try:
+            record = self.document_store.read_document(doc_id)
+        except FileNotFoundError:
+            return False
+        stored = record.get("checksum_sha256")
+        return stored == checksum and stored is not None
+
+    def _infer_doc_type(self, path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix in _IMAGE_EXTENSIONS:
+            return "image"
+        if suffix in _FINANCIAL_EXTENSIONS:
+            return "financial"
+        if suffix in _EMAIL_EXTENSIONS:
+            return "email"
+        if suffix == ".pdf":
+            return "pdf"
+        return "text"
+
+    def _entity_pairs(self, entities: Sequence[EntitySpan]) -> List[Tuple[str, str]]:
+        seen: Set[str] = set()
+        pairs: List[Tuple[str, str]] = []
+        for span in entities:
+            label = span.label.strip()
+            if not label:
+                continue
+            entity_id = normalise_entity_id(label)
+            if entity_id in seen:
+                continue
+            seen.add(entity_id)
+            pairs.append((entity_id, label))
+        return pairs
+
+    def _build_forensics_report(
+        self, doc_type: str, doc_id: str, path: Path
+    ) -> ForensicsReport | None:
+        if doc_type == "image":
+            return self.forensics_service.build_image_artifact(doc_id, path)
+        if doc_type == "financial":
+            return self.forensics_service.build_financial_artifact(doc_id, path)
+        return self.forensics_service.build_document_artifact(doc_id, path)
 
     def _build_timeline_events(self, doc_id: str, text: str) -> List[TimelineEvent]:
         events: List[TimelineEvent] = []

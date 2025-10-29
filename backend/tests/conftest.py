@@ -16,7 +16,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-from PIL import Image
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -290,7 +290,9 @@ def sample_workspace(tmp_path: Path) -> Path:
     )
 
     image = root / "evidence.png"
-    img = Image.new("RGB", (16, 16), color=(123, 45, 67))
+    img = Image.new("RGB", (240, 80), color="white")
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 20), "Acme 2024-10-02", fill="black")
     img.save(image)
 
     csv_file = root / "ledger.csv"
@@ -312,8 +314,13 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
     monkeypatch.setenv("JOB_STORE_DIR", str(storage_root / "jobs"))
     monkeypatch.setenv("DOCUMENT_STORE_DIR", str(storage_root / "documents"))
     monkeypatch.setenv("INGESTION_WORKSPACE_DIR", str(storage_root / "workspaces"))
+    monkeypatch.setenv("INGESTION_CHROMA_DIR", str(storage_root / "chroma"))
+    monkeypatch.setenv("INGESTION_LLAMA_CACHE_DIR", str(storage_root / "llama_cache"))
     monkeypatch.setenv("AGENT_THREADS_DIR", str(storage_root / "agent_threads"))
     monkeypatch.setenv("BILLING_USAGE_PATH", str(storage_root / "billing" / "usage.json"))
+    monkeypatch.setenv("VECTOR_BACKEND", "memory")
+    monkeypatch.setenv("INGESTION_COST_MODE", "community")
+    monkeypatch.setenv("INGESTION_HF_MODEL", "hash://tests")
     key_path = storage_root / "manifest.key"
     key_path.write_bytes(os.urandom(32))
     audit_log_path = storage_root / "audit.log"
