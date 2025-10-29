@@ -318,6 +318,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
     monkeypatch.setenv("INGESTION_LLAMA_CACHE_DIR", str(storage_root / "llama_cache"))
     monkeypatch.setenv("AGENT_THREADS_DIR", str(storage_root / "agent_threads"))
     monkeypatch.setenv("BILLING_USAGE_PATH", str(storage_root / "billing" / "usage.json"))
+    monkeypatch.setenv("VOICE_SESSIONS_DIR", str(storage_root / "voice" / "sessions"))
+    monkeypatch.setenv("VOICE_CACHE_DIR", str(storage_root / "voice" / "cache"))
     monkeypatch.setenv("VECTOR_BACKEND", "memory")
     monkeypatch.setenv("INGESTION_COST_MODE", "community")
     monkeypatch.setenv("INGESTION_HF_MODEL", "local://tests")

@@ -358,3 +358,48 @@ class DevAgentApplyResponse(BaseModel):
     task: DevAgentTaskModel
     execution: SandboxExecutionModel
 
+
+class VoicePersonaModel(BaseModel):
+    persona_id: str
+    label: str
+    description: str | None = None
+    speaker_id: str | None = None
+
+
+class VoiceSentimentModel(BaseModel):
+    label: Literal["positive", "negative", "neutral"]
+    score: float = Field(ge=0.0, le=1.0)
+    pace: float = Field(gt=0.0, le=2.5)
+
+
+class VoiceSegmentModel(BaseModel):
+    start: float = Field(ge=0.0)
+    end: float = Field(ge=0.0)
+    text: str
+    confidence: float
+
+
+class VoiceSessionModel(BaseModel):
+    session_id: str
+    thread_id: str
+    case_id: str
+    persona_id: str
+    transcript: str
+    sentiment: VoiceSentimentModel
+    segments: List[VoiceSegmentModel]
+    created_at: datetime
+    updated_at: datetime
+
+
+class VoiceSessionCreateResponse(VoiceSessionModel):
+    assistant_text: str
+    audio_url: str
+
+
+class VoiceSessionDetailResponse(VoiceSessionModel):
+    voice_memory: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VoicePersonaListResponse(BaseModel):
+    personas: List[VoicePersonaModel]
+

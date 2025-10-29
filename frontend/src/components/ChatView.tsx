@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useQueryContext } from '@/context/QueryContext';
 import { ChatMessage, Citation } from '@/types';
+import { VoiceConsole } from '@/components/VoiceConsole';
 
 export function ChatView(): JSX.Element {
   const { messages, sendMessage, retryLast, loading, error } = useQueryContext();
@@ -44,6 +45,7 @@ export function ChatView(): JSX.Element {
         ))}
       </div>
       <div className="live-region sr-only" ref={liveRegionRef} aria-live="polite" aria-atomic="true" />
+      <VoiceConsole />
       <form className="chat-form" onSubmit={handleSubmit} aria-label="Send a question to the assistant">
         <label htmlFor="prompt" className="sr-only">
           Ask a question

@@ -140,3 +140,41 @@ export interface OnboardingSubmissionResponse {
   message: string;
   received_at: string;
 }
+
+export interface VoicePersona {
+  persona_id: string;
+  label: string;
+  description?: string | null;
+  speaker_id?: string | null;
+}
+
+export interface VoiceSentiment {
+  label: 'positive' | 'negative' | 'neutral';
+  score: number;
+  pace: number;
+}
+
+export interface VoiceSegment {
+  start: number;
+  end: number;
+  text: string;
+  confidence: number;
+}
+
+export interface VoiceSession {
+  session_id: string;
+  thread_id: string;
+  case_id: string;
+  persona_id: string;
+  transcript: string;
+  sentiment: VoiceSentiment;
+  segments: VoiceSegment[];
+  created_at: string;
+  updated_at: string;
+  voice_memory?: Record<string, unknown>;
+}
+
+export interface VoiceSessionResponse extends VoiceSession {
+  assistant_text: string;
+  audio_url: string;
+}

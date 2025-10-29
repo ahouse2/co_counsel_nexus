@@ -5,6 +5,9 @@ import {
   OnboardingSubmissionResponse,
   QueryResponse,
   TimelineResponse,
+  VoicePersona,
+  VoiceSession,
+  VoiceSessionResponse,
 } from '@/types';
 
 const BASE = (() => {
@@ -108,4 +111,48 @@ export function buildStreamUrl(): string {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/query/stream';
   return url.toString();
+}
+
+export async function fetchVoicePersonas(): Promise<VoicePersona[]> {
+  const response = await fetch(withBase('/voice/personas'));
+  if (response.status === 401) {
+    throw new Error('Voice personas require agents:run scope');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load voice personas (${response.status})`);
+  }
+  const payload = (await response.json()) as { personas: VoicePersona[] };
+  return payload.personas;
+}
+
+export async function createVoiceSession(formData: FormData): Promise<VoiceSessionResponse> {
+  const response = await fetch(withBase('/voice/sessions'), {
+    method: 'POST',
+    body: formData,
+  });
+  if (response.status === 401) {
+    throw new Error('Voice session creation requires agents:run scope');
+  }
+  if (response.status === 400) {
+    const detail = await response.text();
+    throw new Error(detail || 'Voice session rejected');
+  }
+  if (!response.ok) {
+    throw new Error(`Voice session failed (${response.status})`);
+  }
+  return (await response.json()) as VoiceSessionResponse;
+}
+
+export async function fetchVoiceSession(sessionId: string): Promise<VoiceSession> {
+  const response = await fetch(withBase(`/voice/sessions/${sessionId}`));
+  if (response.status === 404) {
+    throw new Error('Voice session not found');
+  }
+  if (response.status === 401) {
+    throw new Error('Voice session requires agents:read scope');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load voice session (${response.status})`);
+  }
+  return (await response.json()) as VoiceSession;
 }

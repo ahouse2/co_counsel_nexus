@@ -2,8 +2,20 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from typing import Any, Dict
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from agents.toolkit.sandbox import SandboxExecutionResult
@@ -43,10 +55,13 @@ from .models.api import (
     TimelineEventModel,
     TimelinePaginationModel,
     TimelineResponse,
+    VoicePersonaListResponse,
+    VoiceSessionCreateResponse,
+    VoiceSessionDetailResponse,
 )
 from .services.agents import AgentsService, get_agents_service
 from .services.dev_agent import DevAgentService, get_dev_agent_service
-from .services.errors import WorkflowException, http_status_for_error
+from .services.errors import WorkflowAbort, WorkflowException, http_status_for_error
 from .services.forensics import ForensicsService, get_forensics_service
 from .services.graph import GraphService, get_graph_service
 from .services.ingestion import (
@@ -57,6 +72,7 @@ from .services.ingestion import (
 )
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
 from .services.timeline import TimelineService, get_timeline_service
+from .services.voice import VoiceService, VoiceServiceError, VoiceSessionOutcome, get_voice_service
 from .security.authz import Principal
 from .security.dependencies import (
     authorize_agents_read,
@@ -156,6 +172,138 @@ def stop_background_workers() -> None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+def _build_voice_session_response(
+    session_outcome,
+    request: Request,
+) -> VoiceSessionCreateResponse:
+    session = session_outcome.session
+    sentiment = session_outcome.sentiment
+    segments = [
+        {
+            "start": segment["start"],
+            "end": segment["end"],
+            "text": segment["text"],
+            "confidence": segment["confidence"],
+        }
+        for segment in session.segments
+    ]
+    audio_url = request.url_for("stream_voice_response", session_id=session.session_id)
+    return VoiceSessionCreateResponse(
+        session_id=session.session_id,
+        thread_id=session.thread_id,
+        case_id=session.case_id,
+        persona_id=session.persona_id,
+        transcript=session.transcript,
+        sentiment={
+            "label": sentiment.label,
+            "score": sentiment.score,
+            "pace": sentiment.pace,
+        },
+        segments=segments,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        assistant_text=session_outcome.assistant_text,
+        audio_url=str(audio_url),
+    )
+
+
+@app.get("/voice/personas", response_model=VoicePersonaListResponse)
+def list_voice_personas(
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_run),
+) -> VoicePersonaListResponse:
+    personas = list(service.list_personas())
+    return VoicePersonaListResponse(personas=personas)
+
+
+@app.post(
+    "/voice/sessions",
+    response_model=VoiceSessionCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_voice_session(
+    request: Request,
+    audio: UploadFile = File(...),
+    case_id: str = Form(...),
+    persona_id: str = Form(...),
+    thread_id: str | None = Form(default=None),
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_run),
+) -> VoiceSessionCreateResponse:
+    payload = await audio.read()
+    await audio.close()
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded audio is empty")
+    try:
+        outcome = service.create_session(
+            case_id=case_id,
+            audio_payload=payload,
+            persona_id=persona_id,
+            principal=principal,
+            thread_id=thread_id,
+        )
+    except VoiceServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except WorkflowAbort as exc:
+        _raise_workflow_exception(exc)
+    return _build_voice_session_response(outcome, request)
+
+
+@app.get("/voice/sessions/{session_id}", response_model=VoiceSessionDetailResponse)
+def get_voice_session(
+    session_id: str,
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_read),
+) -> VoiceSessionDetailResponse:
+    try:
+        session = service.get_session(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Voice session {session_id} not found") from exc
+    voice_memory: Dict[str, Any] = {}
+    try:
+        thread_payload = service.agents_service.get_thread(session.thread_id)
+    except FileNotFoundError:
+        thread_payload = {}
+    memory_block = thread_payload.get("memory", {}).get("voice_sessions", {})
+    if isinstance(memory_block, dict):
+        stored = memory_block.get(session_id)
+        if isinstance(stored, dict):
+            voice_memory = stored
+    return VoiceSessionDetailResponse(
+        session_id=session.session_id,
+        thread_id=session.thread_id,
+        case_id=session.case_id,
+        persona_id=session.persona_id,
+        transcript=session.transcript,
+        sentiment={
+            "label": session.sentiment_label,
+            "score": session.sentiment_score,
+            "pace": session.pace,
+        },
+        segments=session.segments,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        voice_memory=voice_memory,
+    )
+
+
+@app.get(
+    "/voice/sessions/{session_id}/response",
+    name="stream_voice_response",
+)
+def stream_voice_response(
+    session_id: str,
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_read),
+) -> StreamingResponse:
+    try:
+        stream = service.stream_response_audio(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Voice session {session_id} not found") from exc
+    headers = {"Content-Disposition": f"inline; filename={session_id}.wav"}
+    return StreamingResponse(stream, media_type="audio/wav", headers=headers)
 
 
 @app.post(

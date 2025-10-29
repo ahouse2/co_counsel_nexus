@@ -96,6 +96,39 @@ class Settings(BaseSettings):
     billing_health_soft_threshold: float = Field(default=0.8)
     billing_health_hard_threshold: float = Field(default=0.95)
 
+    voice_enabled: bool = Field(default=True)
+    voice_sessions_dir: Path = Field(default=Path("storage/voice/sessions"))
+    voice_cache_dir: Path = Field(default=Path("storage/voice/cache"))
+    voice_whisper_model: str = Field(default="medium.en")
+    voice_whisper_compute_type: Literal["int8_float16", "float16", "float32"] = Field(
+        default="int8_float16"
+    )
+    voice_device_preference: Literal["auto", "cuda", "cpu"] = Field(default="auto")
+    voice_tts_model: str = Field(default="tts_models/en/vctk/vits")
+    voice_sentiment_model: str = Field(
+        default="distilbert-base-uncased-finetuned-sst-2-english"
+    )
+    voice_sample_rate: int = Field(default=22050, ge=8000, le=48000)
+    voice_personas: Dict[str, Dict[str, str]] = Field(
+        default_factory=lambda: {
+            "aurora": {
+                "label": "Aurora",
+                "description": "Warm, empathetic cadence suitable for sensitive updates.",
+                "speaker_id": "p273",
+            },
+            "atlas": {
+                "label": "Atlas",
+                "description": "Calm, authoritative delivery for compliance briefings.",
+                "speaker_id": "p270",
+            },
+            "lyra": {
+                "label": "Lyra",
+                "description": "Crisp, energetic tone tuned for investigative stand-ups.",
+                "speaker_id": "p268",
+            },
+        }
+    )
+
     qdrant_collection: str = Field(default="cocounsel_documents")
     qdrant_vector_size: int = Field(default=384)
     qdrant_distance: Literal["Cosine", "Dot", "Euclid"] = Field(default="Cosine")
@@ -148,6 +181,8 @@ class Settings(BaseSettings):
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.billing_usage_path.parent.mkdir(parents=True, exist_ok=True)
+        self.voice_sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
