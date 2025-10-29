@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.services.agents import AgentsService
 from backend.app.services.errors import WorkflowAbort
-from backend.app.storage.agent_memory_store import AgentMemoryStore
+from backend.app.storage.agent_memory_store import AgentMemoryStore, AgentThreadRecord
 
 @pytest.fixture()
 def agents_client(client: TestClient) -> TestClient:
@@ -61,7 +61,12 @@ def test_agents_workflow_generates_thread(
     assert telemetry["errors"] == []
     assert telemetry["retries"] == {}
     assert telemetry["turn_roles"] == roles
-    assert telemetry["hand_offs"] == [["strategy", "ingestion"], ["ingestion", "research"], ["research", "cocounsel"], ["cocounsel", "qa"]]
+    assert telemetry["hand_offs"] == [
+        {"from": "strategy", "to": "ingestion", "via": "ingestion_audit"},
+        {"from": "ingestion", "to": "research", "via": "research_retrieval"},
+        {"from": "research", "to": "cocounsel", "via": "forensics_enrichment"},
+        {"from": "cocounsel", "to": "qa", "via": "qa_rubric"},
+    ]
 
     memory = payload["memory"]
     assert "plan" in memory and memory["plan"]["steps"]
@@ -127,6 +132,22 @@ class _TransientRetrievalService:
                 "graph": {"nodes": [{"id": "entity::acme"}], "edges": [{"id": "edge::acme"}]},
                 "privilege": {"aggregate": {"label": "non-privileged", "score": 0.1}, "decisions": []},
             },
+        } 
+
+
+class _SuccessfulRetrievalService:
+    def query(self, question: str, page_size: int = 5) -> dict[str, object]:
+        return {
+            "answer": "Board approval in January 2023, regulatory response in March 2023, integration completes April 2023.",
+            "citations": [
+                {"docId": "doc-001", "span": "Board approval"},
+                {"docId": "doc-002", "span": "Integration window"},
+            ],
+            "traces": {
+                "vector": [{"id": "vec-1"}],
+                "graph": {"nodes": [{"id": "entity::acme"}], "edges": [{"id": "edge::acme"}]},
+                "privilege": {"aggregate": {"label": "non-privileged", "score": 0.1}, "decisions": []},
+            },
         }
 
 
@@ -155,6 +176,11 @@ def test_agents_service_retries_transient_error(tmp_path: Path) -> None:
     assert telemetry["retries"].get("retrieval") == 1
     assert telemetry["errors"]
     assert telemetry["turn_roles"] == ["strategy", "ingestion", "research", "cocounsel", "qa"]
+    assert telemetry["hand_offs"][-1] == {
+        "from": "cocounsel",
+        "to": "qa",
+        "via": "qa_rubric",
+    }
     memory = response["memory"]
     assert memory["plan"]["steps"]
     assert service.memory_store.list_threads()
@@ -179,3 +205,32 @@ def test_agents_service_records_failure(tmp_path: Path) -> None:
     assert payload["telemetry"]["status"] == "failed"
     assert payload["telemetry"]["errors"]
     assert [turn["role"] for turn in payload["turns"]] == ["strategy", "ingestion"]
+
+
+class _CountingMemoryStore(AgentMemoryStore):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.records: list[AgentThreadRecord] = []
+
+    def write(self, record: AgentThreadRecord) -> None:  # type: ignore[override]
+        self.records.append(record)
+        super().write(record)
+
+
+def test_agents_service_persists_memory_each_turn(tmp_path: Path) -> None:
+    store = _CountingMemoryStore(tmp_path / "threads")
+    service = AgentsService(
+        retrieval_service=_SuccessfulRetrievalService(),
+        forensics_service=_StubForensicsService(),
+        document_store=_StubDocumentStore(),
+        memory_store=store,
+    )
+
+    response = service.run_case("case-memory", "Summarise integration milestones.")
+
+    turn_count = len(response["turns"])
+    # Five turns -> five per-turn writes + orchestrator final persist + service final snapshot
+    assert len(store.records) == turn_count + 2
+    intermediate_snapshots = [record.payload.get("memory", {}) for record in store.records[:-1]]
+    assert any(snapshot.get("plan", {}).get("steps") for snapshot in intermediate_snapshots)
+    assert response["telemetry"]["hand_offs"][-1]["via"] == "qa_rubric"
