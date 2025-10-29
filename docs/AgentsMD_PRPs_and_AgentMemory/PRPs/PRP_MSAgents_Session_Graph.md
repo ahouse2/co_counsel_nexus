@@ -39,7 +39,7 @@ sequenceDiagram
 ```
 
 Telemetry envelopes now include:
-- `turn_roles` and `hand_offs` describing ordered execution.
+- `turn_roles` and structured `hand_offs` dictionaries capturing `{from, to, via}` transitions.
 - `retries` and `backoff_ms` aligned with circuit breakers.
 - `qa_average` and rubric notes emitted by the QA tool.
 
@@ -53,7 +53,13 @@ Telemetry envelopes now include:
   },
   "artifacts": {"artifacts": [{"document_id": "doc-001", "artifact": "document"}]},
   "qa": {"average": 8.7, "scores": {"Technical Accuracy": 9.1}},
-  "turns": [{"role": "strategy", "action": "draft_plan", "metrics": {"step_count": 4}}]
+  "turns": [{"role": "strategy", "action": "draft_plan", "metrics": {"step_count": 4}}],
+  "telemetry": {
+    "hand_offs": [
+      {"from": "strategy", "to": "ingestion", "via": "ingestion_audit"},
+      {"from": "ingestion", "to": "research", "via": "research_retrieval"}
+    ]
+  }
 }
 ```
 
@@ -68,5 +74,5 @@ Telemetry envelopes now include:
 
 ## Operational Notes
 - Startup now pre-warms the orchestrator alongside the ingestion worker to reduce first-turn latency.
-- Shared memory snapshots are written after every turn, providing resilient recovery if a component fails mid-conversation.
+- Shared memory snapshots are written after every turn (plus finalisation), providing resilient recovery if a component fails mid-conversation.
 - Audit hooks remain at the service layer, capturing both turn-level and thread-level events for compliance.
