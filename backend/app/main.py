@@ -6,6 +6,20 @@ from typing import List
 
 import base64
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from typing import Any, Dict
+
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from agents.toolkit.sandbox import SandboxExecutionResult
@@ -30,8 +44,6 @@ from .models.api import (
     DevAgentProposalListResponse,
     DevAgentProposalModel,
     DevAgentTaskModel,
-    SandboxCommandResultModel,
-    SandboxExecutionModel,
     ForensicsResponse,
     GraphEdgeModel,
     GraphNeighborResponse,
@@ -39,9 +51,19 @@ from .models.api import (
     IngestionRequest,
     IngestionResponse,
     IngestionStatusResponse,
+    KnowledgeBookmarkRequest,
+    KnowledgeBookmarkResponse,
+    KnowledgeLessonDetailResponse,
+    KnowledgeLessonListResponse,
+    KnowledgeProgressUpdateRequest,
+    KnowledgeProgressUpdateResponse,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
     OnboardingSubmission,
     OnboardingSubmissionResponse,
     QueryResponse,
+    SandboxCommandResultModel,
+    SandboxExecutionModel,
     TimelineEventModel,
     TimelinePaginationModel,
     TimelineResponse,
@@ -59,11 +81,14 @@ from .models.api import (
     ScenarioVariableModel,
     TextToSpeechRequest,
     TextToSpeechResponse,
+    VoicePersonaListResponse,
+    VoiceSessionCreateResponse,
+    VoiceSessionDetailResponse,
 )
 from .scenarios.schema import ScenarioDefinition, ScenarioEvidenceRequirement, ScenarioMetadata, ScenarioParticipant, ScenarioVariable
 from .services.agents import AgentsService, get_agents_service
 from .services.dev_agent import DevAgentService, get_dev_agent_service
-from .services.errors import WorkflowException, http_status_for_error
+from .services.errors import WorkflowAbort, WorkflowException, http_status_for_error
 from .services.forensics import ForensicsService, get_forensics_service
 from .services.graph import GraphService, get_graph_service
 from .services.ingestion import (
@@ -72,6 +97,7 @@ from .services.ingestion import (
     get_ingestion_worker,
     shutdown_ingestion_worker,
 )
+from .services.knowledge import KnowledgeService, get_knowledge_service
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
 from .services.scenarios import (
     ScenarioEvidenceBinding,
@@ -80,6 +106,7 @@ from .services.scenarios import (
 )
 from .services.timeline import TimelineService, get_timeline_service
 from .services.tts import TextToSpeechService, get_tts_service
+from .services.voice import VoiceService, VoiceServiceError, VoiceSessionOutcome, get_voice_service
 from .security.authz import Principal
 from .security.dependencies import (
     authorize_agents_read,
@@ -92,6 +119,8 @@ from .security.dependencies import (
     authorize_billing_admin,
     authorize_ingest_enqueue,
     authorize_ingest_status,
+    authorize_knowledge_read,
+    authorize_knowledge_write,
     authorize_query,
     authorize_timeline,
     create_mtls_config,
@@ -181,6 +210,138 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _build_voice_session_response(
+    session_outcome,
+    request: Request,
+) -> VoiceSessionCreateResponse:
+    session = session_outcome.session
+    sentiment = session_outcome.sentiment
+    segments = [
+        {
+            "start": segment["start"],
+            "end": segment["end"],
+            "text": segment["text"],
+            "confidence": segment["confidence"],
+        }
+        for segment in session.segments
+    ]
+    audio_url = request.url_for("stream_voice_response", session_id=session.session_id)
+    return VoiceSessionCreateResponse(
+        session_id=session.session_id,
+        thread_id=session.thread_id,
+        case_id=session.case_id,
+        persona_id=session.persona_id,
+        transcript=session.transcript,
+        sentiment={
+            "label": sentiment.label,
+            "score": sentiment.score,
+            "pace": sentiment.pace,
+        },
+        segments=segments,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        assistant_text=session_outcome.assistant_text,
+        audio_url=str(audio_url),
+    )
+
+
+@app.get("/voice/personas", response_model=VoicePersonaListResponse)
+def list_voice_personas(
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_run),
+) -> VoicePersonaListResponse:
+    personas = list(service.list_personas())
+    return VoicePersonaListResponse(personas=personas)
+
+
+@app.post(
+    "/voice/sessions",
+    response_model=VoiceSessionCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_voice_session(
+    request: Request,
+    audio: UploadFile = File(...),
+    case_id: str = Form(...),
+    persona_id: str = Form(...),
+    thread_id: str | None = Form(default=None),
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_run),
+) -> VoiceSessionCreateResponse:
+    payload = await audio.read()
+    await audio.close()
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded audio is empty")
+    try:
+        outcome = service.create_session(
+            case_id=case_id,
+            audio_payload=payload,
+            persona_id=persona_id,
+            principal=principal,
+            thread_id=thread_id,
+        )
+    except VoiceServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except WorkflowAbort as exc:
+        _raise_workflow_exception(exc)
+    return _build_voice_session_response(outcome, request)
+
+
+@app.get("/voice/sessions/{session_id}", response_model=VoiceSessionDetailResponse)
+def get_voice_session(
+    session_id: str,
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_read),
+) -> VoiceSessionDetailResponse:
+    try:
+        session = service.get_session(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Voice session {session_id} not found") from exc
+    voice_memory: Dict[str, Any] = {}
+    try:
+        thread_payload = service.agents_service.get_thread(session.thread_id)
+    except FileNotFoundError:
+        thread_payload = {}
+    memory_block = thread_payload.get("memory", {}).get("voice_sessions", {})
+    if isinstance(memory_block, dict):
+        stored = memory_block.get(session_id)
+        if isinstance(stored, dict):
+            voice_memory = stored
+    return VoiceSessionDetailResponse(
+        session_id=session.session_id,
+        thread_id=session.thread_id,
+        case_id=session.case_id,
+        persona_id=session.persona_id,
+        transcript=session.transcript,
+        sentiment={
+            "label": session.sentiment_label,
+            "score": session.sentiment_score,
+            "pace": session.pace,
+        },
+        segments=session.segments,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        voice_memory=voice_memory,
+    )
+
+
+@app.get(
+    "/voice/sessions/{session_id}/response",
+    name="stream_voice_response",
+)
+def stream_voice_response(
+    session_id: str,
+    service: VoiceService = Depends(get_voice_service),
+    principal: Principal = Depends(authorize_agents_read),
+) -> StreamingResponse:
+    try:
+        stream = service.stream_response_audio(session_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Voice session {session_id} not found") from exc
+    headers = {"Content-Disposition": f"inline; filename={session_id}.wav"}
+    return StreamingResponse(stream, media_type="audio/wav", headers=headers)
+
+
 @app.post(
     "/ingest",
     response_model=IngestionResponse,
@@ -240,6 +401,97 @@ def ingest_status(
     terminal_statuses = {"succeeded", "failed", "cancelled"}
     status_code = status.HTTP_200_OK if response.status in terminal_statuses else status.HTTP_202_ACCEPTED
     return JSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
+
+
+@app.post(
+    "/knowledge/search",
+    response_model=KnowledgeSearchResponse,
+)
+def knowledge_search(
+    payload: KnowledgeSearchRequest,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_read),
+) -> JSONResponse:
+    filters = payload.filters.model_dump(exclude_none=True) if payload.filters else None
+    result = service.search(
+        payload.query,
+        limit=payload.limit,
+        filters=filters,
+        principal=principal,
+    )
+    response = KnowledgeSearchResponse(**result)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.get(
+    "/knowledge/lessons",
+    response_model=KnowledgeLessonListResponse,
+)
+def knowledge_lessons(
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_read),
+) -> JSONResponse:
+    payload = service.list_lessons(principal)
+    response = KnowledgeLessonListResponse(**payload)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.get(
+    "/knowledge/lessons/{lesson_id}",
+    response_model=KnowledgeLessonDetailResponse,
+)
+def knowledge_lesson_detail(
+    lesson_id: str,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_read),
+) -> JSONResponse:
+    try:
+        payload = service.get_lesson(lesson_id, principal)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    response = KnowledgeLessonDetailResponse(**payload)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.post(
+    "/knowledge/lessons/{lesson_id}/progress",
+    response_model=KnowledgeProgressUpdateResponse,
+)
+def knowledge_progress_update(
+    lesson_id: str,
+    payload: KnowledgeProgressUpdateRequest,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_write),
+) -> JSONResponse:
+    try:
+        result = service.record_progress(
+            lesson_id,
+            payload.section_id,
+            payload.completed,
+            principal,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    response = KnowledgeProgressUpdateResponse(**result)
+    return JSONResponse(content=response.model_dump(mode="json"))
+
+
+@app.post(
+    "/knowledge/lessons/{lesson_id}/bookmark",
+    response_model=KnowledgeBookmarkResponse,
+)
+def knowledge_toggle_bookmark(
+    lesson_id: str,
+    payload: KnowledgeBookmarkRequest,
+    service: KnowledgeService = Depends(get_knowledge_service),
+    principal: Principal = Depends(authorize_knowledge_write),
+) -> JSONResponse:
+    try:
+        result = service.set_bookmark(lesson_id, payload.bookmarked, principal)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    response = KnowledgeBookmarkResponse(**result)
+    return JSONResponse(content=response.model_dump(mode="json"))
 
 
 @app.get("/query", response_model=QueryResponse)

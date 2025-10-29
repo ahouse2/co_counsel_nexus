@@ -1,6 +1,11 @@
 import {
   BillingPlanListResponse,
   BillingUsageResponse,
+  KnowledgeBookmarkResponse,
+  KnowledgeLessonDetail,
+  KnowledgeLessonListResponse,
+  KnowledgeProgressUpdateResponse,
+  KnowledgeSearchResponse,
   OnboardingSubmissionPayload,
   OnboardingSubmissionResponse,
   QueryResponse,
@@ -10,6 +15,9 @@ import {
   ScenarioRunResponse,
   TextToSpeechResponsePayload,
   TimelineResponse,
+  VoicePersona,
+  VoiceSession,
+  VoiceSessionResponse,
 } from '@/types';
 
 const BASE = (() => {
@@ -164,4 +172,126 @@ export async function synthesiseSpeech(payload: {
     throw new Error(`TTS request failed (${response.status}): ${detail}`);
   }
   return (await response.json()) as TextToSpeechResponsePayload;
+export async function fetchKnowledgeLessons(): Promise<KnowledgeLessonListResponse> {
+  const response = await fetch(withBase('/knowledge/lessons'));
+  if (!response.ok) {
+    throw new Error(`Failed to load knowledge lessons (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeLessonListResponse;
+}
+
+export async function fetchKnowledgeLesson(lessonId: string): Promise<KnowledgeLessonDetail> {
+  const response = await fetch(withBase(`/knowledge/lessons/${lessonId}`));
+  if (response.status === 404) {
+    throw new Error('Lesson not found');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load lesson ${lessonId} (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeLessonDetail;
+}
+
+type KnowledgeSearchPayload = {
+  query: string;
+  limit?: number;
+  filters?: {
+    tags?: string[];
+    difficulty?: string[];
+    media_types?: string[];
+  };
+};
+
+export async function searchKnowledge(payload: KnowledgeSearchPayload): Promise<KnowledgeSearchResponse> {
+  const response = await fetch(withBase('/knowledge/search'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: payload.query,
+      limit: payload.limit ?? 10,
+      filters: payload.filters,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Knowledge search failed (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeSearchResponse;
+}
+
+export async function updateKnowledgeProgress(
+  lessonId: string,
+  sectionId: string,
+  completed = true
+): Promise<KnowledgeProgressUpdateResponse> {
+  const response = await fetch(withBase(`/knowledge/lessons/${lessonId}/progress`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section_id: sectionId, completed }),
+  });
+  if (response.status === 404) {
+    throw new Error('Lesson section not found');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to update progress (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeProgressUpdateResponse;
+}
+
+export async function updateKnowledgeBookmark(
+  lessonId: string,
+  bookmarked: boolean
+): Promise<KnowledgeBookmarkResponse> {
+  const response = await fetch(withBase(`/knowledge/lessons/${lessonId}/bookmark`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bookmarked }),
+  });
+  if (response.status === 404) {
+    throw new Error('Lesson not found');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to update bookmark (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeBookmarkResponse;
+export async function fetchVoicePersonas(): Promise<VoicePersona[]> {
+  const response = await fetch(withBase('/voice/personas'));
+  if (response.status === 401) {
+    throw new Error('Voice personas require agents:run scope');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load voice personas (${response.status})`);
+  }
+  const payload = (await response.json()) as { personas: VoicePersona[] };
+  return payload.personas;
+}
+
+export async function createVoiceSession(formData: FormData): Promise<VoiceSessionResponse> {
+  const response = await fetch(withBase('/voice/sessions'), {
+    method: 'POST',
+    body: formData,
+  });
+  if (response.status === 401) {
+    throw new Error('Voice session creation requires agents:run scope');
+  }
+  if (response.status === 400) {
+    const detail = await response.text();
+    throw new Error(detail || 'Voice session rejected');
+  }
+  if (!response.ok) {
+    throw new Error(`Voice session failed (${response.status})`);
+  }
+  return (await response.json()) as VoiceSessionResponse;
+}
+
+export async function fetchVoiceSession(sessionId: string): Promise<VoiceSession> {
+  const response = await fetch(withBase(`/voice/sessions/${sessionId}`));
+  if (response.status === 404) {
+    throw new Error('Voice session not found');
+  }
+  if (response.status === 401) {
+    throw new Error('Voice session requires agents:read scope');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load voice session (${response.status})`);
+  }
+  return (await response.json()) as VoiceSession;
 }

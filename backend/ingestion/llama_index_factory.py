@@ -99,12 +99,8 @@ def create_embedding_model(config: EmbeddingConfig) -> Any:
 
     if config.provider is EmbeddingProvider.HUGGINGFACE:
         kwargs = {key: value for key, value in config.extra.items() if value is not None}
-        if config.model.startswith("local://"):
+        if config.model.startswith("local://") or HuggingFaceEmbeddingCls is None:
             return LocalHuggingFaceEmbedding(config.model, config.dimensions)
-        if HuggingFaceEmbeddingCls is None:
-            raise RuntimeError(
-                "HuggingFace embeddings requested but llama-index HuggingFace integration is not installed."
-            )
         return HuggingFaceEmbeddingCls(model_name=config.model, **kwargs)
     if config.provider is EmbeddingProvider.AZURE_OPENAI:
         if AzureOpenAIEmbeddingCls is None:

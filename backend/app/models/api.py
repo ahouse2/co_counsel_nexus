@@ -301,6 +301,113 @@ class OnboardingSubmissionResponse(BaseModel):
     received_at: datetime
 
 
+class KnowledgeMediaModel(BaseModel):
+    type: str
+    title: str
+    url: HttpUrl | str
+    provider: Optional[str] = None
+
+
+class KnowledgeProgressModel(BaseModel):
+    completed_sections: List[str] = Field(default_factory=list)
+    total_sections: int = Field(ge=0)
+    percent_complete: float = Field(ge=0.0, le=1.0)
+    last_viewed_at: Optional[datetime] = None
+
+
+class KnowledgeLessonSectionModel(BaseModel):
+    id: str
+    title: str
+    content: str
+    completed: bool = False
+
+
+class KnowledgeLessonSummaryModel(BaseModel):
+    lesson_id: str
+    title: str
+    summary: str
+    tags: List[str]
+    difficulty: str
+    estimated_minutes: int = Field(ge=0)
+    jurisdictions: List[str]
+    media: List[KnowledgeMediaModel]
+    progress: KnowledgeProgressModel
+    bookmarked: bool = False
+
+
+class KnowledgeLessonListResponse(BaseModel):
+    lessons: List[KnowledgeLessonSummaryModel]
+    filters: Dict[str, List[str]]
+
+
+class KnowledgeLessonDetailResponse(BaseModel):
+    lesson_id: str
+    title: str
+    summary: str
+    tags: List[str]
+    difficulty: str
+    estimated_minutes: int
+    jurisdictions: List[str]
+    media: List[KnowledgeMediaModel]
+    sections: List[KnowledgeLessonSectionModel]
+    progress: KnowledgeProgressModel
+    bookmarked: bool
+
+
+class KnowledgeSearchFiltersModel(BaseModel):
+    tags: Optional[List[str]] = None
+    difficulty: Optional[List[str]] = None
+    media_types: Optional[List[str]] = None
+
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str
+    limit: int = Field(default=10, ge=1, le=50)
+    filters: Optional[KnowledgeSearchFiltersModel] = None
+
+
+class KnowledgeSearchResultModel(BaseModel):
+    lesson_id: str
+    lesson_title: str
+    section_id: str
+    section_title: str
+    snippet: str
+    score: float
+    tags: List[str]
+    difficulty: str
+    media: List[KnowledgeMediaModel]
+
+
+class KnowledgeSearchResponse(BaseModel):
+    results: List[KnowledgeSearchResultModel]
+    elapsed_ms: float
+    applied_filters: Dict[str, List[str]] = Field(default_factory=dict)
+
+
+class KnowledgeProgressUpdateRequest(BaseModel):
+    section_id: str
+    completed: bool = True
+
+
+class KnowledgeProgressUpdateResponse(BaseModel):
+    lesson_id: str
+    section_id: str
+    completed_sections: List[str]
+    total_sections: int
+    percent_complete: float
+    last_viewed_at: Optional[datetime] = None
+
+
+class KnowledgeBookmarkRequest(BaseModel):
+    bookmarked: bool = True
+
+
+class KnowledgeBookmarkResponse(BaseModel):
+    lesson_id: str
+    bookmarked: bool
+    bookmarks: List[str]
+
+
 class SandboxCommandResultModel(BaseModel):
     command: List[str]
     return_code: int
@@ -480,4 +587,47 @@ class TextToSpeechResponse(BaseModel):
     base64: str
     cache_hit: bool
     sha256: str
+class VoicePersonaModel(BaseModel):
+    persona_id: str
+    label: str
+    description: str | None = None
+    speaker_id: str | None = None
+
+
+class VoiceSentimentModel(BaseModel):
+    label: Literal["positive", "negative", "neutral"]
+    score: float = Field(ge=0.0, le=1.0)
+    pace: float = Field(gt=0.0, le=2.5)
+
+
+class VoiceSegmentModel(BaseModel):
+    start: float = Field(ge=0.0)
+    end: float = Field(ge=0.0)
+    text: str
+    confidence: float
+
+
+class VoiceSessionModel(BaseModel):
+    session_id: str
+    thread_id: str
+    case_id: str
+    persona_id: str
+    transcript: str
+    sentiment: VoiceSentimentModel
+    segments: List[VoiceSegmentModel]
+    created_at: datetime
+    updated_at: datetime
+
+
+class VoiceSessionCreateResponse(VoiceSessionModel):
+    assistant_text: str
+    audio_url: str
+
+
+class VoiceSessionDetailResponse(VoiceSessionModel):
+    voice_memory: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VoicePersonaListResponse(BaseModel):
+    personas: List[VoicePersonaModel]
 

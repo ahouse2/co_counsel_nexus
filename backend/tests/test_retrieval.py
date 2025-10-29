@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from pathlib import Path
-
 from pathlib import Path
 
 import pytest
@@ -147,7 +146,30 @@ def test_merge_relation_statements_deduplicates(
 def test_stream_result_generates_events(
     retrieval_service: retrieval_module.RetrievalService,
 ) -> None:
-    trace = retrieval_module.Trace(vector=[], graph={"nodes": [], "edges": []}, forensics=[])
+    graph_service = retrieval_service.graph_service
+    graph_service.upsert_document("doc-trace", "Trace Doc", {})
+    graph_service.upsert_entity("entity-graph", "Entity", {"label": "Graph"})
+    graph_service.merge_relation("doc-trace", "ASSOCIATED_WITH", "entity-graph", {"doc_id": "doc-trace"})
+
+    timeline_event = TimelineEvent(
+        id="event-graph",
+        ts=datetime.now(timezone.utc),
+        title="Graph Event",
+        summary="Graph summary",
+        citations=["doc-trace"],
+        entity_highlights=[],
+        relation_tags=[],
+        confidence=0.9,
+    )
+    retrieval_service.timeline_store.write_all([timeline_event])
+
+    point = qmodels.ScoredPoint(
+        id="vec-graph",
+        score=0.92,
+        payload={"doc_id": "doc-trace", "text": "Context"},
+        version=1,
+    )
+    trace, _ = retrieval_service._build_trace([point], ["entity-graph"])
     meta = retrieval_module.QueryMeta(
         page=1,
         page_size=1,
@@ -163,10 +185,16 @@ def test_stream_result_generates_events(
         meta=meta,
         has_evidence=True,
     )
-    events = retrieval_service.stream_result(result, attributes={"mode": "precision", "reranker": "rrf", "stream": True}, chunk_size=7)
+    events = retrieval_service.stream_result(
+        result,
+        attributes={"mode": "precision", "reranker": "rrf", "stream": True},
+        chunk_size=7,
+    )
     assert events[0].startswith("{\"type\": \"meta\"")
     assert any("\"type\": \"answer\"" in event for event in events)
     assert events[-1].startswith("{\"type\": \"final\"")
+    final_payload = json.loads(events[-1])
+    graph_payload = final_payload["traces"]["graph"]
     node_ids = {node["id"] for node in graph_payload["nodes"]}
     assert {"doc-trace", "entity-graph"}.issubset(node_ids)
     relation_types = {edge["type"] for edge in graph_payload["edges"]}

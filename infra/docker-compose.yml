@@ -30,6 +30,8 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-securepassword}
       - QDRANT_URL=http://qdrant:6333
       - VECTOR_DIR=/data/vector
+      - VOICE_SESSIONS_DIR=/data/voice/sessions
+      - VOICE_CACHE_DIR=/models
       - DOCUMENT_STORAGE_PATH=/var/cocounsel/documents
       - GRAPH_SNAPSHOT_PATH=/var/cocounsel/graphs
       - TELEMETRY_BUFFER_PATH=/var/cocounsel/telemetry
@@ -53,6 +55,7 @@ services:
       - backend
     volumes:
       - api_data:/data
+      - voice_models:/models
       - ../var/storage/documents:/var/cocounsel/documents
       - ../var/storage/graphs:/var/cocounsel/graphs
       - ../var/storage/telemetry:/var/cocounsel/telemetry
@@ -196,6 +199,7 @@ volumes:
   neo4j_data:
   qdrant_data:
   api_data:
+  voice_models:
   grafana_data:
 
 networks:

@@ -14,7 +14,7 @@ from qdrant_client.http import models as qmodels
 
 from backend.app.config import get_settings, reset_settings_cache
 from backend.app.services.forensics import ForensicsService
-from backend.app.services.graph import GraphEdge, GraphNode
+from backend.app.services.graph import GraphEdge, GraphNode, GraphSubgraph
 from backend.app.services.retrieval import QueryResult, RetrievalService
 from backend.app.telemetry import reset_telemetry, setup_telemetry
 
@@ -144,7 +144,16 @@ class DummyGraphService:
         )
         return [node], [edge]
 
-    def search_entities(self, query: str) -> List[GraphNode]:
+    def search_entities(self, query: str, limit: int | None = None) -> List[GraphNode]:
+        return []
+
+    def subgraph(self, entity_ids: List[str]) -> GraphSubgraph:
+        subgraph = GraphSubgraph()
+        for entity_id in entity_ids:
+            subgraph.nodes[entity_id] = GraphNode(id=entity_id, type="Entity", properties={"label": entity_id})
+        return subgraph
+
+    def communities_for_nodes(self, node_ids: List[str]) -> List[object]:
         return []
 
 
@@ -154,6 +163,9 @@ class DummyDocumentStore:
 
     def read_document(self, doc_id: str) -> Dict[str, object]:
         return self._store.get(doc_id, {})
+
+    def list_documents(self) -> List[Dict[str, object]]:
+        return list(self._store.values())
 
 
 class DummyForensicsService:
@@ -301,19 +313,21 @@ def test_retrieval_instrumentation_records_spans_and_metrics(
     vector_span = next(span for span in harness.retrieval.tracer.spans if span.name == "retrieval.vector_search")
     assert vector_span.attributes["retrieval.vector.count"] == 1
 
-    assert harness.retrieval.queries.calls == [
-        (
-            1,
-            {
-                "rerank": False,
-                "filter_source": "any",
-                "filter_entity": False,
-                "has_evidence": True,
-                "privilege_label": "non_privileged",
-                "privilege_flagged": False,
-            },
-        )
-    ]
+    assert len(harness.retrieval.queries.calls) == 1
+    amount, attributes = harness.retrieval.queries.calls[0]
+    assert amount == 1
+    expected_attrs = {
+        "rerank": False,
+        "filter_source": "any",
+        "filter_entity": False,
+        "has_evidence": True,
+        "privilege_label": "non_privileged",
+        "privilege_flagged": False,
+    }
+    for key, value in expected_attrs.items():
+        assert attributes[key] == value
+    assert attributes["mode"] == "precision"
+    assert attributes["reranker"] == "rrf"
     assert len(harness.retrieval.duration.records) == 1
     assert harness.retrieval.duration.records[0][1]["has_evidence"] is True
     assert len(harness.retrieval.results.records) == 1

@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     tts_timeout_seconds: float = Field(default=15.0, ge=1.0)
     tts_cache_dir: Path = Field(default=Path("storage/audio_cache"))
     tts_default_voice: str = Field(default="larynx:en-us-blizzard_lessac")
+    knowledge_catalog_path: Path = Field(default=Path("docs/knowledge/catalog.json"))
+    knowledge_content_dir: Path = Field(default=Path("docs/knowledge/best_practices"))
+    knowledge_progress_path: Path = Field(default=Path("storage/knowledge/progress.json"))
 
     privilege_classifier_threshold: float = Field(default=0.68)
 
@@ -72,6 +75,7 @@ class Settings(BaseSettings):
     security_audience_agents: str = Field(default="co-counsel.agents")
     security_audience_billing: str = Field(default="co-counsel.billing")
     security_audience_dev_agent: str = Field(default="co-counsel.dev-agent")
+    security_audience_knowledge: str = Field(default="co-counsel.knowledge")
 
     dev_agent_validation_commands: tuple[tuple[str, ...], ...] = Field(
         default=(
@@ -103,6 +107,39 @@ class Settings(BaseSettings):
     billing_support_overrides: Dict[str, str] = Field(default_factory=dict)
     billing_health_soft_threshold: float = Field(default=0.8)
     billing_health_hard_threshold: float = Field(default=0.95)
+
+    voice_enabled: bool = Field(default=True)
+    voice_sessions_dir: Path = Field(default=Path("storage/voice/sessions"))
+    voice_cache_dir: Path = Field(default=Path("storage/voice/cache"))
+    voice_whisper_model: str = Field(default="medium.en")
+    voice_whisper_compute_type: Literal["int8_float16", "float16", "float32"] = Field(
+        default="int8_float16"
+    )
+    voice_device_preference: Literal["auto", "cuda", "cpu"] = Field(default="auto")
+    voice_tts_model: str = Field(default="tts_models/en/vctk/vits")
+    voice_sentiment_model: str = Field(
+        default="distilbert-base-uncased-finetuned-sst-2-english"
+    )
+    voice_sample_rate: int = Field(default=22050, ge=8000, le=48000)
+    voice_personas: Dict[str, Dict[str, str]] = Field(
+        default_factory=lambda: {
+            "aurora": {
+                "label": "Aurora",
+                "description": "Warm, empathetic cadence suitable for sensitive updates.",
+                "speaker_id": "p273",
+            },
+            "atlas": {
+                "label": "Atlas",
+                "description": "Calm, authoritative delivery for compliance briefings.",
+                "speaker_id": "p270",
+            },
+            "lyra": {
+                "label": "Lyra",
+                "description": "Crisp, energetic tone tuned for investigative stand-ups.",
+                "speaker_id": "p268",
+            },
+        }
+    )
 
     qdrant_collection: str = Field(default="cocounsel_documents")
     qdrant_vector_size: int = Field(default=384)
@@ -157,6 +194,11 @@ class Settings(BaseSettings):
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.billing_usage_path.parent.mkdir(parents=True, exist_ok=True)
         self.tts_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.knowledge_catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        self.knowledge_content_dir.mkdir(parents=True, exist_ok=True)
+        self.knowledge_progress_path.parent.mkdir(parents=True, exist_ok=True)
+        self.voice_sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
