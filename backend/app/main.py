@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from typing import List
 
+import base64
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -43,7 +45,22 @@ from .models.api import (
     TimelineEventModel,
     TimelinePaginationModel,
     TimelineResponse,
+    ScenarioBeatSpecModel,
+    ScenarioDefinitionModel,
+    ScenarioEvidenceBindingModel,
+    ScenarioEvidenceSpecModel,
+    ScenarioListResponse,
+    ScenarioMetadataModel,
+    ScenarioParticipantModel,
+    ScenarioRunAudioModel,
+    ScenarioRunRequestModel,
+    ScenarioRunResponseModel,
+    ScenarioRunTurnModel,
+    ScenarioVariableModel,
+    TextToSpeechRequest,
+    TextToSpeechResponse,
 )
+from .scenarios.schema import ScenarioDefinition, ScenarioEvidenceRequirement, ScenarioMetadata, ScenarioParticipant, ScenarioVariable
 from .services.agents import AgentsService, get_agents_service
 from .services.dev_agent import DevAgentService, get_dev_agent_service
 from .services.errors import WorkflowException, http_status_for_error
@@ -56,7 +73,13 @@ from .services.ingestion import (
     shutdown_ingestion_worker,
 )
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
+from .services.scenarios import (
+    ScenarioEvidenceBinding,
+    ScenarioRunOptions,
+    get_scenario_engine,
+)
 from .services.timeline import TimelineService, get_timeline_service
+from .services.tts import TextToSpeechService, get_tts_service
 from .security.authz import Principal
 from .security.dependencies import (
     authorize_agents_read,
@@ -473,6 +496,73 @@ def agents_threads(
     return AgentThreadListResponse(threads=threads)
 
 
+@app.get("/scenarios", response_model=ScenarioListResponse)
+def scenarios_list(
+    engine = Depends(get_scenario_engine),
+    principal: Principal = Depends(authorize_agents_read),
+) -> ScenarioListResponse:
+    _ = principal
+    metadata = engine.list_metadata()
+    return ScenarioListResponse(scenarios=[_scenario_metadata_model(item) for item in metadata])
+
+
+@app.get("/scenarios/{scenario_id}", response_model=ScenarioDefinitionModel)
+def scenarios_detail(
+    scenario_id: str,
+    engine = Depends(get_scenario_engine),
+    principal: Principal = Depends(authorize_agents_read),
+) -> ScenarioDefinitionModel:
+    _ = principal
+    try:
+        definition = engine.get(scenario_id)
+    except WorkflowException as exc:
+        _raise_workflow_exception(exc)
+    return _scenario_definition_model(definition)
+
+
+@app.post("/scenarios/run", response_model=ScenarioRunResponseModel)
+def scenarios_run(
+    payload: ScenarioRunRequestModel,
+    engine = Depends(get_scenario_engine),
+    principal: Principal = Depends(authorize_agents_run),
+) -> ScenarioRunResponseModel:
+    options = _scenario_run_options(payload)
+    try:
+        definition = engine.get(options.scenario_id)
+        result = engine.run(options, principal=principal)
+    except WorkflowException as exc:
+        _raise_workflow_exception(exc)
+    transcript_models = [ScenarioRunTurnModel.model_validate(turn) for turn in result.get("transcript", [])]
+    definition_model = _scenario_definition_model(definition)
+    telemetry = dict(result.get("telemetry", {}))
+    return ScenarioRunResponseModel(
+        run_id=str(result.get("run_id")),
+        scenario=definition_model,
+        transcript=transcript_models,
+        telemetry=telemetry,
+    )
+
+
+@app.post("/tts/speak", response_model=TextToSpeechResponse)
+def tts_speak(
+    payload: TextToSpeechRequest,
+    service: TextToSpeechService = Depends(_tts_service_dependency),
+    principal: Principal = Depends(authorize_agents_run),
+) -> TextToSpeechResponse:
+    _ = principal
+    try:
+        result = service.synthesise(text=payload.text, voice=payload.voice)
+    except WorkflowException as exc:
+        _raise_workflow_exception(exc)
+    return TextToSpeechResponse(
+        voice=result.voice,
+        mime_type=result.content_type,
+        base64=base64.b64encode(result.audio_bytes).decode("ascii"),
+        cache_hit=result.cache_hit,
+        sha256=result.sha256,
+    )
+
+
 @app.get("/dev-agent/proposals", response_model=DevAgentProposalListResponse)
 def dev_agent_proposals(
     service: DevAgentService = Depends(get_dev_agent_service),
@@ -564,3 +654,113 @@ def onboarding_submission(payload: OnboardingSubmission) -> OnboardingSubmission
         received_at=datetime.now(timezone.utc),
     )
 
+def _scenario_participant_model(participant: ScenarioParticipant) -> ScenarioParticipantModel:
+    return ScenarioParticipantModel(
+        id=participant.id,
+        name=participant.name,
+        role=participant.role,
+        description=participant.description,
+        sprite=str(participant.sprite),
+        accent_color=participant.accent_color,
+        voice=participant.voice,
+        default=participant.default,
+        optional=participant.optional,
+    )
+
+
+def _scenario_variable_model(variable: ScenarioVariable) -> ScenarioVariableModel:
+    return ScenarioVariableModel(
+        name=variable.name,
+        description=variable.description,
+        required=variable.required,
+        default=variable.default,
+    )
+
+
+def _scenario_evidence_model(spec: ScenarioEvidenceRequirement) -> ScenarioEvidenceSpecModel:
+    return ScenarioEvidenceSpecModel(
+        id=spec.id,
+        label=spec.label,
+        description=spec.description,
+        required=spec.required,
+        type=spec.type,
+        document_id=spec.document_id,
+    )
+
+
+def _scenario_definition_model(definition: ScenarioDefinition) -> ScenarioDefinitionModel:
+    beats: List[ScenarioBeatSpecModel] = []
+    for beat in definition.beats:
+        if beat.kind == "dynamic":
+            dynamic = beat  # type: ignore[assignment]
+            beats.append(
+                ScenarioBeatSpecModel(
+                    id=dynamic.id,
+                    kind=dynamic.kind,
+                    speaker=dynamic.speaker,
+                    stage_direction=dynamic.stage_direction,
+                    emphasis=dynamic.emphasis,
+                    duration_ms=dynamic.duration_ms,
+                    fallback_text=dynamic.fallback_text,
+                    delegate=dynamic.delegate,
+                    top_k=dynamic.top_k,
+                )
+            )
+        else:
+            scripted = beat  # type: ignore[assignment]
+            beats.append(
+                ScenarioBeatSpecModel(
+                    id=scripted.id,
+                    kind=scripted.kind,
+                    speaker=scripted.speaker,
+                    stage_direction=scripted.stage_direction,
+                    emphasis=scripted.emphasis,
+                    duration_ms=scripted.duration_ms,
+                )
+            )
+    return ScenarioDefinitionModel(
+        scenario_id=definition.id,
+        title=definition.title,
+        description=definition.description,
+        category=definition.category,
+        difficulty=definition.difficulty,
+        tags=list(definition.tags),
+        participants=[_scenario_participant_model(p) for p in definition.participants],
+        variables={name: _scenario_variable_model(variable) for name, variable in definition.variables.items()},
+        evidence=[_scenario_evidence_model(spec) for spec in definition.evidence],
+        beats=beats,
+    )
+
+
+def _scenario_metadata_model(metadata: ScenarioMetadata) -> ScenarioMetadataModel:
+    return ScenarioMetadataModel(
+        scenario_id=metadata.id,
+        title=metadata.title,
+        description=metadata.description,
+        category=metadata.category,
+        difficulty=metadata.difficulty,
+        tags=list(metadata.tags),
+        participants=list(metadata.participants),
+    )
+
+
+def _scenario_run_options(payload: ScenarioRunRequestModel) -> ScenarioRunOptions:
+    evidence_bindings = {
+        slot: ScenarioEvidenceBinding(slot_id=slot, value=binding.value, document_id=binding.document_id, type=binding.type)
+        for slot, binding in payload.evidence.items()
+    }
+    return ScenarioRunOptions(
+        scenario_id=payload.scenario_id,
+        case_id=payload.case_id,
+        variables=payload.variables,
+        evidence=evidence_bindings,
+        participants=payload.participants,
+        use_tts=payload.enable_tts,
+    )
+
+
+def _tts_service_dependency() -> TextToSpeechService:
+    service = get_tts_service(optional=True)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="TTS service not configured")
+    return service

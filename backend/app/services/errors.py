@@ -19,6 +19,8 @@ class WorkflowComponent(str, Enum):
     MEMORY = "memory"
     TELEMETRY = "telemetry"
     AUDIT = "audit"
+    SCENARIO = "scenario"
+    TTS = "tts"
 
 
 class WorkflowSeverity(str, Enum):

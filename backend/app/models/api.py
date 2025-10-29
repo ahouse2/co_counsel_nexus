@@ -358,3 +358,126 @@ class DevAgentApplyResponse(BaseModel):
     task: DevAgentTaskModel
     execution: SandboxExecutionModel
 
+
+class ScenarioParticipantModel(BaseModel):
+    id: str
+    name: str
+    role: str
+    description: str
+    sprite: str
+    accent_color: str
+    voice: Optional[str] = None
+    default: bool = True
+    optional: bool = False
+
+
+class ScenarioVariableModel(BaseModel):
+    name: str
+    description: str
+    required: bool = False
+    default: Optional[str] = None
+
+
+class ScenarioEvidenceSpecModel(BaseModel):
+    id: str
+    label: str
+    description: Optional[str] = None
+    required: bool = False
+    type: str = "document"
+    document_id: Optional[str] = None
+
+
+class ScenarioBeatSpecModel(BaseModel):
+    id: str
+    kind: Literal["scripted", "dynamic"]
+    speaker: str
+    stage_direction: Optional[str] = None
+    emphasis: Optional[str] = None
+    duration_ms: Optional[int] = None
+    fallback_text: Optional[str] = None
+    delegate: Optional[str] = None
+    top_k: Optional[int] = None
+
+
+class ScenarioDefinitionModel(BaseModel):
+    scenario_id: str
+    title: str
+    description: str
+    category: str
+    difficulty: str
+    tags: List[str]
+    participants: List[ScenarioParticipantModel]
+    variables: Dict[str, ScenarioVariableModel]
+    evidence: List[ScenarioEvidenceSpecModel]
+    beats: List[ScenarioBeatSpecModel]
+
+
+class ScenarioMetadataModel(BaseModel):
+    scenario_id: str
+    title: str
+    description: str
+    category: str
+    difficulty: str
+    tags: List[str]
+    participants: List[str]
+
+
+class ScenarioListResponse(BaseModel):
+    scenarios: List[ScenarioMetadataModel]
+
+
+class ScenarioEvidenceBindingModel(BaseModel):
+    value: str
+    document_id: Optional[str] = None
+    type: Optional[str] = None
+
+
+class ScenarioRunRequestModel(BaseModel):
+    scenario_id: str
+    case_id: str
+    participants: List[str] = Field(default_factory=list)
+    variables: Dict[str, str] = Field(default_factory=dict)
+    evidence: Dict[str, ScenarioEvidenceBindingModel] = Field(default_factory=dict)
+    enable_tts: bool = False
+
+
+class ScenarioRunAudioModel(BaseModel):
+    voice: str
+    mime_type: str
+    base64: str
+    cache_hit: bool
+    sha256: str
+
+
+class ScenarioRunTurnModel(BaseModel):
+    beat_id: str
+    speaker_id: str
+    speaker: ScenarioParticipantModel
+    text: str
+    kind: str
+    stage_direction: Optional[str]
+    emphasis: Optional[str]
+    duration_ms: Optional[float]
+    thread_id: Optional[str]
+    audio: Optional[ScenarioRunAudioModel] = None
+
+
+class ScenarioRunResponseModel(BaseModel):
+    run_id: str
+    scenario: ScenarioDefinitionModel
+    transcript: List[ScenarioRunTurnModel]
+    telemetry: Dict[str, Any]
+
+
+class TextToSpeechRequest(BaseModel):
+    text: str
+    voice: Optional[str] = None
+
+
+class TextToSpeechResponse(BaseModel):
+    voice: str
+    mime_type: str
+    base64: str
+    cache_hit: bool
+    sha256: str
+

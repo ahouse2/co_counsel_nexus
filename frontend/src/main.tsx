@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { QueryProvider } from './context/QueryContext';
+import { ScenarioProvider } from './context/ScenarioContext';
 import './styles/index.css';
 import { registerServiceWorker } from './utils/serviceWorkerRegistration';
 
@@ -13,7 +14,9 @@ if (!rootElement) {
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <QueryProvider>
-      <App />
+      <ScenarioProvider>
+        <App />
+      </ScenarioProvider>
     </QueryProvider>
   </React.StrictMode>
 );

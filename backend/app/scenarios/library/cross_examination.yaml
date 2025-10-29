@@ -1,0 +1,120 @@
+schema_version: "1.0"
+id: "cross_examination_smith"
+title: "Cross Examination of Agent Smith"
+description: >-
+  Practice a high-pressure cross examination focused on establishing timeline contradictions
+  using real evidence from the case file.
+category: "trial"
+difficulty: "associate"
+tags:
+  - "dfir"
+  - "timeline"
+  - "witness"
+participants:
+  - id: "judge"
+    name: "Hon. Maren Vega"
+    role: "Presiding Judge"
+    description: "Keeps the simulation on track and rules on objections."
+    sprite: "/simulations/characters/judge.json"
+    accent_color: "#f59e0b"
+    voice: "larynx:en-us-blizzard_lessac"
+    default: true
+    optional: false
+  - id: "counsel"
+    name: "You"
+    role: "Lead Counsel"
+    description: "Directs the cross examination, leveraging case knowledge."
+    sprite: "/simulations/characters/counsel.json"
+    accent_color: "#0ea5e9"
+    default: true
+    optional: false
+  - id: "opposition"
+    name: "Atty. D. Harper"
+    role: "Opposing Counsel"
+    description: "Objects to shaky foundations and probes weaknesses."
+    sprite: "/simulations/characters/opposition.json"
+    accent_color: "#ef4444"
+    voice: "larynx:en-gb-alba"
+    default: true
+    optional: true
+  - id: "witness"
+    name: "Agent Priya Smith"
+    role: "Forensic Analyst"
+    description: "Explains chain-of-custody and timeline findings."
+    sprite: "/simulations/characters/witness.json"
+    accent_color: "#22c55e"
+    voice: "larynx:en-au-sarah"
+    default: true
+    optional: true
+variables:
+  issue:
+    name: "issue"
+    description: "Key allegation or contradiction you want to surface."
+    required: true
+  witness_fact:
+    name: "witness_fact"
+    description: "Critical detail the witness must acknowledge."
+    required: true
+  timeframe:
+    name: "timeframe"
+    description: "Window you need to lock in during testimony."
+    required: true
+    default: "January 12, 2025 between 21:00 and 22:00"
+evidence:
+  - id: "primary_document"
+    label: "Primary exhibit"
+    description: "Document you will use to impeach the witness."
+    required: true
+    type: "document"
+  - id: "timeline_event"
+    label: "Timeline anchor"
+    description: "Timeline event that anchors the contradiction."
+    required: true
+    type: "timeline"
+beats:
+  - id: "opening_gavel"
+    kind: "scripted"
+    speaker: "judge"
+    text: "Court is now in session for the cross examination of Agent Smith. Counsel, you may proceed."
+    stage_direction: "Gavel taps twice."
+    duration_ms: 4000
+  - id: "counsel_intro"
+    kind: "dynamic"
+    speaker: "counsel"
+    prompt_template: |-
+      You are preparing for a live courtroom simulation. Summarise, in two sentences, the objective of
+      this cross examination focusing on {issue}. Mention the exhibit {primary_document} you intend to
+      confront the witness with and the timeline anchor {timeline_event}. Use assertive yet respectful
+      courtroom language.
+    delegate: "strategy"
+    top_k: 4
+  - id: "witness_setup"
+    kind: "dynamic"
+    speaker: "witness"
+    prompt_template: |-
+      As the witness {witness_name}, respond to cross examination. Acknowledge your role in the forensic timeline.
+      Counsel is pressing on {issue}. Reference the fact "{witness_fact}" and concede what the timeline at
+      {timeline_event} shows, while maintaining professionalism.
+    delegate: "forensics"
+    fallback_text: "The witness confirms the logged hand-off coincides with the challenged timeframe."
+  - id: "opposition_objection"
+    kind: "scripted"
+    speaker: "opposition"
+    text: "Objection, argumentative."
+    stage_direction: "Opposing counsel stands abruptly."
+    duration_ms: 3000
+  - id: "judge_ruling"
+    kind: "dynamic"
+    speaker: "judge"
+    prompt_template: |-
+      Issue a ruling on an objection about argumentative questioning in a cross examination regarding {issue}.
+      Provide the ruling in a single concise sentence and instruct counsel on how to proceed.
+    delegate: "qa"
+  - id: "counsel_closure"
+    kind: "dynamic"
+    speaker: "counsel"
+    prompt_template: |-
+      Deliver a closing cross examination statement tying {witness_fact} to {issue}. Reinforce how exhibit
+      {primary_document} and the timeline entry {timeline_event} undermine the witness' credibility. Limit to
+      three impactful sentences.
+    delegate: "research"

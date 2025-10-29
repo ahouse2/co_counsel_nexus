@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "stage": {
+    "width": 1280,
+    "height": 720,
+    "background": "/simulations/backgrounds/courtroom.svg",
+    "characterPositions": {
+      "judge": { "x": 980, "y": 160 },
+      "counsel": { "x": 420, "y": 430 },
+      "opposition": { "x": 860, "y": 420 },
+      "witness": { "x": 640, "y": 260 }
+    }
+  },
+  "characters": {
+    "judge": {
+      "sprite": "/simulations/characters/judge.svg",
+      "accentColor": "#f59e0b"
+    },
+    "counsel": {
+      "sprite": "/simulations/characters/counsel.svg",
+      "accentColor": "#0ea5e9"
+    },
+    "opposition": {
+      "sprite": "/simulations/characters/opposition.svg",
+      "accentColor": "#ef4444"
+    },
+    "witness": {
+      "sprite": "/simulations/characters/witness.svg",
+      "accentColor": "#22c55e"
+    }
+  }
+}

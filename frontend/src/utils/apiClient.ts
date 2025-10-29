@@ -4,6 +4,11 @@ import {
   OnboardingSubmissionPayload,
   OnboardingSubmissionResponse,
   QueryResponse,
+  ScenarioDefinition,
+  ScenarioListResponse,
+  ScenarioRunRequestPayload,
+  ScenarioRunResponse,
+  TextToSpeechResponsePayload,
   TimelineResponse,
 } from '@/types';
 
@@ -108,4 +113,55 @@ export function buildStreamUrl(): string {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/query/stream';
   return url.toString();
+}
+
+export async function fetchScenarioMetadata(): Promise<ScenarioListResponse> {
+  const response = await fetch(withBase('/scenarios'));
+  if (!response.ok) {
+    throw new Error(`Failed to load scenarios (${response.status})`);
+  }
+  return (await response.json()) as ScenarioListResponse;
+}
+
+export async function fetchScenarioDefinition(id: string): Promise<ScenarioDefinition> {
+  const response = await fetch(withBase(`/scenarios/${encodeURIComponent(id)}`));
+  if (response.status === 404) {
+    throw new Error(`Scenario ${id} was not found`);
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load scenario ${id} (${response.status})`);
+  }
+  return (await response.json()) as ScenarioDefinition;
+}
+
+export async function runScenarioSimulation(payload: ScenarioRunRequestPayload): Promise<ScenarioRunResponse> {
+  const response = await fetch(withBase('/scenarios/run'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Scenario run failed (${response.status}): ${detail}`);
+  }
+  return (await response.json()) as ScenarioRunResponse;
+}
+
+export async function synthesiseSpeech(payload: {
+  text: string;
+  voice?: string;
+}): Promise<TextToSpeechResponsePayload> {
+  const response = await fetch(withBase('/tts/speak'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (response.status === 503) {
+    throw new Error('TTS service is not available in this environment.');
+  }
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`TTS request failed (${response.status}): ${detail}`);
+  }
+  return (await response.json()) as TextToSpeechResponsePayload;
 }

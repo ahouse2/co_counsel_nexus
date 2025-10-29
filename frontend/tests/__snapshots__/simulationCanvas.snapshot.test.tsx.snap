@@ -1,0 +1,66 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`SimulationCanvas snapshot > renders deterministic fallback layout 1`] = `
+<div
+  class="simulation-canvas"
+  data-renderer="fallback"
+>
+  <div
+    class="simulation-canvas__stage"
+    style="background-image: url("/simulations/backgrounds/courtroom.svg"); width: 1280px; height: 720px;"
+  >
+    <div
+      class="simulation-canvas__avatar"
+      data-active="false"
+      style="left: 980px; top: 160px; border-color: rgb(245, 158, 11); opacity: 1;"
+    >
+      <span>
+        Hon. Rivera
+      </span>
+    </div>
+    <div
+      class="simulation-canvas__avatar"
+      data-active="true"
+      style="left: 420px; top: 430px; border-color: rgb(14, 165, 233); opacity: 1;"
+    >
+      <span>
+        Avery Chen
+      </span>
+    </div>
+  </div>
+  <div
+    aria-live="polite"
+    class="simulation-canvas__captions"
+    role="status"
+  >
+    <div
+      class="simulation-canvas__caption-line"
+    >
+      <strong>
+        Avery Chen
+      </strong>
+      <span
+        class="stage-direction"
+      >
+        (
+        Steps forward to the podium.
+        )
+      </span>
+    </div>
+    <p>
+      Ladies and gentlemen of the jury…
+    </p>
+    <footer>
+      <span>
+        Beat 
+        1
+        /
+        1
+      </span>
+      <span>
+        End of script
+      </span>
+    </footer>
+  </div>
+</div>
+`;
