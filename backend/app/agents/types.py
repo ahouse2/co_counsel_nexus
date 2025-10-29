@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 
 @dataclass(slots=True)
 class AgentTurn:
-    """Structured record of an agent turn emitted by the conversation graph."""
+    """Structured record of an agent turn emitted by the Microsoft Agents graph."""
 
     role: str
     action: str
@@ -16,6 +16,7 @@ class AgentTurn:
     started_at: datetime
     completed_at: datetime
     metrics: Dict[str, Any] = field(default_factory=dict)
+    annotations: Dict[str, Any] = field(default_factory=dict)
 
     def duration_ms(self) -> float:
         return (self.completed_at - self.started_at).total_seconds() * 1000.0
@@ -23,7 +24,7 @@ class AgentTurn:
     def to_dict(self) -> Dict[str, Any]:
         metrics = dict(self.metrics)
         metrics.setdefault("duration_ms", round(self.duration_ms(), 2))
-        return {
+        payload = {
             "role": self.role,
             "action": self.action,
             "input": self.input,
@@ -32,6 +33,9 @@ class AgentTurn:
             "completed_at": self.completed_at.isoformat(),
             "metrics": metrics,
         }
+        if self.annotations:
+            payload["annotations"] = self.annotations
+        return payload
 
 
 @dataclass(slots=True)

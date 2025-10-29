@@ -37,7 +37,7 @@ def test_agents_workflow_generates_thread(
     question = "Summarise the acquisition timeline for Acme."
     run_response = agents_client.post(
         "/agents/run",
-        json={"case_id": "case-001", "question": question},
+        json={"case_id": "case-001", "question": question, "autonomy_level": "high"},
         headers=headers,
     )
     assert run_response.status_code == 200
@@ -61,17 +61,26 @@ def test_agents_workflow_generates_thread(
     assert telemetry["errors"] == []
     assert telemetry["retries"] == {}
     assert telemetry["turn_roles"] == roles
+    assert telemetry["delegations"]
+    assert all(entry["from"] == "Worker" for entry in telemetry["delegations"])
+    assert telemetry["branching"] == []
+    assert telemetry["plan_revisions"] == 0
     assert telemetry["hand_offs"] == [
         {"from": "strategy", "to": "ingestion", "via": "ingestion_audit"},
         {"from": "ingestion", "to": "research", "via": "research_retrieval"},
         {"from": "research", "to": "cocounsel", "via": "forensics_enrichment"},
         {"from": "cocounsel", "to": "qa", "via": "qa_rubric"},
     ]
+    assert telemetry["autonomy_level"] == "high"
+    assert telemetry["total_duration_ms"] >= 0
 
     memory = payload["memory"]
     assert "plan" in memory and memory["plan"]["steps"]
     assert memory["insights"].get("ingestion", {}).get("status") in {"ready", "empty"}
     assert len(memory.get("turns", [])) == len(roles)
+    conversation = memory.get("conversation", [])
+    assert conversation and conversation[0]["role"] == "user"
+    assert any(entry.get("name") == "Critic" for entry in conversation)
 
     thread_id = payload["thread_id"]
 
@@ -151,6 +160,25 @@ class _SuccessfulRetrievalService:
         }
 
 
+class _ReplanRetrievalService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def query(self, question: str, page_size: int = 5) -> dict[str, object]:
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "answer": "",
+                "citations": [],
+                "traces": {
+                    "vector": [],
+                    "graph": {"nodes": [], "edges": []},
+                    "privilege": {"aggregate": {"label": "non-privileged", "score": 0.05}},
+                },
+            }
+        return _SuccessfulRetrievalService().query(question, page_size)
+
+
 class _AlwaysFailRetrievalService:
     def query(self, question: str, page_size: int = 5) -> dict[str, object]:
         raise ValueError("query filters invalid")
@@ -186,6 +214,29 @@ def test_agents_service_retries_transient_error(tmp_path: Path) -> None:
     assert service.memory_store.list_threads()
 
 
+def test_agents_service_replans_on_empty_citations(tmp_path: Path) -> None:
+    service = AgentsService(
+        retrieval_service=_ReplanRetrievalService(),
+        forensics_service=_StubForensicsService(),
+        document_store=_StubDocumentStore(),
+        memory_store=AgentMemoryStore(tmp_path / "threads"),
+    )
+
+    response = service.run_case("case-replan", "Summarise integration milestones.")
+
+    assert response["status"] == "succeeded"
+    telemetry = response["telemetry"]
+    assert telemetry["plan_revisions"] == 1
+    assert telemetry["branching"]
+    assert any(branch["reason"] == "missing_citations" for branch in telemetry["branching"])
+    assert any(note.startswith("Plan revision") for note in telemetry["notes"])
+    assert len(telemetry["delegations"]) >= 4
+    turns = response["turns"]
+    assert turns[2]["action"].endswith("failed")
+    assert any(turn["role"] == "strategy" and turn.get("annotations", {}).get("plan_revision") == 1 for turn in turns)
+    assert response["memory"]["conversation"]
+
+
 def test_agents_service_records_failure(tmp_path: Path) -> None:
     service = AgentsService(
         retrieval_service=_AlwaysFailRetrievalService(),
@@ -195,7 +246,7 @@ def test_agents_service_records_failure(tmp_path: Path) -> None:
     )
 
     with pytest.raises(WorkflowAbort):
-        service.run_case("case-failure", "Trigger invalid filters")
+        service.run_case("case-failure", "Trigger invalid filters", autonomy_level="low")
 
     threads = service.memory_store.list_threads()
     assert threads
@@ -204,7 +255,28 @@ def test_agents_service_records_failure(tmp_path: Path) -> None:
     assert payload["errors"][0]["code"] == "RETRIEVAL_INVALID_INPUT"
     assert payload["telemetry"]["status"] == "failed"
     assert payload["telemetry"]["errors"]
-    assert [turn["role"] for turn in payload["turns"]] == ["strategy", "ingestion"]
+    assert [turn["role"] for turn in payload["turns"]][-1] == "research"
+    assert payload["turns"][-1]["action"].endswith("failed")
+
+
+def test_agents_service_allows_partial_success(tmp_path: Path) -> None:
+    service = AgentsService(
+        retrieval_service=_AlwaysFailRetrievalService(),
+        forensics_service=_StubForensicsService(),
+        document_store=_StubDocumentStore(),
+        memory_store=AgentMemoryStore(tmp_path / "threads"),
+    )
+
+    response = service.run_case("case-partial", "Trigger invalid filters", autonomy_level="balanced")
+
+    assert response["status"] == "degraded"
+    telemetry = response["telemetry"]
+    assert telemetry["status"] == "degraded"
+    assert telemetry["branching"]
+    assert telemetry["plan_revisions"] >= 1
+    assert any(turn["action"].endswith("failed") for turn in response["turns"])
+    assert response["errors"]
+    assert response["memory"]["conversation"]
 
 
 class _CountingMemoryStore(AgentMemoryStore):
@@ -234,3 +306,4 @@ def test_agents_service_persists_memory_each_turn(tmp_path: Path) -> None:
     intermediate_snapshots = [record.payload.get("memory", {}) for record in store.records[:-1]]
     assert any(snapshot.get("plan", {}).get("steps") for snapshot in intermediate_snapshots)
     assert response["telemetry"]["hand_offs"][-1]["via"] == "qa_rubric"
+    assert len(response["memory"].get("conversation", [])) >= turn_count

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
@@ -11,6 +11,16 @@ from ..storage.document_store import DocumentStore
 from .context import AgentContext
 from .qa import QAAgent
 from .types import AgentTurn
+
+
+@dataclass(slots=True)
+class ToolInvocation:
+    """Lightweight wrapper describing an SDK tool invocation."""
+
+    turn: AgentTurn
+    payload: Dict[str, Any]
+    message: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 def _utcnow() -> datetime:
@@ -25,6 +35,27 @@ class AgentTool:
 
     def execute(self, context: AgentContext) -> Tuple[AgentTurn, Dict[str, Any]]:  # pragma: no cover - abstract
         raise NotImplementedError
+
+    def summarize(self, context: AgentContext, payload: Dict[str, Any]) -> str:
+        return self.description
+
+    def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+
+    def invoke(self, context: AgentContext) -> ToolInvocation:
+        turn, payload = self.execute(context)
+        message = self.summarize(context, payload)
+        annotations = self.annotate(payload)
+        if annotations:
+            turn.annotations.update(annotations)
+            turns = context.memory.state.setdefault("turns", [])
+            if turns:
+                last = dict(turns[-1])
+                existing = dict(last.get("annotations", {}))
+                existing.update(annotations)
+                last["annotations"] = existing
+                turns[-1] = last
+        return ToolInvocation(turn=turn, payload=payload, message=message, metadata=annotations)
 
 
 class StrategyTool(AgentTool):
@@ -78,6 +109,20 @@ class StrategyTool(AgentTool):
         context.memory.record_turn(turn.to_dict())
         return turn, plan
 
+    def summarize(self, context: AgentContext, payload: Dict[str, Any]) -> str:
+        steps = payload.get("steps", [])
+        focuses = payload.get("focus_entities", [])
+        focus_text = ", ".join(focuses[:3]) if focuses else "general case signals"
+        return (
+            f"Planner drafted {len(steps)} steps prioritising {focus_text}."
+        )
+
+    def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "delegated_to": ["ingestion", "research", "cocounsel", "qa"],
+            "step_count": len(payload.get("steps", [])),
+        }
+
 
 class IngestionTool(AgentTool):
     def __init__(self, document_store: DocumentStore) -> None:
@@ -115,6 +160,19 @@ class IngestionTool(AgentTool):
         )
         context.memory.record_turn(turn.to_dict())
         return turn, payload
+
+    def summarize(self, context: AgentContext, payload: Dict[str, Any]) -> str:
+        breakdown = payload.get("breakdown", {})
+        dominant = max(breakdown, key=breakdown.get, default="unknown")
+        return (
+            "Ingestion steward verified {count} documents (dominant type: {dominant})."
+        ).format(count=payload.get("document_total", 0), dominant=dominant)
+
+    def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": payload.get("status", "unknown"),
+            "document_types": list(payload.get("breakdown", {}).keys()),
+        }
 
 
 class ResearchTool(AgentTool):
@@ -154,6 +212,23 @@ class ResearchTool(AgentTool):
         context.memory.update("insights", {"retrieval": output})
         context.memory.record_turn(turn.to_dict())
         return turn, output
+
+    def summarize(self, context: AgentContext, payload: Dict[str, Any]) -> str:
+        citations = payload.get("citations", [])
+        traces = payload.get("traces", {})
+        vector_hits = len(traces.get("vector", []))
+        graph_nodes = len(traces.get("graph", {}).get("nodes", []))
+        return (
+            f"Research agent retrieved {len(citations)} citations "
+            f"with {vector_hits} vector hits and {graph_nodes} graph nodes."
+        )
+
+    def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        privilege = payload.get("traces", {}).get("privilege", {})
+        return {
+            "citations": len(payload.get("citations", [])),
+            "privilege_label": privilege.get("aggregate", {}).get("label", "unknown"),
+        }
 
 
 class ForensicsTool(AgentTool):
@@ -231,6 +306,22 @@ class ForensicsTool(AgentTool):
         context.memory.update("artifacts", bundle)
         context.memory.record_turn(turn.to_dict())
         return turn, bundle
+
+    def summarize(self, context: AgentContext, payload: Dict[str, Any]) -> str:
+        artifacts = payload.get("artifacts", [])
+        connectors = payload.get("connectors", {})
+        parts = [f"attached {len(artifacts)} artifacts"]
+        if connectors:
+            active = ", ".join(sorted(connectors.keys()))
+            parts.append(f"activated connectors: {active}")
+        return "CoCounsel " + ", ".join(parts) + "."
+
+    def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        connectors = payload.get("connectors", {})
+        return {
+            "documents_considered": payload.get("documents_considered", 0),
+            "connectors": list(connectors.keys()),
+        }
 
     def _execute_directive_connectors(
         self,
@@ -360,3 +451,19 @@ class QATool(AgentTool):
         )
         context.memory.record_turn(turn.to_dict())
         return turn, output
+
+    def summarize(self, context: AgentContext, payload: Dict[str, Any]) -> str:
+        average = payload.get("average", 0.0)
+        gating = payload.get("gating", {})
+        gate_suffix = (
+            "; privilege review required"
+            if gating.get("requires_privilege_review")
+            else ""
+        )
+        return f"QA adjudicator scored average {average:.2f}{gate_suffix}."
+
+    def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "qa_average": payload.get("average"),
+            "qa_notes": len(payload.get("notes", [])),
+        }
