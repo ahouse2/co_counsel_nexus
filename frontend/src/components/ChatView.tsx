@@ -105,6 +105,11 @@ function ChatBubble({
           {message.role === 'user' ? 'You' : 'Assistant'}
         </span>
         <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString()}</time>
+        {message.mode && (
+          <span className={`chat-mode-badge mode-${message.mode}`}>
+            {message.mode === 'recall' ? 'Economy' : 'Precision'}
+          </span>
+        )}
       </header>
       {message.content ? (
         <ReactMarkdown

@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 from uuid import uuid4
 
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
+
 from ..config import get_settings
 from ..scenarios import ScenarioDefinition, ScenarioRegistry, ScenarioRegistryError
 from ..scenarios.schema import DynamicBeat, ScenarioParticipant, ScriptedBeat
@@ -16,6 +19,36 @@ from ..storage.agent_memory_store import AgentMemoryStore, ScenarioRunRecord
 from .agents import AgentsService, get_agents_service
 from .errors import WorkflowAbort, WorkflowComponent, WorkflowError, WorkflowException
 from .tts import TextToSpeechResult, TextToSpeechService, get_tts_service
+
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+
+_scenario_runs_counter = _meter.create_counter(
+    "scenario_runs_total",
+    unit="1",
+    description="Simulation runs executed",
+)
+_scenario_run_duration = _meter.create_histogram(
+    "scenario_run_duration_ms",
+    unit="ms",
+    description="Duration of scenario runs",
+)
+_scenario_beats_counter = _meter.create_counter(
+    "scenario_beats_total",
+    unit="1",
+    description="Beats processed within scenarios",
+)
+_scenario_beat_duration = _meter.create_histogram(
+    "scenario_beat_duration_ms",
+    unit="ms",
+    description="Duration of individual scenario beats",
+)
+_scenario_tts_counter = _meter.create_counter(
+    "scenario_tts_synth_total",
+    unit="1",
+    description="Count of TTS synthesis events during scenarios",
+)
 
 
 @dataclass(slots=True)
@@ -107,90 +140,139 @@ class ScenarioEngine:
             "dynamic_threads": [],
             "tts": {"synthesised": 0},
         }
-        for beat in scenario.beats:
-            started = time.perf_counter()
-            if isinstance(beat, ScriptedBeat):
-                result = self._handle_scripted(beat, participants[beat.speaker], options.use_tts)
-            else:
-                result = self._handle_dynamic(
-                    scenario,
-                    beat,
-                    participants[beat.speaker],
-                    context,
-                    options,
-                    principal=principal,
+        run_started = time.perf_counter()
+
+        with _tracer.start_as_current_span("scenario.run") as span:
+            span.set_attribute("scenario.id", scenario.id)
+            span.set_attribute("scenario.case_id", options.case_id)
+            span.set_attribute("scenario.use_tts", options.use_tts)
+            try:
+                for beat in scenario.beats:
+                    beat_started = time.perf_counter()
+                    if isinstance(beat, ScriptedBeat):
+                        result = self._handle_scripted(beat, participants[beat.speaker], options.use_tts)
+                    else:
+                        result = self._handle_dynamic(
+                            scenario,
+                            beat,
+                            participants[beat.speaker],
+                            context,
+                            options,
+                            principal=principal,
+                            telemetry=telemetry,
+                        )
+                    elapsed = (time.perf_counter() - beat_started) * 1000.0
+                    metric_attributes = {
+                        "kind": result.kind,
+                        "scenario_id": scenario.id,
+                    }
+                    _scenario_beats_counter.add(1, attributes=metric_attributes)
+                    _scenario_beat_duration.record(elapsed, attributes=metric_attributes)
+                    telemetry.setdefault("beats", []).append(
+                        {
+                            "beat_id": beat.id,
+                            "kind": result.kind,
+                            "speaker": result.speaker.id,
+                            "duration_ms": round(elapsed, 2),
+                            "thread_id": result.dynamic_source_thread,
+                        }
+                    )
+                    turn_payload = {
+                        "beat_id": result.beat_id,
+                        "speaker_id": result.speaker.id,
+                        "speaker": {
+                            "id": result.speaker.id,
+                            "name": result.speaker.name,
+                            "role": result.speaker.role,
+                            "voice": result.speaker.voice,
+                            "accent_color": result.speaker.accent_color,
+                            "sprite": result.speaker.sprite,
+                        },
+                        "text": result.text,
+                        "kind": result.kind,
+                        "stage_direction": result.stage_direction,
+                        "emphasis": result.emphasis,
+                        "duration_ms": result.duration_ms,
+                        "thread_id": result.dynamic_source_thread,
+                    }
+                    if result.audio is not None:
+                        telemetry["tts"]["synthesised"] += 1
+                        _scenario_tts_counter.add(1, attributes={"scenario_id": scenario.id})
+                        turn_payload["audio"] = {
+                            "voice": result.audio.voice,
+                            "mime_type": result.audio.content_type,
+                            "base64": base64.b64encode(result.audio.audio_bytes).decode("ascii"),
+                            "cache_hit": result.audio.cache_hit,
+                            "sha256": result.audio.sha256,
+                        }
+                    transcript.append(turn_payload)
+                    context[f"beat_{beat.id}_text"] = result.text
+                    context[f"{result.speaker.id}_last_line"] = result.text
+                actor = self._actor_from_principal(principal)
+                record = ScenarioRunRecord(
+                    run_id=run_id,
+                    scenario_id=scenario.id,
+                    case_id=options.case_id,
+                    created_at=datetime.now(timezone.utc),
+                    actor=actor,
+                    configuration={
+                        "variables": dict(options.variables),
+                        "evidence": {
+                            slot: {
+                                "value": binding.value,
+                                "documentId": binding.document_id,
+                                "type": binding.type,
+                            }
+                            for slot, binding in options.evidence.items()
+                        },
+                        "participants": [participant.id for participant in participants.values()],
+                        "tts": options.use_tts,
+                    },
+                    transcript=transcript,
                     telemetry=telemetry,
                 )
-            elapsed = (time.perf_counter() - started) * 1000.0
-            telemetry.setdefault("beats", []).append(
-                {
-                    "beat_id": beat.id,
-                    "kind": result.kind,
-                    "speaker": result.speaker.id,
-                    "duration_ms": round(elapsed, 2),
-                    "thread_id": result.dynamic_source_thread,
+                self.memory.write_scenario(record)
+                duration_ms = (time.perf_counter() - run_started) * 1000.0
+                attributes = {
+                    "status": "completed",
+                    "use_tts": options.use_tts,
+                    "scenario_id": scenario.id,
                 }
-            )
-            turn_payload = {
-                "beat_id": result.beat_id,
-                "speaker_id": result.speaker.id,
-                "speaker": {
-                    "id": result.speaker.id,
-                    "name": result.speaker.name,
-                    "role": result.speaker.role,
-                    "voice": result.speaker.voice,
-                    "accent_color": result.speaker.accent_color,
-                    "sprite": result.speaker.sprite,
-                },
-                "text": result.text,
-                "kind": result.kind,
-                "stage_direction": result.stage_direction,
-                "emphasis": result.emphasis,
-                "duration_ms": result.duration_ms,
-                "thread_id": result.dynamic_source_thread,
-            }
-            if result.audio is not None:
-                telemetry["tts"]["synthesised"] += 1
-                turn_payload["audio"] = {
-                    "voice": result.audio.voice,
-                    "mime_type": result.audio.content_type,
-                    "base64": base64.b64encode(result.audio.audio_bytes).decode("ascii"),
-                    "cache_hit": result.audio.cache_hit,
-                    "sha256": result.audio.sha256,
+                _scenario_run_duration.record(duration_ms, attributes=attributes)
+                _scenario_runs_counter.add(1, attributes=attributes)
+                span.set_attribute("scenario.duration_ms", duration_ms)
+                span.set_attribute("scenario.beats_processed", len(scenario.beats))
+                span.set_status(Status(StatusCode.OK))
+                return {
+                    "run_id": run_id,
+                    "scenario": scenario.model_dump(mode="json"),
+                    "transcript": transcript,
+                    "telemetry": telemetry,
                 }
-            transcript.append(turn_payload)
-            context[f"beat_{beat.id}_text"] = result.text
-            context[f"{result.speaker.id}_last_line"] = result.text
-        actor = self._actor_from_principal(principal)
-        record = ScenarioRunRecord(
-            run_id=run_id,
-            scenario_id=scenario.id,
-            case_id=options.case_id,
-            created_at=datetime.now(timezone.utc),
-            actor=actor,
-            configuration={
-                "variables": dict(options.variables),
-                "evidence": {
-                    slot: {
-                        "value": binding.value,
-                        "documentId": binding.document_id,
-                        "type": binding.type,
-                    }
-                    for slot, binding in options.evidence.items()
-                },
-                "participants": [participant.id for participant in participants.values()],
-                "tts": options.use_tts,
-            },
-            transcript=transcript,
-            telemetry=telemetry,
-        )
-        self.memory.write_scenario(record)
-        return {
-            "run_id": run_id,
-            "scenario": scenario.model_dump(mode="json"),
-            "transcript": transcript,
-            "telemetry": telemetry,
-        }
+            except WorkflowAbort as exc:
+                _scenario_runs_counter.add(
+                    1,
+                    attributes={
+                        "status": "failed",
+                        "use_tts": options.use_tts,
+                        "scenario_id": scenario.id,
+                    },
+                )
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, description=str(exc.error.message)))
+                raise
+            except Exception as exc:
+                _scenario_runs_counter.add(
+                    1,
+                    attributes={
+                        "status": "error",
+                        "use_tts": options.use_tts,
+                        "scenario_id": scenario.id,
+                    },
+                )
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, description=str(exc)))
+                raise
 
     def _build_context(
         self,

@@ -130,6 +130,95 @@ video {
   display: flex;
   gap: 1rem;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.retrieval-settings {
+  display: grid;
+  gap: 0.35rem;
+  background: rgba(34, 35, 42, 0.85);
+  border: var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.9rem;
+  min-width: 220px;
+}
+
+.retrieval-settings header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.retrieval-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+.retrieval-mode-toggle {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 0.5rem;
+}
+
+.retrieval-mode-toggle label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.retrieval-mode-toggle label input {
+  appearance: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.retrieval-mode-toggle label.active {
+  border-color: rgba(24, 224, 252, 0.6);
+  color: var(--color-text-primary);
+  box-shadow: 0 0 12px rgba(24, 224, 252, 0.25);
+  background: linear-gradient(135deg, rgba(24, 224, 252, 0.16), rgba(139, 93, 255, 0.12));
+}
+
+.retrieval-mode-toggle label:focus-within {
+  outline: 2px solid var(--color-accent-cyan);
+  outline-offset: 2px;
+}
+
+.mode-label {
+  pointer-events: none;
+}
+
+.retrieval-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.65rem;
+  row-gap: 0.25rem;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.retrieval-details dt {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.retrieval-details dd {
+  margin: 0;
+  color: var(--color-text-secondary);
 }
 
 .app-body {
@@ -274,7 +363,7 @@ video {
 .chat-bubble header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 1rem;
   color: var(--color-text-muted);
   font-size: 0.85rem;
@@ -285,6 +374,29 @@ video {
   letter-spacing: 0.08em;
   font-size: 0.75rem;
   color: var(--color-accent-violet);
+}
+
+.chat-mode-badge {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-mode-badge.mode-precision {
+  border-color: rgba(139, 93, 255, 0.4);
+  background: rgba(139, 93, 255, 0.15);
+  color: var(--color-text-primary);
+}
+
+.chat-mode-badge.mode-recall {
+  border-color: rgba(24, 224, 252, 0.4);
+  background: rgba(24, 224, 252, 0.12);
+  color: var(--color-text-primary);
 }
 
 .chat-markdown {

@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Tuple
 from uuid import uuid4
 
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
+
 from ..agents import get_orchestrator
 from ..agents.qa import QAAgent
 from ..agents.runner import MicrosoftAgentsOrchestrator
@@ -27,6 +30,36 @@ from .errors import (
 )
 from .forensics import ForensicsService, get_forensics_service
 from .retrieval import RetrievalService, get_retrieval_service
+
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+
+_agents_runs_counter = _meter.create_counter(
+    "agents_runs_total",
+    unit="1",
+    description="Agent orchestration runs processed",
+)
+_agents_run_duration = _meter.create_histogram(
+    "agents_run_duration_ms",
+    unit="ms",
+    description="Latency of agent orchestration runs",
+)
+_agents_turn_counter = _meter.create_counter(
+    "agents_turns_total",
+    unit="1",
+    description="Total agent turns emitted per run",
+)
+_agents_retry_counter = _meter.create_counter(
+    "agents_retries_total",
+    unit="1",
+    description="Retries executed within agent workflow components",
+)
+_agents_failure_counter = _meter.create_counter(
+    "agents_failures_total",
+    unit="1",
+    description="Agent runs ending in failure",
+)
 
 
 def _now() -> datetime:
@@ -156,68 +189,97 @@ class AgentsService:
             correlation_id=thread.thread_id,
         )
 
-        def execute_with_resilience(
-            component: WorkflowComponent,
-            operation: Callable[[], Tuple[AgentTurn, Dict[str, Any]]],
-            allow_partial: bool = False,
-            partial_factory: Callable[[WorkflowError], Tuple[AgentTurn, Dict[str, Any]]] | None = None,
-        ) -> Tuple[AgentTurn, Dict[str, Any]]:
-            turn, payload = self._run_with_resilience(
-                thread,
-                component,
-                operation,
-                telemetry_context,
-                allow_partial=allow_partial,
-                partial_factory=partial_factory,
-            )
-            self._audit_turn(thread, turn, actor)
-            return turn, payload
+        run_started = time.perf_counter()
+        with _tracer.start_as_current_span("agents.run_case") as span:
+            span.set_attribute("agents.case_id", case_id)
+            span.set_attribute("agents.top_k", top_k)
+            span.set_attribute("agents.question_length", len(question))
+            if principal is not None and principal.tenant_id:
+                span.set_attribute("agents.tenant_id", principal.tenant_id)
 
-        try:
-            result_thread = self.orchestrator.run(
-                case_id=case_id,
-                question=question,
-                top_k=top_k,
-                actor=actor,
-                component_executor=execute_with_resilience,
-                thread_id=thread.thread_id,
-                thread=thread,
-                telemetry=telemetry_context,
-            )
-            if result_thread.errors:
-                result_thread.status = "degraded"
-                result_thread.telemetry["status"] = "degraded"
-            else:
-                result_thread.status = "succeeded"
-            result_thread.updated_at = _now()
-            self._audit_agents_event(
-                action="agents.thread.completed",
-                outcome="success",
-                subject={"thread_id": result_thread.thread_id, "case_id": case_id},
-                metadata={
-                    "final_answer_length": len(result_thread.final_answer),
-                    "qa_average": result_thread.telemetry.get("qa_average"),
-                    "turn_count": len(result_thread.turns),
-                    "error_count": len(result_thread.errors),
-                    "retry_components": sorted(telemetry_context.get("retries", {}).keys()),
-                },
-                actor=actor,
-                correlation_id=result_thread.thread_id,
-            )
-            payload = self._normalise_thread_payload(result_thread.to_payload())
-            record = AgentThreadRecord(thread_id=result_thread.thread_id, payload=payload)
-            self.memory_store.write(record)
-            return payload
-        except WorkflowException as exc:
-            self._handle_failure(thread, actor, telemetry_context, exc.error)
-            raise
-        except Exception as exc:
-            error = self._classify_exception(WorkflowComponent.ORCHESTRATOR, exc, 1)
-            if error not in thread.errors:
-                thread.errors.append(error)
-            telemetry_context.setdefault("errors", []).append(error.to_dict())
-            self._handle_failure(thread, actor, telemetry_context, error)
-            raise WorkflowAbort(error, status_code=http_status_for_error(error)) from exc
+            def execute_with_resilience(
+                component: WorkflowComponent,
+                operation: Callable[[], Tuple[AgentTurn, Dict[str, Any]]],
+                allow_partial: bool = False,
+                partial_factory: Callable[[WorkflowError], Tuple[AgentTurn, Dict[str, Any]]] | None = None,
+            ) -> Tuple[AgentTurn, Dict[str, Any]]:
+                turn, payload = self._run_with_resilience(
+                    thread,
+                    component,
+                    operation,
+                    telemetry_context,
+                    allow_partial=allow_partial,
+                    partial_factory=partial_factory,
+                )
+                self._audit_turn(thread, turn, actor)
+                return turn, payload
+
+            try:
+                result_thread = self.orchestrator.run(
+                    case_id=case_id,
+                    question=question,
+                    top_k=top_k,
+                    actor=actor,
+                    component_executor=execute_with_resilience,
+                    thread_id=thread.thread_id,
+                    thread=thread,
+                    telemetry=telemetry_context,
+                )
+                if result_thread.errors:
+                    result_thread.status = "degraded"
+                    result_thread.telemetry["status"] = "degraded"
+                else:
+                    result_thread.status = "succeeded"
+                result_thread.updated_at = _now()
+                duration_ms = (time.perf_counter() - run_started) * 1000.0
+                attributes = {"status": result_thread.status}
+                _agents_run_duration.record(duration_ms, attributes=attributes)
+                _agents_runs_counter.add(1, attributes=attributes)
+                _agents_turn_counter.add(len(result_thread.turns), attributes=attributes)
+                span.set_attribute("agents.status", result_thread.status)
+                span.set_attribute("agents.turns", len(result_thread.turns))
+                span.set_attribute("agents.errors", len(result_thread.errors))
+                span.set_status(Status(StatusCode.OK))
+                self._audit_agents_event(
+                    action="agents.thread.completed",
+                    outcome="success",
+                    subject={"thread_id": result_thread.thread_id, "case_id": case_id},
+                    metadata={
+                        "final_answer_length": len(result_thread.final_answer),
+                        "qa_average": result_thread.telemetry.get("qa_average"),
+                        "turn_count": len(result_thread.turns),
+                        "error_count": len(result_thread.errors),
+                        "retry_components": sorted(telemetry_context.get("retries", {}).keys()),
+                    },
+                    actor=actor,
+                    correlation_id=result_thread.thread_id,
+                )
+                payload = self._normalise_thread_payload(result_thread.to_payload())
+                record = AgentThreadRecord(thread_id=result_thread.thread_id, payload=payload)
+                self.memory_store.write(record)
+                return payload
+            except WorkflowException as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, description=str(exc.error.message)))
+                _agents_runs_counter.add(
+                    1,
+                    attributes={"status": "failed", "component": exc.error.component.value},
+                )
+                _agents_failure_counter.add(1, attributes={"component": exc.error.component.value})
+                self._handle_failure(thread, actor, telemetry_context, exc.error)
+                raise
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, description=str(exc)))
+                component = WorkflowComponent.ORCHESTRATOR
+                _agents_runs_counter.add(1, attributes={"status": "failed", "component": component.value})
+                _agents_failure_counter.add(1, attributes={"component": component.value})
+                error = self._classify_exception(component, exc, 1)
+                if error not in thread.errors:
+                    thread.errors.append(error)
+                telemetry_context.setdefault("errors", []).append(error.to_dict())
+                self._handle_failure(thread, actor, telemetry_context, error)
+                raise WorkflowAbort(error, status_code=http_status_for_error(error)) from exc
 
     def get_thread(self, thread_id: str) -> Dict[str, Any]:
         payload = self.memory_store.read(thread_id)
@@ -317,6 +379,7 @@ class AgentsService:
     ) -> None:
         retries = telemetry.setdefault("retries", {})
         retries[component.value] = attempt
+        _agents_retry_counter.add(1, attributes={"component": component.value})
 
     def _backoff(
         self,
@@ -387,6 +450,10 @@ class AgentsService:
         thread.status = "failed"
         thread.updated_at = _now()
         thread.telemetry = telemetry
+        _agents_failure_counter.add(
+            1,
+            attributes={"component": error.component.value, "severity": error.severity.value},
+        )
         self._audit_agents_event(
             action=audit_action,
             outcome="error",

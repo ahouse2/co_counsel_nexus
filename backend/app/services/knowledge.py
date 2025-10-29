@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
 from typing import Dict, Iterable, List, Sequence
+
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
 
 from ..config import get_settings
 from ..security.authz import Principal
@@ -17,6 +21,36 @@ from backend.ingestion.llama_index_factory import (
     create_embedding_model,
 )
 from backend.ingestion.settings import build_runtime_config
+
+
+_tracer = trace.get_tracer(__name__)
+_meter = metrics.get_meter(__name__)
+
+_knowledge_search_counter = _meter.create_counter(
+    "knowledge_search_total",
+    unit="1",
+    description="Knowledge hub searches executed",
+)
+_knowledge_search_duration = _meter.create_histogram(
+    "knowledge_search_duration_ms",
+    unit="ms",
+    description="Latency of knowledge hub searches",
+)
+_knowledge_lessons_counter = _meter.create_counter(
+    "knowledge_lessons_views_total",
+    unit="1",
+    description="Lesson listings and detail views",
+)
+_knowledge_bookmarks_counter = _meter.create_counter(
+    "knowledge_bookmarks_total",
+    unit="1",
+    description="Bookmark toggles within the knowledge hub",
+)
+_knowledge_progress_counter = _meter.create_counter(
+    "knowledge_progress_updates_total",
+    unit="1",
+    description="Knowledge progress updates",
+)
 
 try:  # pragma: no cover - optional dependency guard
     from llama_index.core import Document, VectorStoreIndex
@@ -221,118 +255,171 @@ class KnowledgeService:
         return snippet or text[:length].strip()
 
     def list_lessons(self, principal: Principal):
-        profile = self._profile(principal)
-        lessons_payload: List[Dict[str, object]] = []
-        for lesson in self._lessons.values():
-            progress_record = profile.progress.get(lesson.lesson_id)
-            completed_sections = sorted(progress_record.completed_sections) if progress_record else []
+        with _tracer.start_as_current_span("knowledge.list_lessons") as span:
+            if principal and principal.tenant_id:
+                span.set_attribute("knowledge.tenant_id", principal.tenant_id)
+            profile = self._profile(principal)
+            lessons_payload: List[Dict[str, object]] = []
+            for lesson in self._lessons.values():
+                progress_record = profile.progress.get(lesson.lesson_id)
+                completed_sections = (
+                    sorted(progress_record.completed_sections) if progress_record else []
+                )
+                total_sections = len(lesson.sections)
+                percent = 0.0
+                if total_sections:
+                    percent = min(1.0, len(completed_sections) / total_sections)
+                last_viewed = (
+                    progress_record.last_viewed_at.isoformat()
+                    if progress_record and progress_record.last_viewed_at
+                    else None
+                )
+                lessons_payload.append(
+                    {
+                        "lesson_id": lesson.lesson_id,
+                        "title": lesson.title,
+                        "summary": lesson.summary,
+                        "tags": lesson.tags,
+                        "difficulty": lesson.difficulty,
+                        "estimated_minutes": lesson.estimated_minutes,
+                        "jurisdictions": lesson.jurisdictions,
+                        "media": lesson.media,
+                        "progress": {
+                            "completed_sections": completed_sections,
+                            "total_sections": total_sections,
+                            "percent_complete": percent,
+                            "last_viewed_at": last_viewed,
+                        },
+                        "bookmarked": lesson.lesson_id in profile.bookmarks,
+                    }
+                )
+            payload = {
+                "lessons": sorted(lessons_payload, key=lambda item: item["title"]),
+                "filters": self._filters,
+            }
+            _knowledge_lessons_counter.add(1, attributes={"action": "list"})
+            span.set_attribute("knowledge.lessons", len(payload["lessons"]))
+            span.set_status(Status(StatusCode.OK))
+            return payload
+    def get_lesson(self, lesson_id: str, principal: Principal) -> Dict[str, object]:
+        with _tracer.start_as_current_span("knowledge.get_lesson") as span:
+            span.set_attribute("knowledge.lesson_id", lesson_id)
+            if principal and principal.tenant_id:
+                span.set_attribute("knowledge.tenant_id", principal.tenant_id)
+            lesson = self._lessons.get(lesson_id)
+            if not lesson:
+                span.set_status(Status(StatusCode.ERROR, description="Lesson not found"))
+                raise KeyError(f"Lesson {lesson_id} not found")
+            profile = self._profile(principal)
+            progress_record = profile.progress.get(lesson_id)
+            completed_sections = progress_record.completed_sections if progress_record else set()
             total_sections = len(lesson.sections)
             percent = 0.0
             if total_sections:
                 percent = min(1.0, len(completed_sections) / total_sections)
             last_viewed = (
-                progress_record.last_viewed_at.isoformat() if progress_record and progress_record.last_viewed_at else None
+                progress_record.last_viewed_at.isoformat()
+                if progress_record and progress_record.last_viewed_at
+                else None
             )
-            lessons_payload.append(
-                {
-                    "lesson_id": lesson.lesson_id,
-                    "title": lesson.title,
-                    "summary": lesson.summary,
-                    "tags": lesson.tags,
-                    "difficulty": lesson.difficulty,
-                    "estimated_minutes": lesson.estimated_minutes,
-                    "jurisdictions": lesson.jurisdictions,
-                    "media": lesson.media,
-                    "progress": {
-                        "completed_sections": completed_sections,
-                        "total_sections": total_sections,
-                        "percent_complete": percent,
-                        "last_viewed_at": last_viewed,
-                    },
-                    "bookmarked": lesson.lesson_id in profile.bookmarks,
-                }
+            payload = {
+                "lesson_id": lesson.lesson_id,
+                "title": lesson.title,
+                "summary": lesson.summary,
+                "tags": lesson.tags,
+                "difficulty": lesson.difficulty,
+                "estimated_minutes": lesson.estimated_minutes,
+                "jurisdictions": lesson.jurisdictions,
+                "media": lesson.media,
+                "sections": [
+                    {
+                        "id": section.id,
+                        "title": section.title,
+                        "content": section.markdown,
+                        "completed": section.id in completed_sections,
+                    }
+                    for section in lesson.sections
+                ],
+                "progress": {
+                    "completed_sections": sorted(completed_sections),
+                    "total_sections": total_sections,
+                    "percent_complete": percent,
+                    "last_viewed_at": last_viewed,
+                },
+                "bookmarked": lesson_id in profile.bookmarks,
+            }
+            _knowledge_lessons_counter.add(1, attributes={"action": "detail"})
+            span.set_attribute("knowledge.sections", len(lesson.sections))
+            span.set_status(Status(StatusCode.OK))
+            return payload
+    def record_progress(self, lesson_id: str, section_id: str, completed: bool, principal: Principal) -> Dict[str, object]:
+        with _tracer.start_as_current_span("knowledge.record_progress") as span:
+            span.set_attribute("knowledge.lesson_id", lesson_id)
+            span.set_attribute("knowledge.section_id", section_id)
+            span.set_attribute("knowledge.completed", completed)
+            if principal and principal.tenant_id:
+                span.set_attribute("knowledge.tenant_id", principal.tenant_id)
+            if lesson_id not in self._lessons:
+                span.set_status(Status(StatusCode.ERROR, description="Lesson not found"))
+                raise KeyError(f"Lesson {lesson_id} not found")
+            lesson = self._lessons[lesson_id]
+            valid_sections = {section.id for section in lesson.sections}
+            if section_id not in valid_sections:
+                span.set_status(Status(StatusCode.ERROR, description="Section not found"))
+                raise KeyError(f"Section {section_id} not part of lesson {lesson_id}")
+            record = self.profile_store.record_progress(
+                self._user_key(principal),
+                lesson_id,
+                section_id,
+                completed=completed,
             )
-        return {
-            "lessons": sorted(lessons_payload, key=lambda payload: payload["title"]),
-            "filters": self._filters,
-        }
-
-    def get_lesson(self, lesson_id: str, principal: Principal) -> Dict[str, object]:
-        lesson = self._lessons.get(lesson_id)
-        if not lesson:
-            raise KeyError(f"Lesson {lesson_id} not found")
-        profile = self._profile(principal)
-        progress_record = profile.progress.get(lesson_id)
-        completed_sections = progress_record.completed_sections if progress_record else set()
-        total_sections = len(lesson.sections)
-        percent = 0.0
-        if total_sections:
-            percent = min(1.0, len(completed_sections) / total_sections)
-        last_viewed = (
-            progress_record.last_viewed_at.isoformat() if progress_record and progress_record.last_viewed_at else None
-        )
-        return {
-            "lesson_id": lesson.lesson_id,
-            "title": lesson.title,
-            "summary": lesson.summary,
-            "tags": lesson.tags,
-            "difficulty": lesson.difficulty,
-            "estimated_minutes": lesson.estimated_minutes,
-            "jurisdictions": lesson.jurisdictions,
-            "media": lesson.media,
-            "sections": [
-                {
-                    "id": section.id,
-                    "title": section.title,
-                    "content": section.markdown,
-                    "completed": section.id in completed_sections,
-                }
-                for section in lesson.sections
-            ],
-            "progress": {
-                "completed_sections": sorted(completed_sections),
+            total_sections = len(lesson.sections)
+            percent = 0.0
+            if total_sections:
+                percent = min(1.0, len(record.completed_sections) / total_sections)
+            payload = {
+                "lesson_id": lesson_id,
+                "section_id": section_id,
+                "completed_sections": sorted(record.completed_sections),
                 "total_sections": total_sections,
                 "percent_complete": percent,
-                "last_viewed_at": last_viewed,
-            },
-            "bookmarked": lesson.lesson_id in profile.bookmarks,
-        }
-
-    def record_progress(self, lesson_id: str, section_id: str, completed: bool, principal: Principal) -> Dict[str, object]:
-        if lesson_id not in self._lessons:
-            raise KeyError(f"Lesson {lesson_id} not found")
-        lesson = self._lessons[lesson_id]
-        valid_sections = {section.id for section in lesson.sections}
-        if section_id not in valid_sections:
-            raise KeyError(f"Section {section_id} not part of lesson {lesson_id}")
-        record = self.profile_store.record_progress(
-            self._user_key(principal),
-            lesson_id,
-            section_id,
-            completed=completed,
-        )
-        total_sections = len(lesson.sections)
-        percent = 0.0
-        if total_sections:
-            percent = min(1.0, len(record.completed_sections) / total_sections)
-        return {
-            "lesson_id": lesson_id,
-            "section_id": section_id,
-            "completed_sections": sorted(record.completed_sections),
-            "total_sections": total_sections,
-            "percent_complete": percent,
-            "last_viewed_at": record.last_viewed_at.isoformat() if record.last_viewed_at else None,
-        }
-
+                "last_viewed_at": record.last_viewed_at.isoformat() if record.last_viewed_at else None,
+            }
+            _knowledge_progress_counter.add(
+                1,
+                attributes={
+                    "action": "progress",
+                    "completed": bool(completed),
+                },
+            )
+            span.set_status(Status(StatusCode.OK))
+            return payload
     def set_bookmark(self, lesson_id: str, bookmarked: bool, principal: Principal) -> Dict[str, object]:
-        if lesson_id not in self._lessons:
-            raise KeyError(f"Lesson {lesson_id} not found")
-        bookmarks = self.profile_store.set_bookmark(self._user_key(principal), lesson_id, bookmarked)
-        return {
-            "lesson_id": lesson_id,
-            "bookmarked": lesson_id in bookmarks,
-            "bookmarks": sorted(bookmarks),
-        }
+        with _tracer.start_as_current_span("knowledge.set_bookmark") as span:
+            span.set_attribute("knowledge.lesson_id", lesson_id)
+            span.set_attribute("knowledge.bookmarked", bookmarked)
+            if principal and principal.tenant_id:
+                span.set_attribute("knowledge.tenant_id", principal.tenant_id)
+            if lesson_id not in self._lessons:
+                span.set_status(Status(StatusCode.ERROR, description="Lesson not found"))
+                raise KeyError(f"Lesson {lesson_id} not found")
+            bookmarks = self.profile_store.set_bookmark(
+                self._user_key(principal), lesson_id, bookmarked
+            )
+            payload = {
+                "lesson_id": lesson_id,
+                "bookmarked": lesson_id in bookmarks,
+                "bookmarks": sorted(bookmarks),
+            }
+            _knowledge_bookmarks_counter.add(
+                1,
+                attributes={
+                    "action": "bookmark",
+                    "bookmarked": bool(bookmarked),
+                },
+            )
+            span.set_status(Status(StatusCode.OK))
+            return payload
 
     def search(
         self,
@@ -344,63 +431,39 @@ class KnowledgeService:
     ) -> Dict[str, object]:
         if not query.strip():
             return {"results": [], "elapsed_ms": 0.0}
-        start = perf_counter()
-        applied_filters = {
-            key: {value.lower() for value in values}
-            for key, values in (filters or {}).items()
-            if values
-        }
-        hits: List[KnowledgeSearchHit] = []
-        if self._index is not None:
-            with self._index_lock:
-                retriever = self._index.as_retriever(similarity_top_k=max(5, limit * 2))
-                retrieved = retriever.retrieve(query)
-            for node in retrieved:
-                metadata = getattr(node, "metadata", {}) or {}
-                lesson_id = metadata.get("lesson_id")
-                section_id = metadata.get("section_id")
-                if not lesson_id or not section_id:
-                    continue
-                if not self._match_filters(metadata, applied_filters):
-                    continue
-                lesson = self._lessons.get(lesson_id)
-                if not lesson:
-                    continue
-                section = next((item for item in lesson.sections if item.id == section_id), None)
-                if section is None:
-                    continue
-                score = float(getattr(node, "score", 0.0) or 0.0)
-                hits.append(
-                    KnowledgeSearchHit(
-                        lesson_id=lesson.lesson_id,
-                        lesson_title=lesson.title,
-                        section_id=section.id,
-                        section_title=section.title,
-                        snippet=self._snippet(section.markdown, query),
-                        score=score,
-                        tags=lesson.tags,
-                        difficulty=lesson.difficulty,
-                        media=lesson.media,
-                    )
-                )
-                if len(hits) >= limit:
-                    break
-        else:
-            # Fallback keyword scoring without embeddings.
-            query_tokens = [token for token in re.split(r"\W+", query.lower()) if token]
-            for lesson in self._lessons.values():
-                for section in lesson.sections:
-                    metadata = {
-                        "tags": [tag.lower() for tag in lesson.tags],
-                        "difficulty": lesson.difficulty.lower(),
-                        "media_types": [item.get("type", "link").lower() for item in lesson.media],
-                    }
+
+        with _tracer.start_as_current_span("knowledge.search") as span:
+            span.set_attribute("knowledge.query_length", len(query))
+            span.set_attribute("knowledge.limit", limit)
+            if principal and principal.tenant_id:
+                span.set_attribute("knowledge.tenant_id", principal.tenant_id)
+
+            start = perf_counter()
+            applied_filters = {
+                key: {value.lower() for value in values}
+                for key, values in (filters or {}).items()
+                if values
+            }
+            hits: List[KnowledgeSearchHit] = []
+            if self._index is not None:
+                with self._index_lock:
+                    retriever = self._index.as_retriever(similarity_top_k=max(5, limit * 2))
+                    retrieved = retriever.retrieve(query)
+                for node in retrieved:
+                    metadata = getattr(node, "metadata", {}) or {}
+                    lesson_id = metadata.get("lesson_id")
+                    section_id = metadata.get("section_id")
+                    if not lesson_id or not section_id:
+                        continue
                     if not self._match_filters(metadata, applied_filters):
                         continue
-                    text = section.markdown.lower()
-                    overlap = sum(text.count(token) for token in query_tokens) or 0
-                    if overlap == 0:
+                    lesson = self._lessons.get(lesson_id)
+                    if not lesson:
                         continue
+                    section = next((item for item in lesson.sections if item.id == section_id), None)
+                    if section is None:
+                        continue
+                    score = float(getattr(node, "score", 0.0) or 0.0)
                     hits.append(
                         KnowledgeSearchHit(
                             lesson_id=lesson.lesson_id,
@@ -408,15 +471,53 @@ class KnowledgeService:
                             section_id=section.id,
                             section_title=section.title,
                             snippet=self._snippet(section.markdown, query),
-                            score=float(overlap),
+                            score=score,
                             tags=lesson.tags,
                             difficulty=lesson.difficulty,
                             media=lesson.media,
                         )
                     )
-        elapsed = (perf_counter() - start) * 1000.0
-        hits.sort(key=lambda hit: hit.score, reverse=True)
-        trimmed = hits[:limit]
+                    if len(hits) >= limit:
+                        break
+            else:
+                query_tokens = [token for token in re.split(r"\W+", query.lower()) if token]
+                for lesson in self._lessons.values():
+                    for section in lesson.sections:
+                        metadata = {
+                            "tags": [tag.lower() for tag in lesson.tags],
+                            "difficulty": lesson.difficulty.lower(),
+                            "media_types": [item.get("type", "link").lower() for item in lesson.media],
+                        }
+                        if not self._match_filters(metadata, applied_filters):
+                            continue
+                        text = section.markdown.lower()
+                        overlap = sum(text.count(token) for token in query_tokens) or 0
+                        if overlap == 0:
+                            continue
+                        hits.append(
+                            KnowledgeSearchHit(
+                                lesson_id=lesson.lesson_id,
+                                lesson_title=lesson.title,
+                                section_id=section.id,
+                                section_title=section.title,
+                                snippet=self._snippet(section.markdown, query),
+                                score=float(overlap),
+                                tags=lesson.tags,
+                                difficulty=lesson.difficulty,
+                                media=lesson.media,
+                            )
+                        )
+
+            elapsed = (perf_counter() - start) * 1000.0
+            hits.sort(key=lambda hit: hit.score, reverse=True)
+            trimmed = hits[:limit]
+            attributes = {"has_index": self._index is not None, "filters": bool(filters)}
+            _knowledge_search_duration.record(elapsed, attributes=attributes)
+            _knowledge_search_counter.add(1, attributes=attributes)
+            span.set_attribute("knowledge.elapsed_ms", elapsed)
+            span.set_attribute("knowledge.results", len(trimmed))
+            span.set_status(Status(StatusCode.OK))
+
         results = [
             {
                 "lesson_id": hit.lesson_id,
@@ -431,12 +532,7 @@ class KnowledgeService:
             }
             for hit in trimmed
         ]
-        return {
-            "results": results,
-            "elapsed_ms": elapsed,
-            "applied_filters": {key: sorted(values) for key, values in applied_filters.items()},
-        }
-
+        return {"results": results, "elapsed_ms": elapsed, "applied_filters": applied_filters}
     @staticmethod
     def _match_filters(metadata: Dict[str, object], filters: Dict[str, set[str]]) -> bool:
         if not filters:

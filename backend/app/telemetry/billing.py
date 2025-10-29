@@ -10,10 +10,13 @@ from pathlib import Path
 from threading import Lock
 from typing import Dict, List
 
+import logging
+
 from opentelemetry import metrics
 
 from ..config import Settings, get_settings
 from ..security.authz import Principal
+from ..services.costs import get_cost_tracking_service
 
 _meter = metrics.get_meter(__name__)
 _usage_counter = _meter.create_counter(
@@ -459,6 +462,7 @@ class BillingTelemetry:
 
 _billing_registry: BillingTelemetry | None = None
 _registry_lock = Lock()
+_logger = logging.getLogger(__name__)
 
 
 def get_billing_registry() -> BillingTelemetry:
@@ -488,6 +492,33 @@ def record_billing_event(
 ) -> None:
     registry = get_billing_registry()
     registry.record_event(principal, event_type, units, success=success, attributes=attributes)
+    if attributes is None:
+        return
+    endpoint = attributes.get("endpoint")
+    if not endpoint:
+        return
+    method = str(attributes.get("method", "GET")).upper()
+    latency_ms = float(attributes.get("latency_ms", 0.0) or 0.0)
+    status_code = int(attributes.get("status_code", 200 if success else 500) or 200)
+    cost_metadata = {
+        key: value
+        for key, value in attributes.items()
+        if key not in {"endpoint", "method", "latency_ms", "status_code"}
+    }
+    try:
+        service = get_cost_tracking_service()
+        service.record_api_usage(
+            principal=principal,
+            endpoint=str(endpoint),
+            method=method,
+            latency_ms=latency_ms,
+            success=success,
+            status_code=status_code,
+            metadata=cost_metadata,
+            units=units,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        _logger.warning("Failed to record cost telemetry", extra={"endpoint": endpoint, "error": str(exc)})
 
 
 def export_plan_catalogue() -> List[Dict[str, object]]:

@@ -398,6 +398,33 @@ class KnowledgeProgressUpdateResponse(BaseModel):
     last_viewed_at: Optional[datetime] = None
 
 
+class CostSummaryMetricModel(BaseModel):
+    total: float
+    unit: str
+    breakdown: Dict[str, float]
+    average: Optional[float] = None
+
+
+class CostSummaryResponse(BaseModel):
+    generated_at: datetime
+    window_hours: float
+    tenant_id: Optional[str] = None
+    api_calls: CostSummaryMetricModel
+    model_loads: CostSummaryMetricModel
+    gpu_utilisation: CostSummaryMetricModel
+
+
+class CostEventModel(BaseModel):
+    event_id: str
+    timestamp: datetime
+    tenant_id: Optional[str]
+    category: Literal["api", "model", "gpu"]
+    name: str
+    amount: float
+    unit: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class KnowledgeBookmarkRequest(BaseModel):
     bookmarked: bool = True
 
