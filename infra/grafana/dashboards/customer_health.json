@@ -1,0 +1,95 @@
+{
+  "title": "Customer Health Overview",
+  "uid": "customer-health",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "id": 1,
+      "title": "Active Tenants",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(sum by (tenant_id) (cocounsel_billing_usage_events_total))"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 2,
+      "title": "Customer Health Score",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg(cocounsel_billing_customer_health_score)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {},
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "type": "table",
+      "id": 3,
+      "title": "Usage vs Quota",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (tenant_id) (cocounsel_billing_usage_events_total)"
+        },
+        {
+          "refId": "B",
+          "expr": "avg by (tenant_id) (cocounsel_billing_usage_consumption_ratio)"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

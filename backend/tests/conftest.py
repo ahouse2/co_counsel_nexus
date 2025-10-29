@@ -179,7 +179,21 @@ def security_materials(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Secur
     cert_path.write_bytes(client_cert.public_bytes(serialization.Encoding.PEM))
 
     registry_path = tmp_path / "registry.json"
-    _write_registry(registry_path, client_cert=client_cert, tenant_id=tenant_id, client_id=client_id, roles=["CaseCoordinator", "ResearchAnalyst", "ComplianceAuditor", "PlatformEngineer", "ForensicsOperator"])
+    _write_registry(
+        registry_path,
+        client_cert=client_cert,
+        tenant_id=tenant_id,
+        client_id=client_id,
+        roles=[
+            "CaseCoordinator",
+            "ResearchAnalyst",
+            "ComplianceAuditor",
+            "PlatformEngineer",
+            "ForensicsOperator",
+            "CustomerSuccessManager",
+            "ExecutiveSponsor",
+        ],
+    )
 
     jwks_path = tmp_path / "jwks.json"
     _write_jwks(jwks_path, client_key.public_key())
@@ -227,6 +241,7 @@ def auth_headers_factory(security_materials: SecurityMaterials):
         "forensics:financial",
         "agents:run",
         "agents:read",
+        "billing:read",
     ]
     default_roles = [
         "CaseCoordinator",
@@ -242,6 +257,7 @@ def auth_headers_factory(security_materials: SecurityMaterials):
         "co-counsel.graph",
         "co-counsel.forensics",
         "co-counsel.agents",
+        "co-counsel.billing",
     ]
 
     def factory(
@@ -297,6 +313,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
     monkeypatch.setenv("DOCUMENT_STORE_DIR", str(storage_root / "documents"))
     monkeypatch.setenv("INGESTION_WORKSPACE_DIR", str(storage_root / "workspaces"))
     monkeypatch.setenv("AGENT_THREADS_DIR", str(storage_root / "agent_threads"))
+    monkeypatch.setenv("BILLING_USAGE_PATH", str(storage_root / "billing" / "usage.json"))
     key_path = storage_root / "manifest.key"
     key_path.write_bytes(os.urandom(32))
     audit_log_path = storage_root / "audit.log"
@@ -306,13 +323,17 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
     from backend.app import config as app_config
     from backend.app.services import graph as graph_service
     from backend.app.services import vector as vector_service
+    from backend.app.telemetry.billing import reset_billing_registry
 
     app_config.reset_settings_cache()
     reset_security_caches()
     reset_audit_trail()
     vector_service.reset_vector_service()
     graph_service.reset_graph_service()
+    reset_billing_registry()
 
+    settings = app_config.get_settings()
     main_module = importlib.import_module("backend.app.main")
     importlib.reload(main_module)
-    return TestClient(main_module.app)
+    client_instance = TestClient(main_module.app)
+    return client_instance

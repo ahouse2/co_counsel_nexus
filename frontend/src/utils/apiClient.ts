@@ -1,4 +1,11 @@
-import { QueryResponse, TimelineResponse } from '@/types';
+import {
+  BillingPlanListResponse,
+  BillingUsageResponse,
+  OnboardingSubmissionPayload,
+  OnboardingSubmissionResponse,
+  QueryResponse,
+  TimelineResponse,
+} from '@/types';
 
 const BASE = (() => {
   if (typeof __API_BASE__ !== 'undefined' && __API_BASE__) {
@@ -34,6 +41,46 @@ export async function postQuery(payload: { q: string; filters?: Record<string, s
     throw new Error(`Query request failed with status ${response.status}`);
   }
   return (await response.json()) as QueryResponse;
+}
+
+export async function fetchBillingPlans(): Promise<BillingPlanListResponse> {
+  const response = await fetch(withBase('/billing/plans'));
+  if (!response.ok) {
+    throw new Error(`Failed to load billing plans (${response.status})`);
+  }
+  return (await response.json()) as BillingPlanListResponse;
+}
+
+export async function fetchBillingUsage(token?: string): Promise<BillingUsageResponse> {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(withBase('/billing/usage'), { headers });
+  if (response.status === 401) {
+    throw new Error('Unauthorized: billing usage requires a bearer token with billing:read scope');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load billing usage (${response.status})`);
+  }
+  return (await response.json()) as BillingUsageResponse;
+}
+
+export async function submitOnboarding(
+  payload: OnboardingSubmissionPayload
+): Promise<OnboardingSubmissionResponse> {
+  const response = await fetch(withBase('/onboarding'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Onboarding submission failed (${response.status}): ${detail}`);
+  }
+  return (await response.json()) as OnboardingSubmissionResponse;
 }
 
 export async function fetchTimeline(

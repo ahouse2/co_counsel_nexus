@@ -127,15 +127,40 @@ class IngestionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="At least one source must be provided",
             )
-        for source in request.sources:
-            connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
-            connector.preflight(source)
 
         job_id = str(uuid4())
         submitted_at = datetime.now(timezone.utc)
         actor = self._actor_from_principal(principal)
         job_record = self._initialise_job_record(job_id, submitted_at, request.sources, actor)
         self.job_store.write_job(job_id, job_record)
+
+        for index, source in enumerate(request.sources):
+            connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
+            try:
+                connector.preflight(source)
+            except HTTPException as exc:
+                message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+                error_payload = {
+                    "code": str(getattr(exc, "status_code", "INGESTION_ERROR")),
+                    "message": message,
+                    "source": f"preflight::{source.type.lower()}",
+                }
+                self._record_error(job_record, error_payload)
+                job_record.setdefault("status_details", {}).setdefault("ingestion", {}).setdefault("skipped", []).append(
+                    {"index": index, "source": source.type, "reason": message}
+                )
+                self._transition_job(job_record, "failed")
+                self.job_store.write_job(job_id, job_record)
+                self._audit_job_event(
+                    job_id,
+                    action="ingest.queue.preflight_failed",
+                    outcome="error",
+                    metadata={"source_type": source.type, "index": index},
+                    actor=actor,
+                    severity="error",
+                )
+                return job_id
+
         request_copy = request.model_copy(deep=True)
         future = self.executor.submit(self._run_job, job_id, request_copy, job_record)
         future.add_done_callback(self._log_job_failure(job_id))
@@ -161,6 +186,7 @@ class IngestionService:
         return _callback
 
     def _run_job(self, job_id: str, request: IngestionRequest, job_record: Dict[str, object]) -> None:
+        actor = self._job_actor(job_record)
         self._audit_job_event(
             job_id,
             action="ingest.job.accepted",

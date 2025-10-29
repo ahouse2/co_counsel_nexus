@@ -35,3 +35,5 @@ Phase 10 — Testing/Hardening
 
 Phase 11 — Packaging
 - Installers/containers/binaries as needed
+- Tiered Docker Compose profiles + `scripts/install_tier.sh` for Community/Professional/Enterprise deployments with OTLP & Grafana bundles
+- Billing telemetry surface (`/billing/*`), onboarding flow, and commercial collateral tracked under `docs/commercial/`

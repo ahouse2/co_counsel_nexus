@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .telemetry import setup_telemetry
+from .telemetry.billing import (
+    BILLING_PLANS,
+    BillingEventType,
+    export_customer_health,
+    export_plan_catalogue,
+    record_billing_event,
+)
 from .models.api import (
     AgentRunRequest,
     AgentRunResponse,
     AgentThreadListResponse,
+    BillingPlanListResponse,
+    BillingUsageResponse,
     ForensicsResponse,
     GraphEdgeModel,
     GraphNeighborResponse,
@@ -18,6 +28,8 @@ from .models.api import (
     IngestionRequest,
     IngestionResponse,
     IngestionStatusResponse,
+    OnboardingSubmission,
+    OnboardingSubmissionResponse,
     QueryResponse,
     TimelineEventModel,
     TimelinePaginationModel,
@@ -42,6 +54,7 @@ from .security.dependencies import (
     authorize_forensics_financial,
     authorize_forensics_image,
     authorize_graph_read,
+    authorize_billing_admin,
     authorize_ingest_enqueue,
     authorize_ingest_status,
     authorize_query,
@@ -83,6 +96,15 @@ def ingest(
 ) -> JSONResponse:
     job_id = service.ingest(payload, principal=principal)
     job_record = service.get_job(job_id)
+    record_billing_event(
+        principal,
+        BillingEventType.INGESTION,
+        units=float(max(1, len(payload.sources))),
+        attributes={
+            "job_id": job_id,
+            "source_types": sorted({source.type for source in payload.sources}),
+        },
+    )
     response = IngestionResponse(job_id=job_id, status=job_record.get("status", "queued"))
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
@@ -101,11 +123,23 @@ def ingest_status(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found") from exc
     response = IngestionStatusResponse(**record)
-    if "ResearchAnalyst" in principal.roles and response.status not in {"succeeded", "failed", "cancelled"}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Research analysts may only access completed ingestion runs",
-        )
+    if "ResearchAnalyst" in principal.roles:
+        privileged_roles = {
+            "CaseCoordinator",
+            "PlatformEngineer",
+            "ForensicsOperator",
+            "AutomationService",
+            "ComplianceAuditor",
+        }
+        if set(principal.roles).isdisjoint(privileged_roles) and response.status not in {
+            "succeeded",
+            "failed",
+            "cancelled",
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Research analysts may only access completed ingestion runs",
+            )
     terminal_statuses = {"succeeded", "failed", "cancelled"}
     status_code = status.HTTP_200_OK if response.status in terminal_statuses else status.HTTP_202_ACCEPTED
     return JSONResponse(status_code=status_code, content=response.model_dump(mode="json"))
@@ -137,6 +171,7 @@ def query(
         filters["source"] = filters_source
     if filters_entity:
         filters["entity"] = filters_entity
+    started = time.perf_counter()
     try:
         result = service.query(
             q,
@@ -147,11 +182,24 @@ def query(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    latency_ms = (time.perf_counter() - started) * 1000.0
     if not result.has_evidence:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     payload = result.to_dict()
     if "CaseCoordinator" in principal.roles and "query:trace" not in principal.scopes:
         payload["traces"] = {"vector": [], "graph": {"nodes": [], "edges": []}, "forensics": []}
+    record_billing_event(
+        principal,
+        BillingEventType.QUERY,
+        attributes={
+            "latency_ms": latency_ms,
+            "page": page,
+            "page_size": page_size,
+            "filters": bool(filters),
+            "rerank": rerank,
+            "has_evidence": result.has_evidence,
+        },
+    )
     return JSONResponse(content=payload)
 
 
@@ -171,6 +219,17 @@ def timeline(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     meta = TimelinePaginationModel(cursor=result.next_cursor, limit=result.limit, has_more=result.has_more)
+    record_billing_event(
+        principal,
+        BillingEventType.TIMELINE,
+        attributes={
+            "limit": limit,
+            "cursor": bool(cursor),
+            "entity": bool(entity),
+            "from_ts": bool(from_ts),
+            "to_ts": bool(to_ts),
+        },
+    )
     return TimelineResponse(
         events=[
             TimelineEventModel(
@@ -276,7 +335,17 @@ def agents_run(
 ) -> AgentRunResponse:
     top_k = payload.top_k or 5
     response = service.run_case(payload.case_id, payload.question, top_k=top_k, principal=principal)
-    return AgentRunResponse(**response)
+    payload_model = AgentRunResponse(**response)
+    record_billing_event(
+        principal,
+        BillingEventType.AGENT,
+        attributes={
+            "case_id": payload.case_id,
+            "thread_id": payload_model.thread_id,
+            "turns": len(payload_model.turns),
+        },
+    )
+    return payload_model
 
 
 @app.get("/agents/threads/{thread_id}", response_model=AgentRunResponse)
@@ -299,4 +368,69 @@ def agents_threads(
 ) -> AgentThreadListResponse:
     threads = service.list_threads()
     return AgentThreadListResponse(threads=threads)
+
+
+@app.get("/billing/plans", response_model=BillingPlanListResponse)
+def billing_plans() -> BillingPlanListResponse:
+    plans = export_plan_catalogue()
+    return BillingPlanListResponse(
+        generated_at=datetime.now(timezone.utc),
+        plans=plans,
+    )
+
+
+@app.get("/billing/usage", response_model=BillingUsageResponse)
+def billing_usage(
+    principal: Principal = Depends(authorize_billing_admin),
+) -> BillingUsageResponse:
+    _ = principal  # ensure dependency evaluation for auditing
+    tenants = export_customer_health()
+    return BillingUsageResponse(
+        generated_at=datetime.now(timezone.utc),
+        tenants=tenants,
+    )
+
+
+def _recommend_plan(submission: OnboardingSubmission) -> str:
+    seat_count = submission.seats
+    matters = submission.estimated_matters_per_month
+    automation_target = submission.automation_target_percent or 0.25
+    projected_queries = max(500, seat_count * max(5, matters) * max(0.1, automation_target) * 4)
+    if seat_count <= 10 and projected_queries <= BILLING_PLANS["community"].included_queries:
+        return "community"
+    if seat_count <= 40 and projected_queries <= BILLING_PLANS["professional"].included_queries:
+        return "professional"
+    return "enterprise"
+
+
+@app.post("/onboarding", response_model=OnboardingSubmissionResponse, status_code=status.HTTP_201_CREATED)
+def onboarding_submission(payload: OnboardingSubmission) -> OnboardingSubmissionResponse:
+    recommended_plan = _recommend_plan(payload)
+    record_billing_event(
+        None,
+        BillingEventType.SIGNUP,
+        attributes={
+            "tenant_id": payload.tenant_id,
+            "organization": payload.organization,
+            "contact_email": payload.contact_email,
+            "contact_name": payload.contact_name,
+            "primary_use_case": payload.primary_use_case,
+            "departments": payload.departments,
+            "roi_hours": payload.roi_baseline_hours_per_matter,
+            "matters_per_month": payload.estimated_matters_per_month,
+            "automation_target": payload.automation_target_percent,
+            "go_live_date": payload.go_live_date.isoformat() if payload.go_live_date else None,
+            "notes": payload.notes,
+            "success_criteria": payload.success_criteria,
+            "seats": payload.seats,
+            "completed": True,
+            "recommended_plan": recommended_plan,
+        },
+    )
+    return OnboardingSubmissionResponse(
+        tenant_id=payload.tenant_id,
+        recommended_plan=recommended_plan,
+        message="Onboarding submission recorded",
+        received_at=datetime.now(timezone.utc),
+    )
 

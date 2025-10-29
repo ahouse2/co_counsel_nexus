@@ -33,11 +33,17 @@ def _wait_for_job_completion(job_dir: Path, job_id: str, timeout: float = 10.0) 
         time.sleep(0.05)
 
 
-def _wait_for_job(client: TestClient, job_id: str, timeout: float = 5.0) -> Dict[str, object]:
+def _wait_for_job(
+    client: TestClient,
+    job_id: str,
+    headers: dict[str, str] | None = None,
+    timeout: float = 5.0,
+) -> Dict[str, object]:
     deadline = time.time() + timeout
     last_payload: Dict[str, object] | None = None
     while time.time() < deadline:
-        response = client.get(f"/ingest/{job_id}")
+        request_headers = headers or dict(client.headers)
+        response = client.get(f"/ingest/{job_id}", headers=request_headers)
         assert response.status_code in {200, 202}
         last_payload = response.json()
         status_value = last_payload.get("status")
@@ -47,7 +53,6 @@ def _wait_for_job(client: TestClient, job_id: str, timeout: float = 5.0) -> Dict
     pytest.fail(f"Ingestion job {job_id} did not reach terminal state; last payload={last_payload}")
 
 
-def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp_path: Path) -> None:
 def test_ingestion_and_retrieval(
     client: TestClient,
     sample_workspace: Path,
@@ -63,7 +68,7 @@ def test_ingestion_and_retrieval(
     assert response.status_code == 202
     job_id = response.json()["job_id"]
 
-    status_payload = _wait_for_job(client, job_id)
+    status_payload = _wait_for_job(client, job_id, headers=headers)
     assert status_payload["status"] == "succeeded"
 
     job_manifest = _read_job_manifest(Path(os.environ["JOB_STORE_DIR"]), job_id)
@@ -154,7 +159,7 @@ def test_ingestion_and_retrieval(
     totals = financial_forensics.json()["data"]["totals"]
     assert Decimal(totals["amount"]) == Decimal("600.0")
 
-    status_payload = _wait_for_job(client, job_id)
+    status_payload = _wait_for_job(client, job_id, headers=headers)
     status_response = client.get(f"/ingest/{job_id}", headers=headers)
     assert status_response.status_code == 200
     status_payload = status_response.json()
