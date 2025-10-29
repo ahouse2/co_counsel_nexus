@@ -34,6 +34,7 @@ from .ingestion_worker import (
     IngestionTask,
     IngestionWorker,
 )
+from .timeline import EnrichmentStats, TimelineService
 from .vector import VectorService, get_vector_service
 from backend.ingestion.loader_registry import LoaderRegistry
 from backend.ingestion.ocr import OcrEngine
@@ -428,6 +429,13 @@ class IngestionService:
 
         if all_events:
             self.timeline_store.append(all_events)
+        enrichment_stats = self._refresh_timeline_enrichments()
+        community_summary = self.graph_service.compute_community_summary(graph_nodes)
+        job_record["status_details"].setdefault("graph", {})["communities"] = community_summary.to_dict()
+        timeline_details = job_record["status_details"].setdefault("timeline", {"events": 0})
+        timeline_details["highlights"] = enrichment_stats.highlights
+        timeline_details["relations"] = enrichment_stats.relations
+        timeline_details["enriched"] = enrichment_stats.mutated
         self._transition_job(job_record, "succeeded")
         self.job_store.write_job(job_id, job_record)
         self.logger.info(
@@ -476,6 +484,10 @@ class IngestionService:
         graph.setdefault("edges", 0)
         graph.setdefault("triples", 0)
         job_record.setdefault("requested_by", self._system_actor())
+
+    def _refresh_timeline_enrichments(self) -> EnrichmentStats:
+        service = TimelineService(store=self.timeline_store, graph_service=self.graph_service)
+        return service.refresh_enrichments()
 
     def _system_actor(self) -> Dict[str, Any]:
         return {"id": "ingestion-worker", "type": "system", "roles": ["System"]}
