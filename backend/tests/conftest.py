@@ -320,7 +320,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, security_materials: 
     monkeypatch.setenv("BILLING_USAGE_PATH", str(storage_root / "billing" / "usage.json"))
     monkeypatch.setenv("VECTOR_BACKEND", "memory")
     monkeypatch.setenv("INGESTION_COST_MODE", "community")
-    monkeypatch.setenv("INGESTION_HF_MODEL", "hash://tests")
+    monkeypatch.setenv("INGESTION_HF_MODEL", "local://tests")
     key_path = storage_root / "manifest.key"
     key_path.write_bytes(os.urandom(32))
     audit_log_path = storage_root / "audit.log"

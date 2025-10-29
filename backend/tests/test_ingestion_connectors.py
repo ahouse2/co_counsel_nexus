@@ -51,7 +51,7 @@ def _prime_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registry_pa
     monkeypatch.setenv("INGESTION_LLAMA_CACHE_DIR", str(tmp_path / "llama_cache"))
     monkeypatch.setenv("VECTOR_BACKEND", "memory")
     monkeypatch.setenv("INGESTION_COST_MODE", "community")
-    monkeypatch.setenv("INGESTION_HF_MODEL", "hash://tests")
+    monkeypatch.setenv("INGESTION_HF_MODEL", "local://tests")
     config.reset_settings_cache()
     settings = config.get_settings()
     registry = CredentialRegistry(settings.credentials_registry_path)

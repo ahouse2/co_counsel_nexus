@@ -87,6 +87,8 @@ class CitationModel(BaseModel):
     docId: str
     span: str
     uri: Optional[HttpUrl | str] = None
+    pageLabel: Optional[str] = None
+    chunkIndex: Optional[int] = Field(default=None, ge=0)
 
 
 class TraceModel(BaseModel):
@@ -101,6 +103,8 @@ class QueryPaginationModel(BaseModel):
     page_size: int = Field(ge=1, le=50)
     total_items: int = Field(ge=0)
     has_next: bool
+    mode: Literal["precision", "recall"]
+    reranker: str
 
 
 class QueryResponse(BaseModel):

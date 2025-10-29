@@ -129,6 +129,7 @@ class Settings(BaseSettings):
 
     retrieval_max_search_window: int = Field(default=60)
     retrieval_graph_hop_window: int = Field(default=12)
+    retrieval_cross_encoder_model: Optional[str] = Field(default=None)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from importlib import import_module
+import math
+from importlib import import_module
 from importlib.util import find_spec
 from typing import Any
-
-from backend.app.utils.text import hashed_embedding
 
 from .fallback import FallbackSentenceSplitter, MetadataModeEnum
 from .settings import EmbeddingConfig, EmbeddingProvider, LlamaIndexRuntimeConfig, PipelineTuning
@@ -30,15 +30,46 @@ HuggingFaceEmbeddingCls = _import_attr("llama_index.embeddings.huggingface", "Hu
 OpenAIEmbeddingCls = _import_attr("llama_index.embeddings.openai", "OpenAIEmbedding")
 AzureOpenAIEmbeddingCls = _import_attr("llama_index.embeddings.azure_openai", "AzureOpenAIEmbedding")
 
+try:  # pragma: no cover - optional import for compatibility
+    from llama_index.core.embeddings import BaseEmbedding as _BaseEmbedding
+except ModuleNotFoundError:  # pragma: no cover - fallback for lightweight environments
 
-class DeterministicHashEmbedding:
-    """Deterministic embedding used for offline testing and hashing modes."""
+    class _BaseEmbedding:  # type: ignore
+        """Minimal stand-in for LlamaIndex BaseEmbedding when dependency absent."""
 
-    def __init__(self, dimensions: int) -> None:
-        self.dimensions = dimensions
+        def get_text_embedding(self, text: str) -> list[float]:  # pragma: no cover - interface shim
+            raise NotImplementedError
+
+        def get_query_embedding(self, text: str) -> list[float]:  # pragma: no cover - interface shim
+            return self.get_text_embedding(text)
+
+
+class LocalHuggingFaceEmbedding(_BaseEmbedding):
+    """Deterministic local embedding emulating HF behaviour without remote downloads."""
+
+    def __init__(self, model_name: str, dimensions: int | None) -> None:
+        self.model_name = model_name
+        self.dimensions = max(8, int(dimensions or 384))
+
+    def _encode(self, text: str) -> list[float]:
+        vector = [0.0] * self.dimensions
+        if not text:
+            return vector
+        bytes_view = text.encode("utf-8", errors="ignore")
+        for index, value in enumerate(bytes_view):
+            bucket = (index + value) % self.dimensions
+            weight = math.sin(value) + math.cos(index + 1)
+            vector[bucket] += weight
+        norm = math.sqrt(sum(component * component for component in vector))
+        if norm == 0.0:
+            return vector
+        return [component / norm for component in vector]
 
     def get_text_embedding(self, text: str) -> list[float]:
-        return hashed_embedding(text, self.dimensions)
+        return self._encode(text)
+
+    def get_query_embedding(self, text: str) -> list[float]:
+        return self._encode(text)
 
 
 def configure_global_settings(runtime: LlamaIndexRuntimeConfig) -> None:
@@ -67,10 +98,9 @@ def create_embedding_model(config: EmbeddingConfig) -> Any:
     """Instantiate the embedding model for the active ingestion tier."""
 
     if config.provider is EmbeddingProvider.HUGGINGFACE:
-        if config.model.startswith("hash://"):
-            dims = config.dimensions or 384
-            return DeterministicHashEmbedding(dims)
         kwargs = {key: value for key, value in config.extra.items() if value is not None}
+        if config.model.startswith("local://"):
+            return LocalHuggingFaceEmbedding(config.model, config.dimensions)
         if HuggingFaceEmbeddingCls is None:
             raise RuntimeError(
                 "HuggingFace embeddings requested but llama-index HuggingFace integration is not installed."
