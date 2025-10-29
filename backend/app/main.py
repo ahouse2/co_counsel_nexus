@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from agents.toolkit.sandbox import SandboxExecutionResult
 
@@ -55,7 +55,7 @@ from .services.ingestion import (
     get_ingestion_worker,
     shutdown_ingestion_worker,
 )
-from .services.retrieval import RetrievalService, get_retrieval_service
+from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
 from .services.timeline import TimelineService, get_timeline_service
 from .security.authz import Principal
 from .security.dependencies import (
@@ -237,6 +237,10 @@ def query(
     rerank: bool = Query(
         default=False, description="Enable deterministic reranking heuristics"
     ),
+    mode: str = Query(
+        default="precision", description="Retrieval operating mode: precision or recall"
+    ),
+    stream: bool = Query(default=False, description="Stream partial answers as JSON lines"),
     service: RetrievalService = Depends(get_retrieval_service),
     principal: Principal = Depends(authorize_query),
 ) -> Response:
@@ -247,12 +251,17 @@ def query(
         filters["entity"] = filters_entity
     started = time.perf_counter()
     try:
+        mode_value = RetrievalMode(mode.lower())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid mode") from exc
+    try:
         result = service.query(
             q,
             page=page,
             page_size=page_size,
             filters=filters or None,
             rerank=rerank,
+            mode=mode_value,
         )
     except WorkflowException as exc:
         _raise_workflow_exception(exc)
@@ -264,18 +273,29 @@ def query(
     payload = result.to_dict()
     if "CaseCoordinator" in principal.roles and "query:trace" not in principal.scopes:
         payload["traces"] = {"vector": [], "graph": {"nodes": [], "edges": []}, "forensics": []}
+    billing_attrs = {
+        "latency_ms": latency_ms,
+        "page": page,
+        "page_size": page_size,
+        "filters": bool(filters),
+        "rerank": rerank,
+        "has_evidence": result.has_evidence,
+        "mode": mode_value.value,
+        "stream": stream,
+    }
     record_billing_event(
         principal,
         BillingEventType.QUERY,
-        attributes={
-            "latency_ms": latency_ms,
-            "page": page,
-            "page_size": page_size,
-            "filters": bool(filters),
-            "rerank": rerank,
-            "has_evidence": result.has_evidence,
-        },
+        attributes=billing_attrs,
     )
+    if stream:
+        stream_attributes = {
+            "mode": mode_value.value,
+            "reranker": result.meta.reranker,
+            "stream": True,
+        }
+        events = service.stream_result(result, attributes=stream_attributes)
+        return StreamingResponse((event + "\n" for event in events), media_type="application/jsonl")
     return JSONResponse(content=payload)
 
 
