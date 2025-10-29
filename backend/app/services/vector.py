@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import Dict, Iterable, List, Sequence
 
+import importlib
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
@@ -56,19 +57,29 @@ class InMemoryVectorIndex:
 class VectorService:
     def __init__(self) -> None:
         self.settings = get_settings()
-        self.mode = "memory" if self._should_use_memory_backend() else "qdrant"
-        if self.mode == "memory":
+        backend = self.settings.vector_backend
+        self._memory_index: InMemoryVectorIndex | None = None
+        self.client: QdrantClient | None = None
+        self._chroma_collection = None
+        self._chroma_client = None
+        if backend == "memory":
+            self.mode = "memory"
             self._memory_index = InMemoryVectorIndex(self.settings.qdrant_vector_size)
-            self.client: QdrantClient | None = None
+        elif backend == "chroma":
+            self.mode = "chroma"
+            try:
+                chromadb = importlib.import_module("chromadb")
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "Vector backend 'chroma' selected but chromadb is not installed. Install chromadb or switch the "
+                    "vector backend configuration."
+                ) from exc
+            self._chroma_client = chromadb.PersistentClient(path=str(self.settings.ingestion_chroma_dir))
+            self._chroma_collection = self._chroma_client.get_or_create_collection(self.settings.chroma_collection)
         else:
+            self.mode = "qdrant"
             self.client = self._create_client()
-            self._memory_index = None
             self.ensure_collection()
-
-    def _should_use_memory_backend(self) -> bool:
-        return not self.settings.qdrant_url and (
-            self.settings.qdrant_path is None or self.settings.qdrant_path == ":memory:"
-        )
 
     def _create_client(self) -> QdrantClient:
         if self.settings.qdrant_url:
@@ -106,6 +117,25 @@ class VectorService:
             assert self._memory_index is not None
             self._memory_index.upsert(points)
             return
+        if self.mode == "chroma":
+            ids: List[str] = []
+            embeddings: List[List[float]] = []
+            metadatas: List[Dict[str, object]] = []
+            documents: List[str] = []
+            for point in points:
+                ids.append(str(point.id))
+                vector = list(point.vector)
+                embeddings.append(vector)
+                payload = dict(point.payload or {})
+                metadatas.append(payload)
+                documents.append(str(payload.get("text", "")))
+            self._chroma_collection.upsert(
+                ids=ids,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                documents=documents,
+            )
+            return
         assert self.client is not None
         self.client.upsert(collection_name=self.settings.qdrant_collection, points=list(points))
 
@@ -113,6 +143,32 @@ class VectorService:
         if self.mode == "memory":
             assert self._memory_index is not None
             return self._memory_index.search(vector, top_k)
+        if self.mode == "chroma":
+            results = self._chroma_collection.query(
+                query_embeddings=[list(vector)],
+                n_results=top_k,
+                include=["metadatas", "distances", "embeddings", "documents"],
+            )
+            ids = results.get("ids", [[]])[0]
+            distances = results.get("distances", [[]])[0]
+            metadatas = results.get("metadatas", [[]])[0]
+            embeddings = results.get("embeddings", [[]])[0]
+            scored: List[qmodels.ScoredPoint] = []
+            for idx, point_id in enumerate(ids):
+                metadata = metadatas[idx] if idx < len(metadatas) else {}
+                distance = distances[idx] if idx < len(distances) else 0.0
+                score = 1.0 - distance if distance is not None else 0.0
+                vector_out = embeddings[idx] if idx < len(embeddings) else []
+                scored.append(
+                    qmodels.ScoredPoint(
+                        id=point_id,
+                        score=float(score),
+                        payload=metadata,
+                        version=0,
+                        vector=vector_out,
+                    )
+                )
+            return scored
         assert self.client is not None
         return self.client.search(
             collection_name=self.settings.qdrant_collection,
