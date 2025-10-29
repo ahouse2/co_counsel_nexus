@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from enum import Enum
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Dict, List, Set, Tuple
@@ -22,6 +24,13 @@ from .privilege import (
     PrivilegeDecision,
     get_privilege_classifier_service,
 )
+from .retrieval_engine import (
+    GraphRetrieverAdapter,
+    HybridQueryEngine,
+    HybridRetrievalBundle,
+    KeywordRetrieverAdapter,
+    VectorRetrieverAdapter,
+)
 from .vector import VectorService, get_vector_service
 
 
@@ -42,6 +51,26 @@ _retrieval_results_histogram = _meter.create_histogram(
     unit="1",
     description="Number of vector results evaluated per query",
 )
+_mode_queries_counter = _meter.create_counter(
+    "retrieval_mode_queries_total",
+    unit="1",
+    description="Retrieval queries labelled by precision/recall mode",
+)
+_retrieval_stream_chunks_counter = _meter.create_counter(
+    "retrieval_stream_chunks_total",
+    unit="1",
+    description="Total streamed answer chunks emitted",
+)
+_retrieval_partial_latency = _meter.create_histogram(
+    "retrieval_partial_latency_ms",
+    unit="ms",
+    description="Latency from query execution to first streamed chunk",
+)
+
+
+class RetrievalMode(str, Enum):
+    PRECISION = "precision"
+    RECALL = "recall"
 
 
 @dataclass
@@ -49,11 +78,17 @@ class Citation:
     doc_id: str
     span: str
     uri: str | None
+    page_label: str | None
+    chunk_index: int | None
 
     def to_dict(self) -> Dict[str, object]:
         payload: Dict[str, object] = {"docId": self.doc_id, "span": self.span}
         if self.uri:
             payload["uri"] = self.uri
+        if self.page_label:
+            payload["pageLabel"] = self.page_label
+        if self.chunk_index is not None:
+            payload["chunkIndex"] = self.chunk_index
         return payload
 
 
@@ -81,6 +116,8 @@ class QueryMeta:
     page_size: int
     total_items: int
     has_next: bool
+    mode: RetrievalMode
+    reranker: str
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -88,6 +125,8 @@ class QueryMeta:
             "page_size": self.page_size,
             "total_items": self.total_items,
             "has_next": self.has_next,
+            "mode": self.mode.value,
+            "reranker": self.reranker,
         }
 
 
@@ -127,6 +166,13 @@ class RetrievalService:
         configure_global_settings(self.runtime_config)
         self.embedding_model = create_embedding_model(self.runtime_config.embedding)
         self.timeline_store = TimelineStore(self.settings.timeline_path)
+        cross_encoder_model = getattr(self.settings, "retrieval_cross_encoder_model", None)
+        self.query_engine = HybridQueryEngine(
+            VectorRetrieverAdapter(self.vector_service, self.embedding_model),
+            GraphRetrieverAdapter(self.graph_service),
+            KeywordRetrieverAdapter(self.document_store),
+            cross_encoder_model=cross_encoder_model,
+        )
 
     def query(
         self,
@@ -136,7 +182,10 @@ class RetrievalService:
         page_size: int = 10,
         filters: Dict[str, str] | None = None,
         rerank: bool = False,
+        mode: RetrievalMode = RetrievalMode.PRECISION,
     ) -> QueryResult:
+        if not isinstance(mode, RetrievalMode):
+            mode = RetrievalMode(mode)
         if page < 1:
             raise ValueError("page must be greater than or equal to 1")
         if page_size < 1 or page_size > 50:
@@ -149,6 +198,7 @@ class RetrievalService:
             span.set_attribute("retrieval.page", page)
             span.set_attribute("retrieval.page_size", page_size)
             span.set_attribute("retrieval.rerank", rerank)
+            span.set_attribute("retrieval.mode", mode.value)
 
             source_filter = filters.get("source")
             entity_filter = filters.get("entity")
@@ -177,31 +227,48 @@ class RetrievalService:
                 span.record_exception(ValueError(message))
                 span.set_status(Status(StatusCode.ERROR, message))
                 raise ValueError(message)
-            search_window = min(max_window, max(page * page_size * 2, page_size))
+
+            base_window = max(page * page_size * 2, page_size * 4)
+            if mode is RetrievalMode.RECALL:
+                base_window = max(page * page_size * 3, page_size * 6)
+            search_window = min(max_window, base_window)
             span.set_attribute("retrieval.search_window", search_window)
 
-            query_vector = self.embedding_model.get_text_embedding(question)
-            with _tracer.start_as_current_span("retrieval.vector_search") as vector_span:
-                vector_span.set_attribute("retrieval.vector.top_k", search_window)
-                results = self.vector_service.search(query_vector, top_k=search_window)
-                vector_span.set_attribute("retrieval.vector.count", len(results))
+            vector_window = min(search_window, max(page_size * 3, page_size))
+            graph_window = min(self.settings.retrieval_graph_hop_window, 6)
+            keyword_window = 5
+            if mode is RetrievalMode.RECALL:
+                vector_window = min(search_window, max(page_size * 4, page_size * 2))
+                graph_window = min(self.settings.retrieval_graph_hop_window * 2, 12)
+                keyword_window = 10
 
-            if rerank:
-                with _tracer.start_as_current_span("retrieval.rerank") as rerank_span:
-                    rerank_span.set_attribute("retrieval.rerank.candidates", len(results))
-                    results = self._rerank_results(results, entity_filter)
-                    rerank_span.set_attribute("retrieval.rerank.reordered", len(results))
+            with _tracer.start_as_current_span("retrieval.hybrid") as hybrid_span:
+                bundle: HybridRetrievalBundle = self.query_engine.retrieve(
+                    question,
+                    top_k=search_window,
+                    vector_window=vector_window,
+                    graph_window=graph_window,
+                    keyword_window=keyword_window,
+                    use_cross_encoder=bool(rerank and mode is RetrievalMode.PRECISION),
+                )
+                hybrid_span.set_attribute("retrieval.vector_candidates", len(bundle.vector_points))
+                hybrid_span.set_attribute("retrieval.graph_candidates", len(bundle.graph_points))
+                hybrid_span.set_attribute("retrieval.keyword_candidates", len(bundle.keyword_points))
+                hybrid_span.set_attribute("retrieval.fused_candidates", len(bundle.fused_points))
+                hybrid_span.set_attribute("retrieval.reranker", bundle.reranker)
 
-            filtered_results = self._apply_filters(results, source_filter, entity_filter)
+            filtered_results = self._apply_filters(bundle.fused_points, source_filter, entity_filter)
             span.set_attribute("retrieval.filtered_results", len(filtered_results))
 
-            total_items = len(filtered_results)
             metric_attrs: Dict[str, object] = {
                 "rerank": rerank,
                 "filter_source": source_filter or "any",
                 "filter_entity": bool(entity_filter),
+                "mode": mode.value,
+                "reranker": bundle.reranker,
             }
 
+            total_items = len(filtered_results)
             if total_items == 0:
                 has_evidence = False
                 metric_attrs["has_evidence"] = has_evidence
@@ -210,10 +277,18 @@ class RetrievalService:
                 span.set_attribute("retrieval.has_evidence", has_evidence)
                 span.set_attribute("retrieval.duration_ms", duration_ms)
                 _retrieval_queries_counter.add(1, attributes=metric_attrs)
+                _mode_queries_counter.add(1, attributes=metric_attrs)
                 _retrieval_query_duration.record(duration_ms, attributes=metric_attrs)
                 _retrieval_results_histogram.record(total_items, attributes=metric_attrs)
                 empty_trace = Trace(vector=[], graph={"nodes": [], "edges": []}, forensics=[])
-                meta = QueryMeta(page=page, page_size=page_size, total_items=0, has_next=False)
+                meta = QueryMeta(
+                    page=page,
+                    page_size=page_size,
+                    total_items=0,
+                    has_next=False,
+                    mode=mode,
+                    reranker=bundle.reranker,
+                )
                 answer = "No supporting evidence found for the supplied query."
                 return QueryResult(
                     answer=answer,
@@ -227,16 +302,15 @@ class RetrievalService:
             end = min(start + page_size, total_items)
             has_next = end < total_items
 
-            primary_span = filtered_results[: page_size]
-            graph_window = min(self.settings.retrieval_graph_hop_window, max(len(primary_span), 1))
-            graph_seed = filtered_results[:graph_window]
-            vector_entities = self._collect_entities(graph_seed)
+            vector_seed = self._apply_filters(bundle.vector_points, source_filter, entity_filter)
+            vector_entities = self._collect_entities(vector_seed[:graph_window])
             entity_ids = self._augment_entity_ids(question, vector_entities)
             with _tracer.start_as_current_span("retrieval.trace_build") as trace_span:
                 trace_span.set_attribute("retrieval.trace.entity_ids", len(entity_ids))
-                trace_full, relation_statements = self._build_trace(filtered_results, entity_ids)
+                trace_full, trace_relations = self._build_trace(filtered_results, entity_ids)
                 trace_span.set_attribute("retrieval.trace.nodes", len(trace_full.graph.get("nodes", [])))
                 trace_span.set_attribute("retrieval.trace.edges", len(trace_full.graph.get("edges", [])))
+            relation_statements = self._merge_relation_statements(trace_relations, bundle.relation_statements)
             citations_full = self._build_citations(filtered_results)
 
             page_results = filtered_results[start:end]
@@ -307,12 +381,14 @@ class RetrievalService:
                     f"{answer} No additional supporting evidence available for page {page}; "
                     "adjust pagination or filters to view existing evidence."
                 )
-            
+
             meta = QueryMeta(
                 page=page,
                 page_size=page_size,
                 total_items=total_items,
                 has_next=has_next,
+                mode=mode,
+                reranker=bundle.reranker,
             )
 
             has_evidence = True
@@ -322,6 +398,7 @@ class RetrievalService:
             span.set_attribute("retrieval.has_evidence", has_evidence)
             span.set_attribute("retrieval.duration_ms", duration_ms)
             _retrieval_queries_counter.add(1, attributes=metric_attrs)
+            _mode_queries_counter.add(1, attributes=metric_attrs)
             _retrieval_query_duration.record(duration_ms, attributes=metric_attrs)
             _retrieval_results_histogram.record(total_items, attributes=metric_attrs)
 
@@ -348,9 +425,19 @@ class RetrievalService:
                     uri = doc_record.get("uri") if isinstance(doc_record, dict) else None
                 except FileNotFoundError:
                     uri = None
-            text = payload.get("text", "")
-            span = text[:180] + ("..." if len(text) > 180 else "")
-            citations.append(Citation(doc_id=doc_id, span=span, uri=uri))
+            text = str(payload.get("text", ""))
+            span = self._citation_snippet(text)
+            chunk_index = self._safe_int(payload.get("chunk_index"))
+            page_label = self._page_label(payload, chunk_index)
+            citations.append(
+                Citation(
+                    doc_id=doc_id,
+                    span=span,
+                    uri=uri,
+                    page_label=page_label,
+                    chunk_index=chunk_index,
+                )
+            )
         return citations
 
     def _compose_answer(
@@ -379,6 +466,34 @@ class RetrievalService:
     def _format_graph_answer(self, relation_statements: List[str]) -> str:
         summary = "; ".join(relation_statements[:3])
         return f"Graph evidence indicates: {summary}."
+
+    def _citation_snippet(self, text: str) -> str:
+        clean = " ".join(text.split())
+        if len(clean) <= 220:
+            return clean
+        snippet = clean[:220]
+        last_space = snippet.rfind(" ")
+        if last_space > 120:
+            snippet = snippet[:last_space]
+        return snippet.rstrip() + "…"
+
+    def _page_label(self, payload: Dict[str, object], chunk_index: int | None) -> str | None:
+        explicit = payload.get("page_label") or payload.get("page_number") or payload.get("page")
+        if isinstance(explicit, str) and explicit.strip():
+            return explicit.strip()
+        if isinstance(explicit, (int, float)):
+            return f"Page {int(explicit)}"
+        if chunk_index is not None and chunk_index >= 0:
+            return f"Page {chunk_index + 1}"
+        return None
+
+    def _safe_int(self, value: object) -> int | None:
+        try:
+            if value is None:
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _build_trace(
         self, results: List[qmodels.ScoredPoint], entity_ids: List[str]
@@ -430,6 +545,21 @@ class RetrievalService:
             privilege=privilege_trace,
         )
         return trace, relation_statements
+
+    def _merge_relation_statements(
+        self,
+        primary: List[Tuple[str, str | None]],
+        secondary: List[Tuple[str, str | None]],
+    ) -> List[Tuple[str, str | None]]:
+        merged: List[Tuple[str, str | None]] = []
+        seen: Set[Tuple[str, str | None]] = set()
+        for statement in primary + secondary:
+            key = (statement[0], statement[1])
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(key)
+        return merged
 
     def _build_privilege_trace(self, results: List[qmodels.ScoredPoint]) -> Dict[str, object]:
         decisions: List[PrivilegeDecision] = []
@@ -709,6 +839,42 @@ class RetrievalService:
         if isinstance(title, str) and title:
             return title
         return fallback
+
+    def stream_result(
+        self,
+        result: QueryResult,
+        *,
+        attributes: Dict[str, object],
+        chunk_size: int = 160,
+    ) -> List[str]:
+        start = perf_counter()
+        events: List[str] = []
+        meta_event = {
+            "type": "meta",
+            "meta": result.meta.to_dict(),
+            "hasEvidence": result.has_evidence,
+        }
+        events.append(json.dumps(meta_event))
+        first_latency = (perf_counter() - start) * 1000.0
+        _retrieval_partial_latency.record(first_latency, attributes=attributes)
+        emitted = 0
+        answer = result.answer or ""
+        for idx in range(0, len(answer), chunk_size):
+            chunk = answer[idx : idx + chunk_size]
+            if not chunk:
+                continue
+            events.append(json.dumps({"type": "answer", "delta": chunk}))
+            emitted += 1
+        final_event = {
+            "type": "final",
+            "answer": result.answer,
+            "citations": [citation.to_dict() for citation in result.citations],
+            "traces": result.trace.to_dict(),
+            "meta": result.meta.to_dict(),
+        }
+        events.append(json.dumps(final_event))
+        _retrieval_stream_chunks_counter.add(emitted, attributes=attributes)
+        return events
 
 
 def get_retrieval_service() -> RetrievalService:

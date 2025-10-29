@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pathlib import Path
+
 import pytest
 from qdrant_client.http import models as qmodels
 
@@ -114,6 +116,57 @@ def test_build_trace_includes_graph_payload(retrieval_service: retrieval_module.
     assert graph_payload["edges"]
     assert graph_payload["events"]
     assert graph_payload["communities"]
+
+
+def test_build_citations_includes_page_context(
+    retrieval_service: retrieval_module.RetrievalService,
+) -> None:
+    retrieval_service.document_store.write_document("doc-1", {"id": "doc-1", "uri": "file://doc"})
+    point = qmodels.ScoredPoint(
+        id="vec-1",
+        score=0.8,
+        payload={"doc_id": "doc-1", "text": "Example snippet", "chunk_index": 2},
+        version=1,
+    )
+    citations = retrieval_service._build_citations([point])
+    assert citations
+    citation = citations[0]
+    assert citation.page_label == "Page 3"
+    assert citation.chunk_index == 2
+
+
+def test_merge_relation_statements_deduplicates(
+    retrieval_service: retrieval_module.RetrievalService,
+) -> None:
+    primary = [("A relates B", "doc-1")]
+    secondary = [("A relates B", "doc-1"), ("C relates D", None)]
+    merged = retrieval_service._merge_relation_statements(primary, secondary)
+    assert merged == [("A relates B", "doc-1"), ("C relates D", None)]
+
+
+def test_stream_result_generates_events(
+    retrieval_service: retrieval_module.RetrievalService,
+) -> None:
+    trace = retrieval_module.Trace(vector=[], graph={"nodes": [], "edges": []}, forensics=[])
+    meta = retrieval_module.QueryMeta(
+        page=1,
+        page_size=1,
+        total_items=1,
+        has_next=False,
+        mode=retrieval_module.RetrievalMode.PRECISION,
+        reranker="rrf",
+    )
+    result = retrieval_module.QueryResult(
+        answer="Segmented answer",
+        citations=[],
+        trace=trace,
+        meta=meta,
+        has_evidence=True,
+    )
+    events = retrieval_service.stream_result(result, attributes={"mode": "precision", "reranker": "rrf", "stream": True}, chunk_size=7)
+    assert events[0].startswith("{\"type\": \"meta\"")
+    assert any("\"type\": \"answer\"" in event for event in events)
+    assert events[-1].startswith("{\"type\": \"final\"")
     node_ids = {node["id"] for node in graph_payload["nodes"]}
     assert {"doc-trace", "entity-graph"}.issubset(node_ids)
     relation_types = {edge["type"] for edge in graph_payload["edges"]}
