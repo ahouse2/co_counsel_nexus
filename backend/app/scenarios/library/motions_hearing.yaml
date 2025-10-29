@@ -1,0 +1,71 @@
+schema_version: "1.0"
+id: "motions_in_liminee"
+title: "Motions in Limine Conference"
+description: >-
+  Simulate a pre-trial hearing to argue evidentiary boundaries with rapid-fire judicial questions.
+category: "hearing"
+difficulty: "intro"
+tags:
+  - "pretrial"
+  - "evidence"
+participants:
+  - id: "judge"
+    name: "Hon. Elias Chen"
+    role: "Presiding Judge"
+    description: "Tests the sufficiency of each argument and enforces courtroom decorum."
+    sprite: "/simulations/characters/judge.json"
+    accent_color: "#d97706"
+    voice: "larynx:en-us-blizzard_lessac"
+  - id: "counsel"
+    name: "You"
+    role: "Moving Counsel"
+    description: "Argues for exclusion of prejudicial exhibits."
+    sprite: "/simulations/characters/counsel.json"
+    accent_color: "#0284c7"
+  - id: "opposition"
+    name: "Atty. Rowan Hale"
+    role: "Opposing Counsel"
+    description: "Defends admissibility and presses for limiting instructions instead."
+    sprite: "/simulations/characters/opposition.json"
+    accent_color: "#f97316"
+variables:
+  exhibit_name:
+    name: "exhibit_name"
+    description: "Exhibit identifier you seek to exclude."
+    required: true
+  rule_basis:
+    name: "rule_basis"
+    description: "Primary rule or statute supporting exclusion."
+    required: true
+evidence:
+  - id: "supporting_case"
+    label: "Case citation"
+    description: "Controlling case reinforcing your motion."
+    required: true
+    type: "document"
+beats:
+  - id: "call_to_order"
+    kind: "scripted"
+    speaker: "judge"
+    text: "We're on the record for motions in limine. Counsel for the movant, state your motion."
+  - id: "argument"
+    kind: "dynamic"
+    speaker: "counsel"
+    prompt_template: |-
+      Present an opening argument to exclude {exhibit_name} relying on {rule_basis}. Reference precedent
+      {supporting_case} and focus on prejudice outweighing probative value. Two to three sentences maximum.
+    delegate: "strategy"
+  - id: "judicial_probe"
+    kind: "dynamic"
+    speaker: "judge"
+    prompt_template: |-
+      Pose a probing question challenging whether exclusion is necessary. Reference balancing factors under
+      {rule_basis} and demand concrete prejudice impacts.
+    delegate: "qa"
+  - id: "opposition_reply"
+    kind: "dynamic"
+    speaker: "opposition"
+    prompt_template: |-
+      Deliver a rebuttal insisting {exhibit_name} stays in, offering a limiting instruction alternative. Mention
+      at least one strength of the exhibit for the jury.
+    delegate: "research"
