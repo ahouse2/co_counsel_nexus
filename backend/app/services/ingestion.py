@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -31,7 +32,7 @@ from .graph import GraphService, get_graph_service
 from .ingestion_sources import MaterializedSource, build_connector
 from .vector import VectorService, get_vector_service
 
-_TEXT_EXTENSIONS = {".txt", ".md", ".json", ".log", ".rtf"}
+_TEXT_EXTENSIONS = {".txt", ".md", ".json", ".log", ".rtf", ".html", ".htm"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp"}
 _FINANCIAL_EXTENSIONS = {".csv"}
 
@@ -76,6 +77,9 @@ class GraphMutation:
         self.triples += other.triples
 
 
+_DEFAULT_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+
+
 class IngestionService:
     def __init__(
         self,
@@ -85,6 +89,7 @@ class IngestionService:
         job_store: JobStore | None = None,
         document_store: DocumentStore | None = None,
         forensics_service: ForensicsService | None = None,
+        executor: ThreadPoolExecutor | None = None,
     ) -> None:
         self.logger = LOGGER
         self.settings = get_settings()
@@ -95,6 +100,7 @@ class IngestionService:
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.forensics_service = forensics_service or ForensicsService()
         self.credential_registry = CredentialRegistry(self.settings.credentials_registry_path)
+        self.executor = executor or _DEFAULT_EXECUTOR
 
     def ingest(self, request: IngestionRequest) -> str:
         if not request.sources:
@@ -102,10 +108,38 @@ class IngestionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="At least one source must be provided",
             )
+        for source in request.sources:
+            connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
+            connector.preflight(source)
         job_id = str(uuid4())
         submitted_at = datetime.now(timezone.utc)
         job_record = self._initialise_job_record(job_id, submitted_at, request.sources)
         self.job_store.write_job(job_id, job_record)
+        request_copy = request.model_copy(deep=True)
+        future = self.executor.submit(self._run_job, job_id, request_copy, job_record)
+        future.add_done_callback(self._log_job_failure(job_id))
+        return job_id
+
+    def get_job(self, job_id: str) -> Dict[str, object]:
+        record = self.job_store.read_job(job_id)
+        record.setdefault("job_id", job_id)
+        return record
+
+    # region async execution
+
+    def _log_job_failure(self, job_id: str):
+        def _callback(future: Future) -> None:
+            try:
+                future.result()
+            except HTTPException:
+                # Already logged inside the worker
+                return
+            except Exception:  # pylint: disable=broad-except
+                self.logger.exception("Unhandled ingestion worker failure", extra={"job_id": job_id})
+
+        return _callback
+
+    def _run_job(self, job_id: str, request: IngestionRequest, job_record: Dict[str, object]) -> None:
         self._transition_job(job_record, "running")
         self.job_store.write_job(job_id, job_record)
 
@@ -187,12 +221,8 @@ class IngestionService:
             "Ingestion completed",
             extra={"job_id": job_id, "documents": len(all_documents), "events": len(all_events)},
         )
-        return job_id
 
-    def get_job(self, job_id: str) -> Dict[str, object]:
-        record = self.job_store.read_job(job_id)
-        record.setdefault("job_id", job_id)
-        return record
+    # endregion
 
     # region ingestion helpers
 

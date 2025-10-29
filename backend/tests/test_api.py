@@ -3,8 +3,9 @@ from __future__ import annotations
 import importlib
 import json
 import os
-from pathlib import Path
+import time
 from decimal import Decimal
+from pathlib import Path
 from typing import Dict
 
 import pytest
@@ -60,6 +61,20 @@ def _read_job_manifest(job_dir: Path, job_id: str) -> Dict[str, object]:
     return json.loads(manifest.read_text())
 
 
+def _wait_for_job(client: TestClient, job_id: str, timeout: float = 5.0) -> Dict[str, object]:
+    deadline = time.time() + timeout
+    last_payload: Dict[str, object] | None = None
+    while time.time() < deadline:
+        response = client.get(f"/ingest/{job_id}")
+        assert response.status_code in {200, 202}
+        last_payload = response.json()
+        status_value = last_payload.get("status")
+        if status_value in {"succeeded", "failed", "cancelled"}:
+            return last_payload
+        time.sleep(0.1)
+    pytest.fail(f"Ingestion job {job_id} did not reach terminal state; last payload={last_payload}")
+
+
 def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp_path: Path) -> None:
     response = client.post(
         "/ingest",
@@ -67,6 +82,9 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     )
     assert response.status_code == 202
     job_id = response.json()["job_id"]
+
+    status_payload = _wait_for_job(client, job_id)
+    assert status_payload["status"] == "succeeded"
 
     job_manifest = _read_job_manifest(Path(os.environ["JOB_STORE_DIR"]), job_id)
     documents = job_manifest["documents"]
@@ -137,11 +155,8 @@ def test_ingestion_and_retrieval(client: TestClient, sample_workspace: Path, tmp
     totals = financial_forensics.json()["data"]["totals"]
     assert Decimal(totals["amount"]) == Decimal("600.0")
 
-    status_response = client.get(f"/ingest/{job_id}")
-    assert status_response.status_code == 200
-    status_payload = status_response.json()
+    status_payload = _wait_for_job(client, job_id)
     assert status_payload["job_id"] == job_id
-    assert status_payload["status"] == "succeeded"
     assert status_payload["status_details"]["ingestion"]["documents"] == 3
     assert status_payload["documents"][0]["metadata"]["checksum_sha256"]
 
