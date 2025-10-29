@@ -10,8 +10,9 @@ from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
 from ..config import get_settings
+from backend.ingestion.llama_index_factory import create_embedding_model, configure_global_settings
+from backend.ingestion.settings import build_runtime_config
 from ..storage.document_store import DocumentStore
-from ..utils.text import hashed_embedding
 from ..utils.triples import extract_entities, normalise_entity_id
 from .forensics import ForensicsService, get_forensics_service
 from .graph import GraphEdge, GraphNode, GraphService, get_graph_service
@@ -121,6 +122,9 @@ class RetrievalService:
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.forensics_service = forensics_service or get_forensics_service()
         self.privilege_classifier = privilege_classifier or get_privilege_classifier_service()
+        self.runtime_config = build_runtime_config(self.settings)
+        configure_global_settings(self.runtime_config)
+        self.embedding_model = create_embedding_model(self.runtime_config.embedding)
 
     def query(
         self,
@@ -174,7 +178,7 @@ class RetrievalService:
             search_window = min(max_window, max(page * page_size * 2, page_size))
             span.set_attribute("retrieval.search_window", search_window)
 
-            query_vector = hashed_embedding(question, self.settings.qdrant_vector_size)
+            query_vector = self.embedding_model.get_text_embedding(question)
             with _tracer.start_as_current_span("retrieval.vector_search") as vector_span:
                 vector_span.set_attribute("retrieval.vector.top_k", search_window)
                 results = self.vector_service.search(query_vector, top_k=search_window)

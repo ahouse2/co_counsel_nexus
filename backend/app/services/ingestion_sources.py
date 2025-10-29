@@ -656,7 +656,6 @@ class OneDriveSourceConnector(BaseSourceConnector):
 
     def materialize(self, job_id: str, index: int, source: IngestionSource) -> MaterializedSource:
         httpx_module = self._ensure_dependencies()
-        httpx = self._ensure_dependencies()
 
         if not source.credRef:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OneDrive source requires credRef")
@@ -673,9 +672,6 @@ class OneDriveSourceConnector(BaseSourceConnector):
             )
 
         folder = source.path or credentials.get("folder", "")
-        base_folder = folder.strip("/")
-        token = self._acquire_token(httpx, tenant_id, client_id, client_secret)
-        headers = {"Authorization": f"Bearer {token}"}
         workspace = self._workspace(job_id, index)
 
         token = self._acquire_token(httpx_module, tenant_id, client_id, client_secret)
@@ -693,9 +689,6 @@ class OneDriveSourceConnector(BaseSourceConnector):
             )
 
         origin_suffix = folder_path if folder_path else "root"
-        return MaterializedSource(root=workspace, source=source, origin=f"onedrive:{drive_id}/{origin_suffix}")
-
-    def _ensure_dependencies(self):
         return MaterializedSource(root=workspace, source=source, origin=f"onedrive:{drive_id}/{origin_suffix}")
 
     def _workspace(self, job_id: str, index: int) -> Path:
