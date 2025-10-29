@@ -34,6 +34,18 @@ _PIPELINE_ERRORS = _meter.create_counter(
     description="Pipeline failures",
 )
 
+_JOB_STATUS_TRANSITIONS = _meter.create_counter(
+    "ingestion.job.status_transitions",
+    unit="1",
+    description="Lifecycle transitions for ingestion jobs",
+)
+
+_JOB_QUEUE_EVENTS = _meter.create_counter(
+    "ingestion.job.queue.events",
+    unit="1",
+    description="Queue operations performed for ingestion jobs",
+)
+
 
 @contextmanager
 def record_pipeline_metrics(source_type: str, job_id: str) -> Iterator[None]:
@@ -60,4 +72,28 @@ def record_document_yield(count: int, *, source_type: str, job_id: str) -> None:
         _PIPELINE_DOCUMENTS.add(count, {"source_type": source_type, "job_id": job_id})
 
 
-__all__ = ["record_pipeline_metrics", "record_node_yield", "record_document_yield"]
+def record_job_transition(job_id: str, previous: str | None, new: str) -> None:
+    """Count a lifecycle transition for an ingestion job."""
+
+    attributes = {"job_id": job_id or "unknown", "to": new}
+    if previous:
+        attributes["from"] = previous
+    _JOB_STATUS_TRANSITIONS.add(1, attributes)
+
+
+def record_queue_event(job_id: str, event: str, *, reason: str | None = None) -> None:
+    """Emit telemetry for queue-level operations (enqueued, duplicate, rejected)."""
+
+    attributes = {"job_id": job_id or "unknown", "event": event}
+    if reason:
+        attributes["reason"] = reason
+    _JOB_QUEUE_EVENTS.add(1, attributes)
+
+
+__all__ = [
+    "record_pipeline_metrics",
+    "record_node_yield",
+    "record_document_yield",
+    "record_job_transition",
+    "record_queue_event",
+]

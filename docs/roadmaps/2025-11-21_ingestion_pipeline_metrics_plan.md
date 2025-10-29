@@ -1,0 +1,50 @@
+# 2025-11-21 Ingestion Pipeline Metrics & Observability Plan
+
+- Volume I — Situational Awareness
+  - Chapter 1 — Inventory Baseline
+    - Paragraph a — Confirm existing LlamaIndex runtime (settings, loaders, OCR) satisfies TRD cost tiers and connector coverage.
+      - Sentence i — Verify `backend/ingestion/settings.py` resolves COMMUNITY/PRO/ENTERPRISE embeddings + OCR combos and caches directories per settings.
+      - Sentence ii — Inspect `LoaderRegistry` for PDF/email/OCR + LlamaHub SharePoint/OneDrive/Gmail/IMAP/GDrive loader wiring.
+      - Sentence iii — Ensure `run_ingestion_pipeline` persists node/entity/triple data and records metrics (documents/nodes/duration).
+    - Paragraph b — Catalogue observability hooks currently active.
+      - Sentence i — Note existing OpenTelemetry histogram/counter coverage in `backend/ingestion/metrics.py` (duration, documents, nodes, errors).
+      - Sentence ii — Map ingestion job lifecycle logging/auditing already emitted from `IngestionService`.
+  - Chapter 2 — Risk Ledger
+    - Paragraph a — Identify missing telemetry for queue/status transitions to satisfy dashboard requirements.
+      - Sentence i — Detect absence of counters for queue operations (enqueue/reject/duplicate) impacting saturation panels.
+      - Sentence ii — Detect absence of metrics for status transitions (queued→running→succeeded/failed) hindering SLA burn-down views.
+    - Paragraph b — Enumerate validation deltas for incremental re-index assurance.
+      - Sentence i — Confirm checksum dedupe logic exercised via regression tests.
+      - Sentence ii — Highlight need for metrics-focused fixture to guard instrumentation regressions.
+
+- Volume II — Execution Blueprint
+  - Chapter 3 — Telemetry Enhancements
+    - Paragraph a — Extend `backend/ingestion/metrics.py` with counters for job status transitions and queue events.
+      - Sentence i — Create `_PIPELINE_STATUS` counter capturing `{job_id, from, to}` attributes for each `_transition_job` call.
+      - Sentence ii — Create `_PIPELINE_QUEUE_EVENTS` counter with `{job_id, event, reason?}` attributes for enqueue/duplicate/reject flows.
+    - Paragraph b — Surface thin wrappers `record_job_transition` and `record_queue_event` exporting instrumentation API.
+      - Sentence i — Ensure functions are idempotent and safe when telemetry backend absent (OpenTelemetry no-op meter semantics).
+  - Chapter 4 — Service Integration
+    - Paragraph a — Import new helpers into `backend/app/services/ingestion.py`.
+      - Sentence i — Emit queue event counters for enqueue success, duplicate suppression, and queue saturation rejection.
+      - Sentence ii — Emit queue event counters when worker claims jobs to differentiate backlog vs. actively processing.
+      - Sentence iii — Emit status transition counter from `_transition_job` with previous/next states.
+    - Paragraph b — Preserve existing audit + error handling semantics (no behavioural regressions tolerated).
+  - Chapter 5 — Quality Gates
+    - Paragraph a — Add regression in `backend/tests/test_ingestion_async.py` verifying queue + status metrics wrappers invoked during end-to-end job run.
+      - Sentence i — Monkeypatch metric helpers to capture invocations without needing a live OpenTelemetry collector.
+      - Sentence ii — Reuse existing sample workspace fixture to avoid duplicative scaffolding.
+    - Paragraph b — Ensure test suite remains deterministic by shutting down worker between tests.
+  - Chapter 6 — Stewardship Artefacts
+    - Paragraph a — Update ACE memory log with retriever→planner→critic summary referencing telemetry enhancements.
+    - Paragraph b — Append stewardship entry to root `AGENTS.md` log with validation results + rubric intent.
+    - Paragraph c — Capture build log summarising executed commands, findings, and residual watchpoints for observability dashboards.
+
+- Volume III — Contingency Branches (Decision Tree Appendix)
+  - Chapter 7 — Alternate Paths
+    - Paragraph a — If OpenTelemetry API absent, implement fallback meter stub injection (guarded by try/except) before instrumentation.
+    - Paragraph b — If queue metrics introduce race conditions, downgrade to thread-safe accumulation via `collections.Counter` until instrumentation bug resolved.
+  - Chapter 8 — Verification Closure Criteria
+    - Paragraph a — All pytest suites touching ingestion must pass locally (`PYTHONPATH=. pytest backend/tests/test_ingestion_async.py -q` minimum, extend to full backend when time permits).
+    - Paragraph b — Manual spot-check job manifest JSON to confirm no extraneous fields added unintentionally.
+    - Paragraph c — Review diff twice end-to-end ensuring no placeholder code or regression risk remains.
