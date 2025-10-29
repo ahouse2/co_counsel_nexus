@@ -92,24 +92,24 @@ export function SimulationWorkbench(): JSX.Element {
   const enabledParticipants = state.configuration.participants;
   const progress = transcript.length > 0 ? ((currentIndex + 1) / transcript.length) * 100 : 0;
 
-  const handlePlayToggle = () => {
+  const handlePlayToggle = (): void => {
     if (!transcript.length) {
       return;
     }
     setIsPlaying((value) => !value);
   };
 
-  const stepForward = () => {
+  const stepForward = (): void => {
     setIsPlaying(false);
     setCurrentIndex((index) => Math.min(index + 1, Math.max(transcript.length - 1, 0)));
   };
 
-  const stepBackward = () => {
+  const stepBackward = (): void => {
     setIsPlaying(false);
     setCurrentIndex((index) => Math.max(index - 1, 0));
   };
 
-  const restart = () => {
+  const restart = (): void => {
     setIsPlaying(false);
     setCurrentIndex(0);
   };
