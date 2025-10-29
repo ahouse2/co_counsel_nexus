@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
 
+import pytest
+
 from backend.app.scenarios.registry import ScenarioRegistry
+from backend.app.services.errors import WorkflowAbort
 from backend.app.services.scenarios import (
     ScenarioEngine,
     ScenarioEvidenceBinding,
@@ -87,6 +90,47 @@ def test_scenario_engine_run(tmp_path: Path) -> None:
     assert all(turn["text"].startswith("Dynamic response") for turn in result["transcript"] if turn["kind"] == "dynamic")
     stored_runs = agents.memory_store.list_scenarios()
     assert stored_runs, "Scenario transcript was not persisted"
+
+
+def test_scenario_engine_rejects_inactive_participant(tmp_path: Path) -> None:
+    registry = ScenarioRegistry(_library_path())
+    agents = _StubAgentsService(tmp_path / "threads_inactive")
+    engine = ScenarioEngine(
+        registry=registry,
+        agents_service=agents,
+        memory_store=agents.memory_store,
+        tts_service=None,
+    )
+    scenario = registry.get("cross_examination_smith")
+    inactive_participant = "witness"
+    assert any(p.id == inactive_participant and p.optional for p in scenario.participants)
+
+    options = ScenarioRunOptions(
+        scenario_id=scenario.id,
+        case_id="case-omit-witness",
+        variables={
+            "issue": "Chain of custody gap",
+            "witness_fact": "The hand-off occurred at 21:07",
+            "timeframe": "January 12 2025 21:00-21:15",
+        },
+        evidence={
+            "primary_document": ScenarioEvidenceBinding(
+                slot_id="primary_document",
+                value="Exhibit 12",
+            ),
+            "timeline_event": ScenarioEvidenceBinding(
+                slot_id="timeline_event",
+                value="Timeline entry 42",
+            ),
+        },
+        participants=[p.id for p in scenario.participants if p.id != inactive_participant],
+        use_tts=False,
+    )
+
+    with pytest.raises(WorkflowAbort) as exc:
+        engine.run(options)
+
+    assert exc.value.error.code == "SCENARIO_PARTICIPANT_INACTIVE"
 
 
 def test_scenarios_api_endpoints(client, auth_headers_factory, tmp_path: Path) -> None:

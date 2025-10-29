@@ -251,6 +251,21 @@ class ScenarioEngine:
                     )
                 )
             active[participant_id] = available[participant_id]
+
+        speakers = {beat.speaker for beat in scenario.beats}
+        missing_active = sorted(speaker for speaker in speakers if speaker not in active)
+        if missing_active:
+            inactive = ", ".join(missing_active)
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.SCENARIO,
+                    code="SCENARIO_PARTICIPANT_INACTIVE",
+                    message=(
+                        "Scenario configuration deselected participants required for beats: "
+                        f"{inactive}"
+                    ),
+                )
+            )
         return active
 
     def _handle_scripted(
