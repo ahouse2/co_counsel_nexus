@@ -1,0 +1,105 @@
+{
+  "title": "Agent Run Outcomes",
+  "uid": "agent-success",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "id": 1,
+      "title": "Success Rate (5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cocounsel_agents_runs_total{status!~\"failed\"}[5m])) / sum(rate(cocounsel_agents_runs_total[5m]))",
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 2,
+      "title": "Run Volume by Status",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cocounsel_agents_runs_total[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "1/min"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "id": 3,
+      "title": "Failures by Component",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(cocounsel_agents_failures_total[1h])) by (component)",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

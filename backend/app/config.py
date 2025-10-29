@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     manifest_retention_days: int = Field(default=30)
     audit_log_path: Path = Field(default=Path("storage/audit.log"))
     billing_usage_path: Path = Field(default=Path("storage/billing/usage.json"))
+    cost_tracking_path: Path = Field(default=Path("storage/costs/events.jsonl"))
     scenario_library_path: Path | None = Field(default=None)
     scenario_default_top_k: int = Field(default=4, ge=1, le=20)
 
@@ -193,6 +194,7 @@ class Settings(BaseSettings):
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.billing_usage_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cost_tracking_path.parent.mkdir(parents=True, exist_ok=True)
         self.tts_cache_dir.mkdir(parents=True, exist_ok=True)
         self.knowledge_catalog_path.parent.mkdir(parents=True, exist_ok=True)
         self.knowledge_content_dir.mkdir(parents=True, exist_ok=True)

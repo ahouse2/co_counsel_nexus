@@ -1,0 +1,114 @@
+{
+  "title": "Cost & Utilization",
+  "uid": "cost-observability",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "id": 1,
+      "title": "API Calls / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cocounsel_cost_api_calls_total[5m]))"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "type": "bargauge",
+      "id": 2,
+      "title": "API Calls by Endpoint",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cocounsel_cost_api_calls_total[5m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 3,
+      "title": "GPU Duration (ms)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(cocounsel_cost_gpu_duration_ms_sum[5m])) by (device)",
+          "legendFormat": "{{device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "table",
+      "id": 4,
+      "title": "Model Loads (Last 1h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PB6071C224CFE0776"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(cocounsel_cost_model_loads_total[1h])) by (model_name,framework,device)",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

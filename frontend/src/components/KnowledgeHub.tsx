@@ -14,13 +14,9 @@ import {
   KnowledgeSearchResult,
 } from '@/types';
 
-const emptyFilters = {
-  tags: new Set<string>(),
-  difficulty: new Set<string>(),
-  media_types: new Set<string>(),
-};
+const filterKeys = ['tags', 'difficulty', 'media_types'] as const;
 
-type FilterKey = keyof typeof emptyFilters;
+type FilterKey = (typeof filterKeys)[number];
 
 type KnowledgeFilters = {
   tags: string[];
@@ -67,7 +63,6 @@ export function KnowledgeHub(): JSX.Element {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadLesson = async (lessonId: string): Promise<void> => {
@@ -103,7 +98,7 @@ export function KnowledgeHub(): JSX.Element {
 
   const activeFilterPayload = useMemo(() => {
     const payload: KnowledgeFilters = { tags: [], difficulty: [], media_types: [] };
-    (Object.keys(selectedFilters) as FilterKey[]).forEach((key) => {
+    filterKeys.forEach((key) => {
       if (selectedFilters[key].size) {
         payload[key] = Array.from(selectedFilters[key]);
       }
@@ -111,7 +106,7 @@ export function KnowledgeHub(): JSX.Element {
     return payload;
   }, [selectedFilters]);
 
-  const handleSearch = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSearch = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -134,7 +129,7 @@ export function KnowledgeHub(): JSX.Element {
     }
   };
 
-  const handleToggleBookmark = async (lessonId: string, bookmarked: boolean) => {
+  const handleToggleBookmark = async (lessonId: string, bookmarked: boolean): Promise<void> => {
     setError(null);
     try {
       const response = await updateKnowledgeBookmark(lessonId, bookmarked);
@@ -153,7 +148,7 @@ export function KnowledgeHub(): JSX.Element {
     }
   };
 
-  const handleToggleSection = async (sectionId: string, completed: boolean) => {
+  const handleToggleSection = async (sectionId: string, completed: boolean): Promise<void> => {
     if (!lessonDetail) return;
     setError(null);
     try {

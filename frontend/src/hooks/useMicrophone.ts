@@ -95,15 +95,15 @@ export function useMicrophone(sampleRate = 16000): MicrophoneState {
     }
   }, [sampleRate, teardown, updateWaveform]);
 
-  const stop = useCallback(async () => {
+  const stop = useCallback(async (): Promise<Blob | null> => {
     if (!recorderRef.current) {
       return null;
     }
     setProcessing(true);
     const recorder = recorderRef.current;
     const audioContext = audioContextRef.current;
-    return await new Promise<Blob | null>((resolve) => {
-      const handleStop = async () => {
+      return await new Promise<Blob | null>((resolve) => {
+        const handleStop = async (): Promise<void> => {
         recorder.removeEventListener('stop', handleStop);
         setRecording(false);
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
@@ -133,7 +133,7 @@ export function useMicrophone(sampleRate = 16000): MicrophoneState {
     });
   }, [teardown]);
 
-  const reset = useCallback(() => {
+  const reset = useCallback((): void => {
     teardown();
     setRecording(false);
     setProcessing(false);

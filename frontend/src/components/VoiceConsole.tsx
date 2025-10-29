@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import { useMicrophone } from '@/hooks/useMicrophone';
 import { useVoiceSession } from '@/hooks/useVoiceSession';
@@ -16,7 +16,7 @@ export function VoiceConsole(): JSX.Element {
     return 'Record Question';
   }, [microphone.processing, microphone.recording]);
 
-  const handleRecord = async () => {
+  const handleRecord = async (): Promise<void> => {
     if (microphone.recording) {
       const blob = await microphone.stop();
       if (blob) {
@@ -28,13 +28,31 @@ export function VoiceConsole(): JSX.Element {
     await microphone.start();
   };
 
-  const handleRefresh = async () => {
+  const handleRefresh = async (): Promise<void> => {
     if (voice.session) {
       await voice.refresh(voice.session.session_id);
     }
   };
 
-  const handleCaseSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const sessionId = voice.session?.session_id;
+  const { refresh } = voice;
+
+  useEffect(() => {
+    if (!sessionId) {
+      return undefined;
+    }
+    const interval = window.setInterval(() => {
+      void refresh(sessionId);
+    }, 5000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [refresh, sessionId]);
+
+  const transcriptSegments = useMemo(() => voice.detail?.segments ?? voice.session?.segments ?? [], [voice.detail, voice.session]);
+  const fullTranscript = voice.detail?.transcript ?? voice.session?.transcript;
+
+  const handleCaseSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const nextCase = (data.get('caseId') as string).trim();
@@ -102,6 +120,27 @@ export function VoiceConsole(): JSX.Element {
           <span key={index} style={{ height: `${Math.min(1, value) * 100}%` }} />
         ))}
       </div>
+      <section className="voice-console__transcript" aria-live="polite" aria-label="Live transcription">
+        <header>
+          <h3>Live Transcription</h3>
+          {fullTranscript && <p className="voice-console__transcript-summary">{fullTranscript}</p>}
+        </header>
+        <ol>
+          {transcriptSegments.length > 0 ? (
+            transcriptSegments.map((segment) => (
+              <li key={`${segment.start}-${segment.end}`}>
+                <span className="voice-console__transcript-time">
+                  {segment.start.toFixed(1)}s – {segment.end.toFixed(1)}s
+                </span>
+                <span>{segment.text}</span>
+                <span className="confidence">{(segment.confidence * 100).toFixed(0)}%</span>
+              </li>
+            ))
+          ) : (
+            <li className="voice-console__transcript-empty">No transcription available yet.</li>
+          )}
+        </ol>
+      </section>
       <footer className="voice-console__status">
         {microphone.error && (
           <p role="alert" className="voice-console__error">

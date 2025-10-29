@@ -1,10 +1,20 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import type { AnchorHTMLAttributes } from 'react';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useQueryContext } from '@/context/QueryContext';
 import { ChatMessage, Citation } from '@/types';
 import { VoiceConsole } from '@/components/VoiceConsole';
 
+const markdownComponents: Components = {
+  a: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a {...props} target="_blank" rel="noopener noreferrer" />
+  ),
+};
+
 export function ChatView(): JSX.Element {
-  const { messages, sendMessage, retryLast, loading, error } = useQueryContext();
+  const { messages, sendMessage, retryLast, loading, error, setActiveCitation } = useQueryContext();
   const [prompt, setPrompt] = useState('');
   const listRef = useRef<HTMLDivElement | null>(null);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
@@ -41,7 +51,7 @@ export function ChatView(): JSX.Element {
     <div className="chat-view">
       <div className="chat-transcript" ref={listRef} role="log" aria-live="polite" aria-label="Conversation transcript">
         {messages.map((message) => (
-          <ChatBubble key={message.id} message={message} />
+          <ChatBubble key={message.id} message={message} onCitationSelect={setActiveCitation} />
         ))}
       </div>
       <div className="live-region sr-only" ref={liveRegionRef} aria-live="polite" aria-atomic="true" />
@@ -78,7 +88,13 @@ export function ChatView(): JSX.Element {
   );
 }
 
-function ChatBubble({ message }: { message: ChatMessage }): JSX.Element {
+function ChatBubble({
+  message,
+  onCitationSelect,
+}: {
+  message: ChatMessage;
+  onCitationSelect: (citation: Citation) => void;
+}): JSX.Element {
   return (
     <article
       className={`chat-bubble chat-bubble-${message.role}${message.error ? ' chat-bubble-error' : ''}`}
@@ -89,8 +105,24 @@ function ChatBubble({ message }: { message: ChatMessage }): JSX.Element {
           {message.role === 'user' ? 'You' : 'Assistant'}
         </span>
         <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString()}</time>
+        {message.mode && (
+          <span className={`chat-mode-badge mode-${message.mode}`}>
+            {message.mode === 'recall' ? 'Economy' : 'Precision'}
+          </span>
+        )}
       </header>
-      <p>{message.content || (message.streaming ? '…' : '')}</p>
+      {message.content ? (
+        <ReactMarkdown
+          className="chat-markdown"
+          remarkPlugins={[remarkGfm]}
+          components={markdownComponents}
+          skipHtml
+        >
+          {message.content}
+        </ReactMarkdown>
+      ) : (
+        message.streaming && <p className="chat-streaming">Streaming response…</p>
+      )}
       {message.error && (
         <p role="alert" className="error">
           {message.error}
@@ -100,7 +132,18 @@ function ChatBubble({ message }: { message: ChatMessage }): JSX.Element {
         <ul className="citation-list">
           {message.citations.map((citation: Citation) => (
             <li key={citation.docId}>
-              <span>{citation.docId}</span>
+              <button
+                type="button"
+                onClick={() => onCitationSelect(citation)}
+                className="citation-link"
+              >
+                {citation.title ?? citation.docId}
+              </button>
+              {citation.uri && (
+                <a href={citation.uri} target="_blank" rel="noopener noreferrer" className="citation-external">
+                  Open source
+                </a>
+              )}
               {citation.confidence !== undefined && citation.confidence !== null && (
                 <span className="confidence">Confidence {(citation.confidence * 100).toFixed(0)}%</span>
               )}
