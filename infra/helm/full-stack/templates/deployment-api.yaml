@@ -1,0 +1,121 @@
+{{- $name := include "full-stack.fullname" . -}}
+{{- $labels := include "full-stack.selectorLabels" . -}}
+{{- $secretName := default (printf "%s-secrets" $name) .Values.secrets.existingSecret -}}
+{{- $neo4jUri := default (printf "bolt://%s-neo4j:7687" $name) .Values.api.env.NEO4J_URI -}}
+{{- $qdrantUrl := default (printf "http://%s-qdrant:6333" $name) .Values.api.env.QDRANT_URL -}}
+{{- $sttUrl := default (printf "http://%s-stt:9000" $name) .Values.api.env.STT_SERVICE_URL -}}
+{{- $ttsUrl := default (printf "http://%s-tts:5002" $name) .Values.api.env.TTS_SERVICE_URL -}}
+{{- $otelEndpoint := default (printf "http://%s-otel-collector:4317" $name) .Values.api.env.TELEMETRY_OTLP_ENDPOINT -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-api
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- $labels | nindent 6 }}
+      component: api
+  template:
+    metadata:
+      labels:
+        {{- include "full-stack.labels" . | nindent 8 }}
+        component: api
+    spec:
+      serviceAccountName: {{ default (include "full-stack.fullname" .) .Values.serviceAccount.name }}
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: NEO4J_URI
+              value: {{ $neo4jUri | quote }}
+            - name: NEO4J_USER
+              value: {{ .Values.api.env.NEO4J_USER | quote }}
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: NEO4J_PASSWORD
+            - name: QDRANT_URL
+              value: {{ $qdrantUrl | quote }}
+            - name: STT_SERVICE_URL
+              value: {{ $sttUrl | quote }}
+            - name: TTS_SERVICE_URL
+              value: {{ $ttsUrl | quote }}
+            - name: TELEMETRY_ENABLED
+              value: {{ .Values.api.env.TELEMETRY_ENABLED | quote }}
+            - name: TELEMETRY_OTLP_ENDPOINT
+              value: {{ $otelEndpoint | quote }}
+            - name: TELEMETRY_OTLP_INSECURE
+              value: {{ .Values.api.env.TELEMETRY_OTLP_INSECURE | quote }}
+            - name: TELEMETRY_ENVIRONMENT
+              value: {{ .Values.api.env.TELEMETRY_ENVIRONMENT | quote }}
+            - name: DOCUMENT_STORAGE_PATH
+              value: {{ .Values.api.env.DOCUMENT_STORAGE_PATH | quote }}
+            - name: GRAPH_SNAPSHOT_PATH
+              value: {{ .Values.api.env.GRAPH_SNAPSHOT_PATH | quote }}
+            - name: TELEMETRY_BUFFER_PATH
+              value: {{ .Values.api.env.TELEMETRY_BUFFER_PATH | quote }}
+            - name: HUGGINGFACE_HUB_CACHE
+              value: {{ .Values.api.env.HUGGINGFACE_HUB_CACHE | quote }}
+            - name: WHISPER_MODEL_PATH
+              value: {{ .Values.api.env.WHISPER_MODEL_PATH | quote }}
+            - name: TTS_MODEL_PATH
+              value: {{ .Values.api.env.TTS_MODEL_PATH | quote }}
+            - name: API_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: API_JWT_SECRET
+          {{- range .Values.api.extraEnv }}
+            - {{ toYaml . | nindent 14 }}
+          {{- end }}
+          volumeMounts:
+            - name: documents
+              mountPath: {{ .Values.api.env.DOCUMENT_STORAGE_PATH | quote }}
+            - name: graphs
+              mountPath: {{ .Values.api.env.GRAPH_SNAPSHOT_PATH | quote }}
+            - name: telemetry
+              mountPath: {{ .Values.api.env.TELEMETRY_BUFFER_PATH | quote }}
+            - name: huggingface
+              mountPath: {{ .Values.api.env.HUGGINGFACE_HUB_CACHE | quote }}
+            - name: whisper
+              mountPath: {{ .Values.api.env.WHISPER_MODEL_PATH | quote }}
+            - name: tts
+              mountPath: {{ .Values.api.env.TTS_MODEL_PATH | quote }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+      volumes:
+        - name: documents
+          persistentVolumeClaim:
+            claimName: {{ $name }}-documents
+        - name: graphs
+          persistentVolumeClaim:
+            claimName: {{ $name }}-graphs
+        - name: telemetry
+          persistentVolumeClaim:
+            claimName: {{ $name }}-telemetry
+        - name: huggingface
+          emptyDir: {}
+        - name: whisper
+          emptyDir: {}
+        - name: tts
+          emptyDir: {}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

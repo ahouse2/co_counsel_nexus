@@ -1,4 +1,20 @@
 version: '3.9'
+
+x-gpu-capable: &gpu-capable
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - capabilities:
+              - gpu
+            count: ${GPU_DEVICE_COUNT:-0}
+            driver: ${GPU_DRIVER:-nvidia}
+  device_requests:
+    - capabilities:
+        - gpu
+      count: ${GPU_DEVICE_COUNT:-0}
+      driver: ${GPU_DRIVER:-nvidia}
+
 services:
   api:
     build:
@@ -16,12 +32,20 @@ services:
       - VECTOR_DIR=/data/vector
       - VOICE_SESSIONS_DIR=/data/voice/sessions
       - VOICE_CACHE_DIR=/models
+      - DOCUMENT_STORAGE_PATH=/var/cocounsel/documents
+      - GRAPH_SNAPSHOT_PATH=/var/cocounsel/graphs
+      - TELEMETRY_BUFFER_PATH=/var/cocounsel/telemetry
       - BILLING_USAGE_PATH=/data/billing/usage.json
       - BILLING_DEFAULT_PLAN=${BILLING_DEFAULT_PLAN:-community}
       - TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-false}
       - TELEMETRY_OTLP_ENDPOINT=${TELEMETRY_OTLP_ENDPOINT:-http://otel-collector:4317}
       - TELEMETRY_OTLP_INSECURE=${TELEMETRY_OTLP_INSECURE:-true}
       - TELEMETRY_ENVIRONMENT=${TELEMETRY_ENVIRONMENT:-community}
+      - STT_SERVICE_URL=${STT_SERVICE_URL:-http://stt:9000}
+      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts:5002}
+      - HUGGINGFACE_HUB_CACHE=/var/cocounsel/models/huggingface
+      - WHISPER_MODEL_PATH=/var/cocounsel/models/whisper
+      - TTS_MODEL_PATH=/var/cocounsel/models/tts
     ports:
       - "8000:8000"
     depends_on:
@@ -32,6 +56,12 @@ services:
     volumes:
       - api_data:/data
       - voice_models:/models
+      - ../var/storage/documents:/var/cocounsel/documents
+      - ../var/storage/graphs:/var/cocounsel/graphs
+      - ../var/storage/telemetry:/var/cocounsel/telemetry
+      - ../var/models/huggingface:/var/cocounsel/models/huggingface
+      - ../var/models/whisper:/var/cocounsel/models/whisper
+      - ../var/models/tts:/var/cocounsel/models/tts
 
   neo4j:
     image: neo4j:5.20
@@ -41,11 +71,15 @@ services:
       - enterprise
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-securepassword}
+      - NEO4J_dbms_memory_heap_initial__size=1G
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_security_auth__enabled=true
     ports:
       - "7474:7474"
       - "7687:7687"
     volumes:
       - neo4j_data:/data
+      - ../infra/migrations/neo4j:/var/lib/neo4j/migrations:ro
     networks:
       - backend
 
@@ -60,6 +94,50 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    networks:
+      - backend
+
+  stt:
+    <<: *gpu-capable
+    image: ghcr.io/guillaumekln/faster-whisper-server:latest
+    profiles:
+      - community
+      - pro
+      - enterprise
+      - gpu
+    environment:
+      - ASR_MODEL=${STT_MODEL_NAME:-openai/whisper-small}
+      - ASR_ENGINE=faster_whisper
+      - ASR_BEAM_SIZE=5
+      - ASR_DEVICE=${STT_DEVICE:-cpu}
+      - HUGGINGFACE_HUB_CACHE=/models/huggingface
+      - ASR_OUTPUT_LANGUAGE=${STT_OUTPUT_LANGUAGE:-en}
+    ports:
+      - "9000:9000"
+    volumes:
+      - ../var/models/huggingface:/models/huggingface
+      - ../var/models/whisper:/models/whisper
+    networks:
+      - backend
+
+  tts:
+    <<: *gpu-capable
+    image: rhasspy/larynx:latest
+    profiles:
+      - community
+      - pro
+      - enterprise
+      - gpu
+    environment:
+      - LARYNX_VOICE=${TTS_VOICE:-en-us-blizzard_lessac}
+      - LARYNX_OUTPUT_DIR=/output
+      - HUGGINGFACE_HUB_CACHE=/models/huggingface
+    ports:
+      - "5002:5002"
+    volumes:
+      - ../var/models/huggingface:/models/huggingface
+      - ../var/models/tts:/models/tts
+      - ../var/audio:/output
     networks:
       - backend
 
@@ -96,6 +174,27 @@ services:
     networks:
       - backend
 
+  storage-backup:
+    image: ghcr.io/offen/docker-volume-backup:latest
+    profiles:
+      - community
+      - pro
+      - enterprise
+    environment:
+      - BACKUP_CRON=${BACKUP_CRON_SCHEDULE:-0 3 * * *}
+      - BACKUP_FILENAME=full-stack
+      - BACKUP_PATH=/var/backups
+      - BACKUP_PRUNING_PREFIX=full-stack
+      - BACKUP_PRUNING_KEEP_DAYS=${BACKUP_RETENTION_DAYS:-7}
+      - BACKUP_LATEST_SYMLINK=true
+    volumes:
+      - ../var/backups:/var/backups
+      - ../var/storage/documents:/backup/documents:ro
+      - ../var/storage/graphs:/backup/graphs:ro
+      - ../var/storage/telemetry:/backup/telemetry:ro
+    networks:
+      - backend
+
 volumes:
   neo4j_data:
   qdrant_data:
@@ -106,4 +205,3 @@ volumes:
 networks:
   backend:
     driver: bridge
-

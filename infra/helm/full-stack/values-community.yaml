@@ -1,0 +1,19 @@
+api:
+  replicas: 1
+  env:
+    TELEMETRY_ENABLED: "false"
+    TELEMETRY_ENVIRONMENT: community
+    TELEMETRY_OTLP_ENDPOINT: ""
+
+telemetry:
+  enabled: false
+  grafana:
+    enabled: false
+
+backup:
+  schedule: "0 3 * * *"
+  retentionDays: 7
+
+stt:
+  model: openai/whisper-small
+

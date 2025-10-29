@@ -1,0 +1,54 @@
+{{- $name := include "full-stack.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-qdrant
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "full-stack.selectorLabels" . | nindent 6 }}
+      component: qdrant
+  template:
+    metadata:
+      labels:
+        {{- include "full-stack.labels" . | nindent 8 }}
+        component: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          image: {{ .Values.qdrant.image }}
+          ports:
+            - containerPort: 6333
+              name: http
+            - containerPort: 6334
+              name: grpc
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+          resources:
+            {{- toYaml .Values.qdrant.resources | nindent 12 }}
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ $name }}-qdrant
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-qdrant
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "full-stack.selectorLabels" . | nindent 4 }}
+    component: qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http
+    - name: grpc
+      port: 6334
+      targetPort: grpc
