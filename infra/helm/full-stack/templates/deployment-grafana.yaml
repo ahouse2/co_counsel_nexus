@@ -1,0 +1,60 @@
+{{- if and .Values.telemetry.enabled .Values.telemetry.grafana.enabled }}
+{{- $name := include "full-stack.fullname" . -}}
+{{- $secretName := default (printf "%s-secrets" $name) .Values.secrets.existingSecret -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-grafana
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "full-stack.selectorLabels" . | nindent 6 }}
+      component: grafana
+  template:
+    metadata:
+      labels:
+        {{- include "full-stack.labels" . | nindent 8 }}
+        component: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: {{ .Values.telemetry.grafana.image }}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ .Values.telemetry.grafana.adminUser | quote }}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: GRAFANA_ADMIN_PASSWORD
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+          resources:
+            {{- toYaml .Values.telemetry.grafana.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $name }}-grafana
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-grafana
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "full-stack.selectorLabels" . | nindent 4 }}
+    component: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+{{- end }}

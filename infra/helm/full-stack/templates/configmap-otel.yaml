@@ -1,0 +1,41 @@
+{{- if .Values.telemetry.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "full-stack.fullname" . }}-otel-config
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+data:
+  collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      batch:
+        send_batch_size: 512
+        timeout: 5s
+    exporters:
+      logging:
+        loglevel: info
+      prometheus:
+        endpoint: 0.0.0.0:9464
+        namespace: cocounsel
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      zpages:
+        endpoint: 0.0.0.0:55679
+    service:
+      extensions: [health_check, zpages]
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [prometheus, logging]
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [logging]
+{{- end }}

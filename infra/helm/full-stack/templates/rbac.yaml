@@ -1,0 +1,36 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "full-stack.fullname" . }}
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+{{- range .Values.rbac.additionalRules }}
+  - {{ toYaml . | nindent 4 }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "full-stack.fullname" . }}
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ default (include "full-stack.fullname" .) .Values.serviceAccount.name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "full-stack.fullname" . }}
+{{- end }}

@@ -1,0 +1,59 @@
+{{- if .Values.telemetry.enabled }}
+{{- $name := include "full-stack.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-otel-collector
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "full-stack.selectorLabels" . | nindent 6 }}
+      component: otel
+  template:
+    metadata:
+      labels:
+        {{- include "full-stack.labels" . | nindent 8 }}
+        component: otel
+    spec:
+      containers:
+        - name: otel-collector
+          image: {{ .Values.telemetry.collector.image }}
+          args:
+            - "--config=/etc/otel/collector-config.yaml"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otel/collector-config.yaml
+              subPath: collector-config.yaml
+          ports:
+            - containerPort: 4317
+              name: otlp-grpc
+            - containerPort: 9464
+              name: metrics
+          resources:
+            {{- toYaml .Values.telemetry.collector.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-otel-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-otel-collector
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "full-stack.selectorLabels" . | nindent 4 }}
+    component: otel
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: metrics
+      port: 9464
+      targetPort: metrics
+{{- end }}

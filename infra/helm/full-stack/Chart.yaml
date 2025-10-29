@@ -1,0 +1,6 @@
+apiVersion: v2
+name: full-stack
+version: 0.1.0
+appVersion: "1.0.0"
+description: Helm chart deploying the NinthOctopusMitten platform with API, data stores, audio services, telemetry, and backups.
+type: application

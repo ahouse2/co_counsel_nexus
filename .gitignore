@@ -17,6 +17,10 @@ frontend/tsconfig.tsbuildinfo
 storage/
 !backend/app/storage/
 backend/app/storage/__pycache__/
+var/
+
+# Backups
+backups/
 
 # Logs
 *.log

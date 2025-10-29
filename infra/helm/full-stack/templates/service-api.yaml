@@ -1,0 +1,15 @@
+{{- $name := include "full-stack.fullname" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-api
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "full-stack.selectorLabels" . | nindent 4 }}
+    component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
