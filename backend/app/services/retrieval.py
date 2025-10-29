@@ -257,6 +257,10 @@ class RetrievalService:
                 hybrid_span.set_attribute("retrieval.fused_candidates", len(bundle.fused_points))
                 hybrid_span.set_attribute("retrieval.reranker", bundle.reranker)
 
+            with _tracer.start_as_current_span("retrieval.vector_search") as vector_span:
+                vector_span.set_attribute("retrieval.vector.count", len(bundle.vector_points))
+                vector_span.set_attribute("retrieval.vector.window", vector_window)
+
             filtered_results = self._apply_filters(bundle.fused_points, source_filter, entity_filter)
             span.set_attribute("retrieval.filtered_results", len(filtered_results))
 

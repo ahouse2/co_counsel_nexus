@@ -376,6 +376,22 @@ authorize_dev_agent_admin = _dependency(
     allowed_roles=settings.dev_agent_admin_roles,
 )
 
+authorize_knowledge_read = _dependency(
+    resource_name="knowledge.read",
+    action="knowledge:read",
+    audience=settings.security_audience_knowledge,
+    required_scopes=["knowledge:read"],
+    allowed_roles=["ResearchAnalyst", "CaseCoordinator", "ComplianceAuditor"],
+)
+
+authorize_knowledge_write = _dependency(
+    resource_name="knowledge.write",
+    action="knowledge:write",
+    audience=settings.security_audience_knowledge,
+    required_scopes=["knowledge:write", "knowledge:read"],
+    allowed_roles=["ResearchAnalyst", "CaseCoordinator"],
+)
+
 
 def reset_security_caches() -> None:
     _get_oauth_validator.cache_clear()

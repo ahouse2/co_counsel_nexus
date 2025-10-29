@@ -183,10 +183,16 @@ class MTLSMiddleware(BaseHTTPMiddleware):
 
     def _validate_validity_window(self, certificate: x509.Certificate) -> None:
         now = datetime.now(timezone.utc)
-        not_before = certificate.not_valid_before_utc
-        not_after = certificate.not_valid_after_utc
+        not_before = getattr(certificate, "not_valid_before_utc", None)
+        not_after = getattr(certificate, "not_valid_after_utc", None)
+        if not_before is None:
+            raw = certificate.not_valid_before
+            not_before = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        if not_after is None:
+            raw = certificate.not_valid_after
+            not_after = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
         skew = self.config.clock_skew_seconds
-        if now < not_before - timedelta(seconds=skew) or now > not_after + timedelta(seconds=skew):  # type: ignore[name-defined]
+        if now < not_before - timedelta(seconds=skew) or now > not_after + timedelta(seconds=skew):
             LOGGER.warning(
                 "Client certificate outside validity window",
                 extra={

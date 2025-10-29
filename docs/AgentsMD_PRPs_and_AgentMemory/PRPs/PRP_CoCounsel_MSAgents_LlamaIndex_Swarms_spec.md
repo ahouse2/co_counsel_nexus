@@ -23,6 +23,29 @@ version: 0.2
 - **Emergency Elevation**: Break-glass access escalates to `PlatformEngineer` with one-time approval codes; actions must be
   reconciled within 24 hours in the audit ledger.
 
+### Knowledge Hub API Surface
+
+- **Purpose**: Serve curated legal best-practice lessons (Trial University) with LlamaIndex-backed semantic search and
+  per-principal learning telemetry.
+- **Endpoints**:
+  - `POST /knowledge/search` — Accepts `{ query, limit, filters }`; returns scored section snippets with elapsed time metadata.
+  - `GET /knowledge/lessons` — Lists lesson summaries alongside completion ratios, bookmark state, and available filter facets.
+  - `GET /knowledge/lessons/{lesson_id}` — Streams markdown sections + media attachments tailored with the caller's progress
+    state.
+  - `POST /knowledge/lessons/{lesson_id}/progress` — Mutates section completion (requires `knowledge:write`).
+  - `POST /knowledge/lessons/{lesson_id}/bookmark` — Toggles bookmarks for quick recall (requires `knowledge:write`).
+- **Scopes/Roles**:
+  - Read (`knowledge:read`): `ResearchAnalyst`, `CaseCoordinator`, `ComplianceAuditor` (case admins inherit).
+  - Write (`knowledge:write`): `ResearchAnalyst`, `CaseCoordinator` for progress/bookmark persistence.
+- **Persistence & Indexing**:
+  - Catalog: `docs/knowledge/catalog.json` referencing markdown dossiers in `docs/knowledge/best_practices/`.
+  - Profile store: encrypted manifest at `storage/knowledge/progress.json`, keyed by `{tenant}:{subject}`.
+  - Search: Sections chunked + embedded via shared ingestion runtime, hydrated into a LlamaIndex `VectorStoreIndex` with
+    keyword fallback when optional deps absent.
+- **Agent Touchpoints**:
+  - Agents can `get_knowledge_service()` to pre-load lessons, cite curated steps, or augment analysis with best-practice
+    checklists.
+
 ### POST /ingest
 **Summary**: Queue document sources for processing. Implemented via `backend.app.models.api.IngestionRequest` ➜ `IngestionResponse`.
 
