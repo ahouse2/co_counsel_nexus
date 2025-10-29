@@ -112,6 +112,11 @@ class QAAgent:
         vector_hits = len(traces.get("vector", []))
         graph_nodes = len(graph.get("nodes", []))
         graph_edges = len(graph.get("edges", []))
+        privilege = traces.get("privilege", {})
+        privileged_docs = [
+            item for item in privilege.get("decisions", []) if item.get("label") == "privileged"
+        ]
+        privilege_max = max((float(item.get("score", 0.0)) for item in privilege.get("decisions", [])), default=0.0)
         artifacts: List[Dict[str, Any]] = forensics_bundle.get("artifacts", [])
         artifact_count = len(artifacts)
         forensics_signals = sum(len(item.get("signals", [])) for item in artifacts)
@@ -200,6 +205,8 @@ class QAAgent:
             7.0,
             0.5 if forensics_signals == 0 else 0.2,
             0.4 if artifact_count else 0.0,
+            (-0.8 if privileged_docs else 0.0),
+            (-0.4 if privilege_max >= 0.8 else (-0.2 if privilege_max >= 0.6 else 0.0)),
         )
         scores["Enterprise Value"] = score(
             7.1,
@@ -214,6 +221,9 @@ class QAAgent:
             f"Citations: {len(citations)}; Forensics artifacts: {artifact_count}; Graph edges: {graph_edges}.",
             f"Total runtime: {round(total_duration, 2)} ms across {len(turn_roles)} turns.",
         ]
+        if privileged_docs:
+            doc_list = ", ".join(item.get("doc_id", "?") for item in privileged_docs)
+            notes.append(f"Privilege alerts: {len(privileged_docs)} document(s) flagged ({doc_list}).")
         return scores, notes, average
 
 
@@ -313,6 +323,11 @@ class AgentsService:
             "graph_edges": len(output.get("traces", {}).get("graph", {}).get("edges", [])),
             "citations": len(output.get("citations", [])),
         }
+        privilege = output.get("traces", {}).get("privilege", {})
+        metrics["privileged_docs"] = sum(
+            1 for item in privilege.get("decisions", []) if item.get("label") == "privileged"
+        )
+        metrics["privilege_label"] = privilege.get("aggregate", {}).get("label", "unknown")
         turn = AgentTurn(
             role="research",
             action="retrieve_context",
@@ -418,6 +433,12 @@ class AgentsService:
             "turn_roles": [turn.role for turn in turns],
             "durations_ms": [round(turn.duration_ms(), 2) for turn in turns],
         }
+        privilege = traces.get("privilege", {})
+        telemetry["privileged_docs"] = sum(
+            1 for item in privilege.get("decisions", []) if item.get("label") == "privileged"
+        )
+        telemetry["privilege_label"] = privilege.get("aggregate", {}).get("label", "unknown")
+        telemetry["privilege_score"] = privilege.get("aggregate", {}).get("score", 0.0)
         telemetry["total_duration_ms"] = round(sum(telemetry["durations_ms"]), 2)
         telemetry["sequence_valid"] = telemetry["turn_roles"] == ["research", "forensics"]
         return telemetry

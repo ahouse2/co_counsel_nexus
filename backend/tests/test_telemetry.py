@@ -295,6 +295,8 @@ def test_retrieval_instrumentation_records_spans_and_metrics(
     assert query_span.attributes["retrieval.page"] == 1
     assert query_span.attributes["retrieval.page_size"] == 1
     assert query_span.attributes["retrieval.has_evidence"] is True
+    assert query_span.attributes["retrieval.privilege.label"] == "non_privileged"
+    assert query_span.attributes["retrieval.privilege.flagged"] == 0
 
     vector_span = next(span for span in harness.retrieval.tracer.spans if span.name == "retrieval.vector_search")
     assert vector_span.attributes["retrieval.vector.count"] == 1
@@ -307,6 +309,8 @@ def test_retrieval_instrumentation_records_spans_and_metrics(
                 "filter_source": "any",
                 "filter_entity": False,
                 "has_evidence": True,
+                "privilege_label": "non_privileged",
+                "privilege_flagged": False,
             },
         )
     ]
