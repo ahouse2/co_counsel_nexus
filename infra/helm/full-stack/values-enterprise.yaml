@@ -1,0 +1,54 @@
+api:
+  replicas: 3
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+neo4j:
+  resources:
+    requests:
+      cpu: "1"
+      memory: "4Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+  heap:
+    init: 4Gi
+    max: 8Gi
+
+qdrant:
+  resources:
+    requests:
+      cpu: "1"
+      memory: "4Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+stt:
+  gpu:
+    enabled: true
+
+tts:
+  gpu:
+    enabled: true
+
+telemetry:
+  enabled: true
+  grafana:
+    enabled: true
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+
+backup:
+  schedule: "0 1 * * *"
+  retentionDays: 30

@@ -1,0 +1,125 @@
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+rbac:
+  create: true
+  additionalRules: []
+
+secrets:
+  create: true
+  existingSecret: ""
+  data:
+    neo4jPassword: securepassword
+    grafanaAdminPassword: change-me-now
+    apiJwtSecret: change-this-jwt-secret
+
+storage:
+  className: ""
+  documents:
+    size: 50Gi
+  graphs:
+    size: 50Gi
+  telemetry:
+    size: 10Gi
+  backups:
+    size: 50Gi
+  models:
+    size: 100Gi
+  neo4j:
+    size: 100Gi
+  qdrant:
+    size: 100Gi
+  grafana:
+    size: 20Gi
+
+api:
+  image:
+    repository: ghcr.io/ninthoctopusmitten/api
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources: {}
+  env:
+    TELEMETRY_ENABLED: "true"
+    TELEMETRY_OTLP_ENDPOINT: ""
+    TELEMETRY_OTLP_INSECURE: "true"
+    TELEMETRY_ENVIRONMENT: enterprise
+    NEO4J_URI: ""
+    NEO4J_USER: neo4j
+    QDRANT_URL: ""
+    STT_SERVICE_URL: ""
+    TTS_SERVICE_URL: ""
+    DOCUMENT_STORAGE_PATH: /var/cocounsel/documents
+    GRAPH_SNAPSHOT_PATH: /var/cocounsel/graphs
+    TELEMETRY_BUFFER_PATH: /var/cocounsel/telemetry
+    HUGGINGFACE_HUB_CACHE: /var/cocounsel/models/huggingface
+    WHISPER_MODEL_PATH: /var/cocounsel/models/whisper
+    TTS_MODEL_PATH: /var/cocounsel/models/tts
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+neo4j:
+  image: neo4j:5.20
+  resources: {}
+  heap:
+    init: 2Gi
+    max: 4Gi
+
+qdrant:
+  image: qdrant/qdrant:latest
+  resources: {}
+
+stt:
+  image: ghcr.io/guillaumekln/faster-whisper-server:latest
+  model: openai/whisper-large-v2
+  device: cpu
+  beamSize: 5
+  outputLanguage: en
+  replicas: 1
+  resources: {}
+  gpu:
+    enabled: false
+    resourceLimits:
+      "nvidia.com/gpu": 1
+
+tts:
+  image: rhasspy/larynx:latest
+  voice: en-us-libritts-high
+  replicas: 1
+  resources: {}
+  gpu:
+    enabled: false
+    resourceLimits:
+      "nvidia.com/gpu": 1
+
+telemetry:
+  enabled: true
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.98.0
+    resources: {}
+  grafana:
+    enabled: true
+    image: grafana/grafana-oss:11.1.4
+    adminUser: admin
+    resources: {}
+
+backup:
+  enabled: true
+  image: alpine:3.20
+  schedule: "0 1 * * *"
+  retentionDays: 30
+  resources: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []

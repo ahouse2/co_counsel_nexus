@@ -1,0 +1,71 @@
+{{- $name := include "full-stack.fullname" . -}}
+{{- $resources := deepCopy (default (dict) .Values.stt.resources) -}}
+{{- if .Values.stt.gpu.enabled }}
+  {{- if not (hasKey $resources "limits") }}
+    {{- $_ := set $resources "limits" (dict) }}
+  {{- end }}
+  {{- range $k, $v := .Values.stt.gpu.resourceLimits }}
+    {{- $_ := set $resources.limits $k $v }}
+  {{- end }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}-stt
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.stt.replicas }}
+  selector:
+    matchLabels:
+      {{- include "full-stack.selectorLabels" . | nindent 6 }}
+      component: stt
+  template:
+    metadata:
+      labels:
+        {{- include "full-stack.labels" . | nindent 8 }}
+        component: stt
+    spec:
+      containers:
+        - name: stt
+          image: {{ .Values.stt.image }}
+          ports:
+            - containerPort: 9000
+              name: http
+          env:
+            - name: ASR_MODEL
+              value: {{ .Values.stt.model | quote }}
+            - name: ASR_DEVICE
+              value: {{ .Values.stt.device | quote }}
+            - name: ASR_BEAM_SIZE
+              value: {{ .Values.stt.beamSize | quote }}
+            - name: ASR_OUTPUT_LANGUAGE
+              value: {{ .Values.stt.outputLanguage | quote }}
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /models/huggingface
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          {{- if $resources }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ $name }}-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-stt
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "full-stack.selectorLabels" . | nindent 4 }}
+    component: stt
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http

@@ -1,0 +1,63 @@
+{{- if .Values.backup.enabled }}
+{{- $name := include "full-stack.fullname" . -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}-storage-backup
+  labels:
+    {{- include "full-stack.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "full-stack.labels" . | nindent 12 }}
+            component: backup
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ default (include "full-stack.fullname" .) .Values.serviceAccount.name }}
+          containers:
+            - name: storage-backup
+              image: {{ .Values.backup.image }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  if ! command -v tar >/dev/null; then
+                    apk add --no-cache tar zstd >/dev/null
+                  fi
+                  ts=$(date -u +%Y%m%dT%H%M%SZ)
+                  archive=/backups/full-stack_${ts}.tar.zst
+                  tar --sort=name --use-compress-program="zstd -T0" -cf "$archive" -C /data documents graphs telemetry
+                  find /backups -name 'full-stack_*.tar.zst' -mtime +{{ .Values.backup.retentionDays }} -print -delete
+              volumeMounts:
+                - name: documents
+                  mountPath: /data/documents
+                  readOnly: true
+                - name: graphs
+                  mountPath: /data/graphs
+                  readOnly: true
+                - name: telemetry
+                  mountPath: /data/telemetry
+                  readOnly: true
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: documents
+              persistentVolumeClaim:
+                claimName: {{ $name }}-documents
+            - name: graphs
+              persistentVolumeClaim:
+                claimName: {{ $name }}-graphs
+            - name: telemetry
+              persistentVolumeClaim:
+                claimName: {{ $name }}-telemetry
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ $name }}-backups
+{{- end }}
