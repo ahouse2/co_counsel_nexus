@@ -36,6 +36,7 @@ from .models.api import (
     TimelineResponse,
 )
 from .services.agents import AgentsService, get_agents_service
+from .services.errors import WorkflowException, http_status_for_error
 from .services.forensics import ForensicsService, get_forensics_service
 from .services.graph import GraphService, get_graph_service
 from .services.ingestion import (
@@ -67,6 +68,11 @@ settings = get_settings()
 setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.add_middleware(MTLSMiddleware, config=create_mtls_config())
+
+
+def _raise_workflow_exception(exc: WorkflowException) -> None:
+    status_code = exc.status_code or http_status_for_error(exc.error)
+    raise HTTPException(status_code=status_code, detail=exc.error.to_dict()) from exc
 
 
 @app.on_event("startup")
@@ -180,6 +186,8 @@ def query(
             filters=filters or None,
             rerank=rerank,
         )
+    except WorkflowException as exc:
+        _raise_workflow_exception(exc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     latency_ms = (time.perf_counter() - started) * 1000.0
@@ -215,6 +223,8 @@ def timeline(
 ) -> TimelineResponse:
     try:
         result = service.list_events(cursor=cursor, limit=limit, from_ts=from_ts, to_ts=to_ts, entity=entity)
+    except WorkflowException as exc:
+        _raise_workflow_exception(exc)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -346,6 +356,11 @@ def agents_run(
         },
     )
     return payload_model
+    try:
+        response = service.run_case(payload.case_id, payload.question, top_k=top_k, principal=principal)
+    except WorkflowException as exc:
+        _raise_workflow_exception(exc)
+    return AgentRunResponse(**response)
 
 
 @app.get("/agents/threads/{thread_id}", response_model=AgentRunResponse)

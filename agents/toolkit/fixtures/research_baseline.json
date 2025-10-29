@@ -1,0 +1,98 @@
+{
+  "name": "knowledgeops_research_baseline",
+  "version": "2025.11.18",
+  "agent_type": "research",
+  "seed": 732,
+  "metadata": {
+    "jurisdiction": "Delaware",
+    "knowledge_ops_programme": "Acquisition Timeline"
+  },
+  "cases": [
+    {
+      "id": "acme_beacon_timeline",
+      "question": "Summarise the key milestones and risks for Acme Corporation's acquisition of Beacon Analytics.",
+      "context": "Board minutes, diligence memos, and regulator correspondence outline a four-month closing window with integration dependencies tied to the Beacon data warehouse.",
+      "documents": [
+        {
+          "id": "doc-001",
+          "title": "Acme Board Approval — 12 January 2023",
+          "snippets": [
+            "Board unanimously approves Beacon Analytics acquisition contingent on privacy remediation by 31 March 2023.",
+            "Legal flagged need for SEC Form 8-K within four business days."
+          ],
+          "source": "local"
+        },
+        {
+          "id": "doc-002",
+          "title": "Beacon Integration Memo — 24 February 2023",
+          "snippets": [
+            "Data warehouse migration requires dual-run from 1 April through 30 April; customer consent refresh queued for mid-March.",
+            "Risk log notes outstanding DPIA for EU data subjects."
+          ],
+          "source": "local"
+        },
+        {
+          "id": "doc-003",
+          "title": "FTC Comment Letter — 15 March 2023",
+          "snippets": [
+            "FTC requests confirmation that Beacon data minimisation controls align with prior consent decree.",
+            "Response deadline set for 31 March 2023."
+          ],
+          "source": "websearch"
+        }
+      ],
+      "expected": {
+        "contains": [
+          "January 2023 board approval",
+          "March 2023 regulatory response",
+          "April 2023 integration window"
+        ],
+        "forbidden": ["privileged draft"],
+        "minimum_citations": 3,
+        "required_documents": ["doc-001", "doc-002"],
+        "max_privileged_documents": 0,
+        "max_latency_ms": 1600
+      },
+      "metadata": {
+        "tags": ["timeline", "regulatory"],
+        "kpi": "Closing readiness"
+      }
+    },
+    {
+      "id": "acme_financial_synergies",
+      "question": "Describe expected financial synergies, integration checkpoints, and outstanding risks for the Acme/Beacon merger.",
+      "context": "Finance integration working group documented synergy targets and dependencies on unified analytics access while compliance logged open DPIA tasks.",
+      "documents": [
+        {
+          "id": "doc-101",
+          "title": "Synergy Forecast — 20 February 2023",
+          "snippets": [
+            "Run-rate savings of $12M annually contingent on cloud vendor consolidation by Q4 2023.",
+            "Customer churn mitigation requires joint success team in place by 1 May 2023."
+          ],
+          "source": "local"
+        },
+        {
+          "id": "doc-102",
+          "title": "Compliance Risk Register — 02 March 2023",
+          "snippets": [
+            "Outstanding DPIA for Beacon EU data flagged as high severity; remediation owner assigned to Privacy Office.",
+            "Privileged legal memo referenced but not attached."
+          ],
+          "source": "local"
+        }
+      ],
+      "expected": {
+        "contains": ["$12M", "Q4 2023", "DPIA"],
+        "minimum_citations": 2,
+        "required_documents": ["doc-101", "doc-102"],
+        "max_privileged_documents": 0,
+        "max_latency_ms": 1400
+      },
+      "metadata": {
+        "tags": ["synergy", "risk"],
+        "kpi": "Integration scorecard"
+      }
+    }
+  ]
+}

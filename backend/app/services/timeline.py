@@ -11,6 +11,7 @@ from opentelemetry import metrics
 from ..config import get_settings
 from ..storage.timeline_store import TimelineStore, TimelineEvent
 from ..utils.triples import normalise_entity_id
+from .errors import WorkflowAbort, WorkflowComponent, WorkflowError, WorkflowSeverity
 from .graph import GraphNode, GraphService, get_graph_service
 
 _meter = metrics.get_meter(__name__)
@@ -71,7 +72,17 @@ class TimelineService:
         to_ts = self._ensure_naive_timestamp(to_ts, "to_ts")
         bounded_limit = self._bounded_limit(limit)
         if from_ts and to_ts and from_ts > to_ts:
-            raise ValueError("from_ts must be earlier than to_ts")
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.TIMELINE,
+                    code="TIMELINE_INVALID_RANGE",
+                    message="from_ts must be earlier than to_ts",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                    context={"from_ts": from_ts.isoformat(), "to_ts": to_ts.isoformat()},
+                ),
+                status_code=400,
+            )
 
         events = self.store.read_all()
         enriched_events, stats = self._enrich_events(events)
@@ -133,7 +144,17 @@ class TimelineService:
         tzinfo = value.tzinfo
         if tzinfo is None or tzinfo.utcoffset(value) is None:
             return value.replace(tzinfo=None)
-        raise ValueError(f"{label} must be timezone-naive")
+        raise WorkflowAbort(
+            WorkflowError(
+                component=WorkflowComponent.TIMELINE,
+                code="TIMELINE_TIMEZONE_AWARE",
+                message=f"{label} must be timezone-naive",
+                severity=WorkflowSeverity.ERROR,
+                retryable=False,
+                context={"label": label},
+            ),
+            status_code=400,
+        )
 
     def _filter_by_entity(self, events: Iterable[TimelineEvent], entity: str) -> List[TimelineEvent]:
         doc_ids = self._collect_citations(events)
@@ -195,7 +216,17 @@ class TimelineService:
             ts_str, event_id = raw.split("|", 1)
             timestamp = datetime.fromisoformat(ts_str)
         except (ValueError, binascii.Error) as exc:
-            raise ValueError("Invalid cursor") from exc
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.TIMELINE,
+                    code="TIMELINE_CURSOR_INVALID",
+                    message="Invalid cursor",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                    context={"cursor": cursor},
+                ),
+                status_code=400,
+            ) from exc
         return timestamp, event_id
 
     @staticmethod

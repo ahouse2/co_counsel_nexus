@@ -128,6 +128,14 @@ class IngestionService:
                 detail="At least one source must be provided",
             )
 
+        connectors = [
+            (
+                build_connector(source.type, self.settings, self.credential_registry, self.logger),
+                source,
+            )
+            for source in request.sources
+        ]
+
         job_id = str(uuid4())
         submitted_at = datetime.now(timezone.utc)
         actor = self._actor_from_principal(principal)
@@ -136,6 +144,7 @@ class IngestionService:
 
         for index, source in enumerate(request.sources):
             connector = build_connector(source.type, self.settings, self.credential_registry, self.logger)
+        for connector, source in connectors:
             try:
                 connector.preflight(source)
             except HTTPException as exc:
@@ -158,6 +167,25 @@ class IngestionService:
                     metadata={"source_type": source.type, "index": index},
                     actor=actor,
                     severity="error",
+                self._record_error(
+                    job_record,
+                    {
+                        "code": str(exc.status_code),
+                        "message": message,
+                        "source": source.type,
+                    },
+                )
+                self._transition_job(job_record, "failed")
+                self._touch_job(job_record)
+                self.job_store.write_job(job_id, job_record)
+                severity = "error" if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR else "warning"
+                self._audit_job_event(
+                    job_id,
+                    action="ingest.job.preflight_failed",
+                    outcome="error",
+                    metadata={"source_type": source.type, "status_code": exc.status_code},
+                    actor=actor,
+                    severity=severity,
                 )
                 return job_id
 
