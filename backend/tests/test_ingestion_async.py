@@ -1,5 +1,4 @@
 import threading
-import threading
 from pathlib import Path
 
 import pytest
@@ -176,4 +175,56 @@ def test_ingestion_pipeline_emits_ocr_metadata(
     assert stored.get("chunk_count", 0) > 0
     assert stored.get("entity_labels"), "Entity labels should be captured"
     assert stored.get("ocr_confidence") is not None
+    ingestion_module.shutdown_ingestion_worker(timeout=1.0)
+
+
+def test_ingestion_emits_queue_and_status_metrics(
+    client: TestClient,
+    sample_workspace: Path,
+    auth_headers_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ingestion_module.shutdown_ingestion_worker(timeout=1.0)
+
+    queue_events: list[tuple[str, str, dict[str, object]]] = []
+    transitions: list[tuple[str, str | None, str]] = []
+
+    def capture_queue_event(job_id: str, event: str, *, reason: str | None = None) -> None:
+        payload: dict[str, object] = {"event": event}
+        if reason:
+            payload["reason"] = reason
+        queue_events.append((job_id, event, payload))
+
+    def capture_transition(job_id: str, previous: str | None, new: str) -> None:
+        transitions.append((job_id, previous, new))
+
+    monkeypatch.setattr(ingestion_module, "record_queue_event", capture_queue_event)
+    monkeypatch.setattr(ingestion_module, "record_job_transition", capture_transition)
+
+    headers = auth_headers_factory()
+    status_headers = auth_headers_factory(
+        scopes=["ingest:status"],
+        roles=["CaseCoordinator"],
+        audience=["co-counsel.ingest"],
+    )
+
+    response = client.post(
+        "/ingest",
+        json={"sources": [{"type": "local", "path": str(sample_workspace)}]},
+        headers=headers,
+    )
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+
+    worker = ingestion_module.get_ingestion_worker()
+    assert worker.wait_for_idle(timeout=10.0)
+
+    status_response = client.get(f"/ingest/{job_id}", headers=status_headers)
+    assert status_response.status_code == 200
+
+    assert any(event == "enqueued" for _, event, _ in queue_events)
+    assert any(event == "claimed" for _, event, _ in queue_events)
+    assert any(new == "succeeded" for _, _, new in transitions)
+    assert any(previous == "queued" and new == "running" for _, previous, new in transitions)
+
     ingestion_module.shutdown_ingestion_worker(timeout=1.0)

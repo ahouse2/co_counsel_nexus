@@ -36,6 +36,7 @@ from .ingestion_worker import (
 )
 from .timeline import EnrichmentStats, TimelineService
 from .vector import VectorService, get_vector_service
+from backend.ingestion.metrics import record_job_transition, record_queue_event
 from backend.ingestion.loader_registry import LoaderRegistry
 from backend.ingestion.ocr import OcrEngine
 from backend.ingestion.pipeline import run_ingestion_pipeline
@@ -235,6 +236,7 @@ class IngestionService:
             worker.enqueue(job_id, payload)
         except IngestionJobAlreadyQueued:
             self.logger.info("Job already queued", extra={"job_id": job_id})
+            record_queue_event(job_id, "duplicate")
             self._audit_job_event(
                 job_id,
                 action="ingest.queue.duplicate",
@@ -254,6 +256,7 @@ class IngestionService:
             )
             self._transition_job(job_record, "failed")
             self.job_store.write_job(job_id, job_record)
+            record_queue_event(job_id, "rejected", reason="queue_full")
             self._audit_job_event(
                 job_id,
                 action="ingest.queue.saturated",
@@ -269,6 +272,7 @@ class IngestionService:
         else:
             self._touch_job(job_record)
             self.job_store.write_job(job_id, job_record)
+            record_queue_event(job_id, "enqueued")
             self._audit_job_event(
                 job_id,
                 action="ingest.queue.enqueued",
@@ -300,6 +304,7 @@ class IngestionService:
             metadata={"status": status_value},
             actor=self._job_actor(job_record),
         )
+        record_queue_event(job_id, "claimed")
         if status_value in {"succeeded", "failed", "cancelled"}:
             self.logger.info(
                 "Skipping ingestion job with terminal status",
@@ -907,6 +912,7 @@ class IngestionService:
         previous = job_record.get("status")
         job_record["status"] = status_value
         self._touch_job(job_record)
+        record_job_transition(str(job_record.get("job_id", "")), previous, status_value)
         if previous == status_value:
             return
         severity = "info"
