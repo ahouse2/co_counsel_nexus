@@ -28,7 +28,7 @@ export function ScenarioConfigurator(): JSX.Element {
     return { byId, byVoice };
   }, [state.scenario]);
 
-  const handleScenarioChange = async (event: FormEvent<HTMLSelectElement>) => {
+  const handleScenarioChange = async (event: FormEvent<HTMLSelectElement>): Promise<void> => {
     const value = event.currentTarget.value;
     if (!value) {
       return;
@@ -36,12 +36,12 @@ export function ScenarioConfigurator(): JSX.Element {
     await selectScenario(value);
   };
 
-  const handleRun = async (event: FormEvent<HTMLFormElement>) => {
+  const handleRun = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     await runScenario();
   };
 
-  const handlePreview = async (participantId: string) => {
+  const handlePreview = async (participantId: string): Promise<void> => {
     await previewVoice(participantId, voiceSample);
   };
 

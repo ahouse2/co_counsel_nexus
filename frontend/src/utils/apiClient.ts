@@ -172,6 +172,7 @@ export async function synthesiseSpeech(payload: {
     throw new Error(`TTS request failed (${response.status}): ${detail}`);
   }
   return (await response.json()) as TextToSpeechResponsePayload;
+}
 export async function fetchKnowledgeLessons(): Promise<KnowledgeLessonListResponse> {
   const response = await fetch(withBase('/knowledge/lessons'));
   if (!response.ok) {
@@ -252,6 +253,7 @@ export async function updateKnowledgeBookmark(
     throw new Error(`Failed to update bookmark (${response.status})`);
   }
   return (await response.json()) as KnowledgeBookmarkResponse;
+}
 export async function fetchVoicePersonas(): Promise<VoicePersona[]> {
   const response = await fetch(withBase('/voice/personas'));
   if (response.status === 401) {

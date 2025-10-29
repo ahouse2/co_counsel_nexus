@@ -15,6 +15,7 @@ vi.mock('@/utils/apiClient', () => ({
     meta: { cursor: null, limit: 20, has_more: false },
   })),
   buildStreamUrl: vi.fn(() => 'ws://localhost/mock'),
+  fetchVoicePersonas: vi.fn(async () => []),
 }));
 
 vi.mock('@/hooks/useWebSocket', () => ({

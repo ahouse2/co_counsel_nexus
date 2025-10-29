@@ -15,7 +15,6 @@ import {
   ScenarioMetadata,
   ScenarioRunRequestPayload,
   ScenarioRunResponse,
-  ScenarioVariable,
   TextToSpeechResponsePayload,
 } from '@/types';
 import {
@@ -239,7 +238,7 @@ export function ScenarioProvider({ children }: { children: ReactNode }): JSX.Ele
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    const load = async (): Promise<void> => {
       dispatch({ type: 'metadata:loading' });
       try {
         const response: ScenarioListResponse = await fetchScenarioMetadata();

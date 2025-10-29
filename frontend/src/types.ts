@@ -257,6 +257,7 @@ export interface TextToSpeechResponsePayload {
   base64: string;
   cache_hit: boolean;
   sha256: string;
+}
 export interface KnowledgeMedia {
   type: string;
   title: string;
@@ -331,6 +332,7 @@ export interface KnowledgeBookmarkResponse {
   lesson_id: string;
   bookmarked: boolean;
   bookmarks: string[];
+}
 export interface VoicePersona {
   persona_id: string;
   label: string;
