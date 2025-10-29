@@ -14,22 +14,34 @@ interface UseWebSocketOptions {
   onError: (error: Error) => void;
 }
 
+interface ManagedSocket extends WebSocket {
+  shouldReconnect?: boolean;
+}
+
 export function useWebSocket({
   url,
   onToken,
   onDone,
   onError,
 }: UseWebSocketOptions): { start: (body: Record<string, unknown>) => void; stop: () => void } {
-  const socketRef = useRef<WebSocket | null>(null);
+  const socketRef = useRef<ManagedSocket | null>(null);
   const reconnectRef = useRef<number>(0);
+  const lastBodyRef = useRef<Record<string, unknown> | null>(null);
 
   const start = useCallback<(body: Record<string, unknown>) => void>(
     (body) => {
       try {
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        lastBodyRef.current = body;
+        if (
+          socketRef.current &&
+          (socketRef.current.readyState === WebSocket.OPEN ||
+            socketRef.current.readyState === WebSocket.CONNECTING)
+        ) {
+          socketRef.current.shouldReconnect = false;
           socketRef.current.close(1000, 'reset');
         }
-        const socket = new WebSocket(url);
+        const socket = new WebSocket(url) as ManagedSocket;
+        socket.shouldReconnect = true;
         socketRef.current = socket;
         socket.onopen = () => {
           reconnectRef.current = 0;
@@ -53,10 +65,17 @@ export function useWebSocket({
         socket.onerror = () => {
           onError(new Error('WebSocket error'));
         };
-        socket.onclose = () => {
-          if (reconnectRef.current < 2) {
-            reconnectRef.current += 1;
-            setTimeout(() => start(body), reconnectRef.current * 500);
+        socket.onclose = (event) => {
+          if (socketRef.current === socket) {
+            socketRef.current = null;
+          }
+          const isCleanClosure = event.code === 1000 || event.code === 1001;
+          if (socket.shouldReconnect && !isCleanClosure && lastBodyRef.current) {
+            if (reconnectRef.current < 2) {
+              reconnectRef.current += 1;
+              const retryPayload = lastBodyRef.current;
+              setTimeout(() => start(retryPayload), reconnectRef.current * 500);
+            }
           }
         };
       } catch (error) {
@@ -68,8 +87,13 @@ export function useWebSocket({
 
   const stop = useCallback((): void => {
     if (socketRef.current) {
-      socketRef.current.close(1000, 'complete');
+      socketRef.current.shouldReconnect = false;
+      const socket = socketRef.current;
       socketRef.current = null;
+      lastBodyRef.current = null;
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close(1000, 'complete');
+      }
     }
   }, []);
 
