@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 interface EvidenceModalProps {
@@ -9,7 +9,7 @@ interface EvidenceModalProps {
 
 export function EvidenceModal({ title, onClose, children }: EvidenceModalProps): JSX.Element | null {
   const modalRoot = document.getElementById('modal-root');
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedRef = useRef<Element | null>(null);
 
@@ -18,16 +18,16 @@ export function EvidenceModal({ title, onClose, children }: EvidenceModalProps):
       return undefined;
     }
     previouslyFocusedRef.current = document.activeElement;
-    const container = document.createElement('div');
-    container.className = 'evidence-modal';
-    modalRoot.appendChild(container);
-    containerRef.current = container;
+    const containerElement = document.createElement('div');
+    containerElement.className = 'evidence-modal';
+    modalRoot.appendChild(containerElement);
+    setContainer(containerElement);
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') {
         onClose();
       }
       if (event.key === 'Tab') {
-        const scope = dialogRef.current ?? container;
+        const scope = dialogRef.current ?? containerElement;
         const focusableElements = scope.querySelectorAll<HTMLElement>(
           'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])'
         );
@@ -43,7 +43,7 @@ export function EvidenceModal({ title, onClose, children }: EvidenceModalProps):
         }
       }
     };
-    container.addEventListener('keydown', onKeyDown);
+    containerElement.addEventListener('keydown', onKeyDown);
     requestAnimationFrame(() => {
       const focusTarget = dialogRef.current?.querySelector<HTMLElement>(
         'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])'
@@ -51,15 +51,18 @@ export function EvidenceModal({ title, onClose, children }: EvidenceModalProps):
       focusTarget?.focus();
     });
     return () => {
-      container.removeEventListener('keydown', onKeyDown);
-      modalRoot.removeChild(container);
+      containerElement.removeEventListener('keydown', onKeyDown);
+      if (modalRoot.contains(containerElement)) {
+        modalRoot.removeChild(containerElement);
+      }
+      setContainer((current) => (current === containerElement ? null : current));
       if (previouslyFocusedRef.current instanceof HTMLElement) {
         previouslyFocusedRef.current.focus();
       }
     };
   }, [modalRoot, onClose]);
 
-  if (!modalRoot || !containerRef.current) {
+  if (!modalRoot || !container) {
     return null;
   }
 
@@ -81,5 +84,5 @@ export function EvidenceModal({ title, onClose, children }: EvidenceModalProps):
     </div>
   );
 
-  return createPortal(modalContent, containerRef.current);
+  return createPortal(modalContent, container);
 }
