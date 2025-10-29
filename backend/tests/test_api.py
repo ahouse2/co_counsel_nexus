@@ -89,6 +89,9 @@ def test_ingestion_and_retrieval(
     assert any(edge["type"] == "ACQUIRED" for edge in graph_edges)
     assert traces["forensics"]
     assert len(traces["vector"]) <= meta["page_size"]
+    privilege = traces["privilege"]
+    assert privilege["aggregate"]["label"] in {"non_privileged", "privileged", "unknown"}
+    assert isinstance(privilege["decisions"], list)
 
     timeline_response = client.get("/timeline", headers=headers)
     assert timeline_response.status_code == 200
