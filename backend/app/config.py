@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     manifest_retention_days: int = Field(default=30)
     audit_log_path: Path = Field(default=Path("storage/audit.log"))
     billing_usage_path: Path = Field(default=Path("storage/billing/usage.json"))
+    knowledge_catalog_path: Path = Field(default=Path("docs/knowledge/catalog.json"))
+    knowledge_content_dir: Path = Field(default=Path("docs/knowledge/best_practices"))
+    knowledge_progress_path: Path = Field(default=Path("storage/knowledge/progress.json"))
 
     privilege_classifier_threshold: float = Field(default=0.68)
 
@@ -64,6 +67,7 @@ class Settings(BaseSettings):
     security_audience_agents: str = Field(default="co-counsel.agents")
     security_audience_billing: str = Field(default="co-counsel.billing")
     security_audience_dev_agent: str = Field(default="co-counsel.dev-agent")
+    security_audience_knowledge: str = Field(default="co-counsel.knowledge")
 
     dev_agent_validation_commands: tuple[tuple[str, ...], ...] = Field(
         default=(
@@ -148,6 +152,9 @@ class Settings(BaseSettings):
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
         self.billing_usage_path.parent.mkdir(parents=True, exist_ok=True)
+        self.knowledge_catalog_path.parent.mkdir(parents=True, exist_ok=True)
+        self.knowledge_content_dir.mkdir(parents=True, exist_ok=True)
+        self.knowledge_progress_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

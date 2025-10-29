@@ -1,6 +1,11 @@
 import {
   BillingPlanListResponse,
   BillingUsageResponse,
+  KnowledgeBookmarkResponse,
+  KnowledgeLessonDetail,
+  KnowledgeLessonListResponse,
+  KnowledgeProgressUpdateResponse,
+  KnowledgeSearchResponse,
   OnboardingSubmissionPayload,
   OnboardingSubmissionResponse,
   QueryResponse,
@@ -108,4 +113,86 @@ export function buildStreamUrl(): string {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/query/stream';
   return url.toString();
+}
+
+export async function fetchKnowledgeLessons(): Promise<KnowledgeLessonListResponse> {
+  const response = await fetch(withBase('/knowledge/lessons'));
+  if (!response.ok) {
+    throw new Error(`Failed to load knowledge lessons (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeLessonListResponse;
+}
+
+export async function fetchKnowledgeLesson(lessonId: string): Promise<KnowledgeLessonDetail> {
+  const response = await fetch(withBase(`/knowledge/lessons/${lessonId}`));
+  if (response.status === 404) {
+    throw new Error('Lesson not found');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to load lesson ${lessonId} (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeLessonDetail;
+}
+
+type KnowledgeSearchPayload = {
+  query: string;
+  limit?: number;
+  filters?: {
+    tags?: string[];
+    difficulty?: string[];
+    media_types?: string[];
+  };
+};
+
+export async function searchKnowledge(payload: KnowledgeSearchPayload): Promise<KnowledgeSearchResponse> {
+  const response = await fetch(withBase('/knowledge/search'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: payload.query,
+      limit: payload.limit ?? 10,
+      filters: payload.filters,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Knowledge search failed (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeSearchResponse;
+}
+
+export async function updateKnowledgeProgress(
+  lessonId: string,
+  sectionId: string,
+  completed = true
+): Promise<KnowledgeProgressUpdateResponse> {
+  const response = await fetch(withBase(`/knowledge/lessons/${lessonId}/progress`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section_id: sectionId, completed }),
+  });
+  if (response.status === 404) {
+    throw new Error('Lesson section not found');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to update progress (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeProgressUpdateResponse;
+}
+
+export async function updateKnowledgeBookmark(
+  lessonId: string,
+  bookmarked: boolean
+): Promise<KnowledgeBookmarkResponse> {
+  const response = await fetch(withBase(`/knowledge/lessons/${lessonId}/bookmark`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bookmarked }),
+  });
+  if (response.status === 404) {
+    throw new Error('Lesson not found');
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to update bookmark (${response.status})`);
+  }
+  return (await response.json()) as KnowledgeBookmarkResponse;
 }
