@@ -236,6 +236,7 @@ class AgentsService:
             "notes": [],
             "status": "pending",
             "sequence_valid": False,
+            "hand_offs": [],
         }
 
     def _normalise_thread_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
