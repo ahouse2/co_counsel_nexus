@@ -812,6 +812,13 @@ def scenarios_run(
     )
 
 
+def _tts_service_dependency() -> TextToSpeechService:
+    service = get_tts_service(optional=True)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="TTS service not configured")
+    return service
+
+
 @app.post("/tts/speak", response_model=TextToSpeechResponse)
 def tts_speak(
     payload: TextToSpeechRequest,
@@ -1081,10 +1088,3 @@ def _scenario_run_options(payload: ScenarioRunRequestModel) -> ScenarioRunOption
         participants=payload.participants,
         use_tts=payload.enable_tts,
     )
-
-
-def _tts_service_dependency() -> TextToSpeechService:
-    service = get_tts_service(optional=True)
-    if service is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="TTS service not configured")
-    return service

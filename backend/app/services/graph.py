@@ -5,7 +5,17 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from neo4j import GraphDatabase
+try:  # pragma: no cover - optional dependency for runtime graph enrichment
+    from neo4j import GraphDatabase
+except ModuleNotFoundError:  # pragma: no cover - fallback for tests
+    class _StubGraphDatabase:
+        @staticmethod
+        def driver(*args, **kwargs):  # noqa: D401 - matches neo4j API
+            raise ModuleNotFoundError(
+                "neo4j driver is unavailable; install neo4j package to enable graph features"
+            )
+
+    GraphDatabase = _StubGraphDatabase  # type: ignore[assignment]
 
 from ..config import get_settings
 from .errors import WorkflowAbort, WorkflowComponent, WorkflowError, WorkflowSeverity
@@ -359,13 +369,19 @@ class GraphService:
         self._community_cache: GraphCommunitySummary | None = None
         self._nx_graph = nx.DiGraph() if nx is not None else None
         if self.mode == "neo4j":
-            self.driver = GraphDatabase.driver(
-                self.settings.neo4j_uri,
-                auth=(self.settings.neo4j_user, self.settings.neo4j_password),
-            )
-            self._ensure_constraints()
-            self._seed_ontology()
-        else:
+            try:
+                self.driver = GraphDatabase.driver(
+                    self.settings.neo4j_uri,
+                    auth=(self.settings.neo4j_user, self.settings.neo4j_password),
+                )
+            except ModuleNotFoundError:
+                self.mode = "memory"
+                self._nodes = {}
+                self._edges = {}
+            else:
+                self._ensure_constraints()
+                self._seed_ontology()
+        if self.mode == "memory":
             self._nodes: Dict[str, GraphNode] = {}
             self._edges: Dict[Tuple[str, str, str, str | None], GraphEdge] = {}
             self._seed_ontology()
