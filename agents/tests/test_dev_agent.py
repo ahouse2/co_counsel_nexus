@@ -6,6 +6,8 @@ from subprocess import CompletedProcess
 from typing import List, Sequence, Tuple
 
 import pytest
+
+pytest.importorskip("fastapi")
 from fastapi import HTTPException, status
 
 from agents.toolkit.sandbox import (

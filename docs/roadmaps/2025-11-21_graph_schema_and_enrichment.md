@@ -16,6 +16,8 @@
 - `GraphService.get_knowledge_index()` lazily initialises a LlamaIndex `KnowledgeGraphIndex` bound to the active store; node/edge
   registrations call `_sync_knowledge_index` so tooling such as text-to-Cypher and KG agents stay fresh without manual rebuilds.
 - Graph service exposes `run_cypher`, `describe_schema`, and text-to-Cypher prompt scaffolding for agent workflows.
+- `GraphService.text_to_cypher` wraps backend graph stores that implement automated NL → Cypher translation while preserving a
+  safe fallback prompt (agents toolkit exposes this via `graph_explorer.text_to_cypher`).
 - Unified subgraph export via `GraphService.subgraph` standardises node/edge payloads for retrieval traces and UI panes.
 
 ## Community Detection Pipeline

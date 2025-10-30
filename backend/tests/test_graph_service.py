@@ -126,6 +126,35 @@ def test_build_text_to_cypher_prompt(memory_graph: graph_module.GraphService) ->
     assert "Node types" in prompt
 
 
+def test_text_to_cypher_falls_back_to_prompt(memory_graph: graph_module.GraphService) -> None:
+    result = memory_graph.text_to_cypher("List entities")
+    assert result.prompt
+    assert result.cypher == ""
+    assert result.used_generator is False
+    assert result.warnings == []
+
+
+def test_text_to_cypher_uses_property_graph_generator(memory_graph: graph_module.GraphService) -> None:
+    class _StubStore:
+        def __init__(self) -> None:
+            self.text_to_cypher_template = "Schema:{schema}\nQ:{question}"
+            self.calls: list[tuple[str, str | None]] = []
+
+        def text_to_cypher(self, question: str, schema: str | None = None) -> dict:
+            self.calls.append((question, schema))
+            return {"cypher": "MATCH (n) RETURN n", "prompt": "custom"}
+
+    stub = _StubStore()
+    memory_graph._property_graph = stub  # type: ignore[attr-defined]
+    memory_graph._text_to_cypher_template = stub.text_to_cypher_template  # type: ignore[attr-defined]
+
+    result = memory_graph.text_to_cypher("List docs")
+    assert result.cypher == "MATCH (n) RETURN n"
+    assert result.prompt == "custom"
+    assert result.used_generator is True
+    assert stub.calls
+
+
 def test_property_graph_store_receives_nodes(memory_graph: graph_module.GraphService) -> None:
     store = memory_graph.get_property_graph_store()
     memory_graph.upsert_document("doc-store", "Store Doc", {})

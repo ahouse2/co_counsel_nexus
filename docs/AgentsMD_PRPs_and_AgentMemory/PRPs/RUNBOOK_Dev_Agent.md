@@ -18,25 +18,32 @@
   - `POST /dev-agent/apply` → execute sandbox validation for a proposal.
 - **RBAC:** `authorize_dev_agent_admin` enforces scope `dev-agent:admin` and roles `PlatformEngineer` or `AutomationService`. Case administrators bypass role checks per Oso policy.
 - **mTLS/OAuth:** Requests must present a trusted client certificate and bearer token; audit metadata captures fingerprint, roles, and scopes for investigations.
+- **Oso Policy:** `backend/app/security/policy.polar` encodes scope/role checks; `dev_agent.admin` resource binds to the admin endpoints. Update the policy when introducing new actions to keep RBAC declarative.
 
-## 4. Sandbox Workflow
+## 4. Backlog Schema & Persistence
+- **Improvement Tasks:** `backend/app/storage/agent_memory_store.py` persists tasks under `improvement_tasks/<task_id>.json` with fields `planner_notes`, `risk_score`, `metadata`, and embedded `proposals`.
+- **Patch Proposals:** Proposals capture `diff`, `summary`, `rationale`, `validation`, `approvals`, and status transitions (`pending` → `validated`/`failed`). The Dev Team executor appends proposals atomically via `AgentMemoryStore.append_proposal`.
+- **Deduplication:** Planner `triage` matches on `feature_request_id` to avoid duplicate backlog entries; updates refresh `title`, `description`, `priority`, and merge metadata/tags.
+- **Audit Coupling:** Validation updates write structured outcomes to `backend/app/utils/audit.py` ledger, referencing `task_id` and `proposal_id` for traceability.
+
+## 5. Sandbox Workflow
 1. **Workspace Fabrication:** Copy repo (including `.git`) into an ephemeral directory under `/tmp/dev-agent-*/workspace`.
 2. **Diff Application:** Apply provided diff via `git apply --whitespace=nowarn`; the result is emitted as a `SandboxCommandResult` even on failure so API consumers receive structured stdout/stderr without exceptions.
 3. **Command Orchestration:** Execute `settings.dev_agent_validation_commands` sequentially. Results capture command, exit code, stdout/stderr, and duration.
 4. **Result Envelope:** Validation results stored on the proposal (`validation`) and surfaced through API responses for operator review.
 
-## 5. Rollback & Remediation
+## 6. Rollback & Remediation
 - **Failed Validation:** Proposal remains `failed`; planner revises diff or splits work. Task remains in `needs_revision` until a succeeding proposal validates.
 - **Manual Rollback:** Operators may purge proposals via filesystem (`improvement_tasks/<task_id>.json`) using `AgentMemoryStore.purge` semantics or craft a superseding proposal.
 - **Audit Repair:** Use `backend/app/utils/audit.py:AuditTrail.verify()` to confirm chain integrity post-incident. Append corrective events referencing the failed hash if tampering detected.
 - **Sandbox Diagnostics:** Retry validation locally by exporting proposal diff and rerunning `SandboxExecutionHarness.validate()` with verbose commands. Store outputs alongside incident ticket.
 
-## 6. Operational Tips
+## 7. Operational Tips
 - Keep validation command lists lean but comprehensive (`ruff`, `python -m tools.qa.quality_gate`, targeted pytest shards).
 - Tag planner notes with `[risk:<level>]` to accelerate triage in `/dev-agent/proposals`.
 - Update `settings.dev_agent_validation_commands` in environment for branch-specific workflows (e.g., hotfix pipelines).
 
-## 7. References
+## 8. References
 - `backend/app/agents/dev_team.py`
 - `backend/app/services/dev_agent.py`
 - `backend/app/storage/agent_memory_store.py`

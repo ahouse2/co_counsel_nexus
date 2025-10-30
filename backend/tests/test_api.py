@@ -108,6 +108,14 @@ def test_ingestion_and_retrieval(
     assert "Acme" in payload["answer"]
     assert "Graph analysis highlights" in payload["answer"]
     assert payload["citations"]
+    first_citation = payload["citations"][0]
+    assert first_citation["pageNumber"] >= 1
+    assert first_citation["pageLabel"]
+    assert first_citation["retrievers"]
+    assert first_citation["fusionScore"] is not None
+    assert first_citation["confidence"] is not None
+    assert first_citation["sourceType"]
+    assert first_citation["entities"]
     meta = payload["meta"]
     assert meta["page"] == 1
     assert meta["page_size"] == 10
@@ -206,6 +214,10 @@ def test_query_filters_and_pagination(
         citation = first_payload["citations"][0]
         assert "pageLabel" in citation
         assert "chunkIndex" in citation
+        assert citation["pageNumber"] >= 1
+        assert citation["retrievers"]
+        assert citation["fusionScore"] is not None
+        assert citation["confidence"] is not None
 
     second_page = client.get(
         "/query",
@@ -289,6 +301,7 @@ def test_query_filters_and_pagination(
     assert frames, "expected streaming payload"
     assert frames[0]["type"] == "meta"
     assert frames[0]["meta"]["page_size"] == 1
+    assert frames[0]["meta"]["mode"] in {"precision", "recall"}
     assert "hasEvidence" in frames[0]
 
     answer_frames = [frame for frame in frames if frame["type"] == "answer"]
@@ -299,6 +312,14 @@ def test_query_filters_and_pagination(
     assert final_frame["meta"] == frames[0]["meta"]
     assert "citations" in final_frame
     assert "traces" in final_frame
+    if final_frame["citations"]:
+        stream_citation = final_frame["citations"][0]
+        assert stream_citation["pageNumber"] >= 1
+        assert stream_citation["retrievers"]
+        assert stream_citation["fusionScore"] is not None
+        assert stream_citation["confidence"] is not None
+        assert stream_citation["sourceType"]
+        assert stream_citation["entities"]
 
     reconstructed = "".join(chunk["delta"] for chunk in answer_frames)
     assert reconstructed == final_frame["answer"]
