@@ -172,6 +172,47 @@ class GraphEdgeModel(BaseModel):
     properties: dict
 
 
+class GraphArgumentLinkModel(BaseModel):
+    node: GraphNodeModel
+    relation: str
+    stance: Literal["support", "contradiction", "neutral"]
+    documents: List[str] = Field(default_factory=list)
+    weight: Optional[float] = None
+
+
+class GraphArgumentEntryModel(BaseModel):
+    node: GraphNodeModel
+    supporting: List[GraphArgumentLinkModel] = Field(default_factory=list)
+    opposing: List[GraphArgumentLinkModel] = Field(default_factory=list)
+    neutral: List[GraphArgumentLinkModel] = Field(default_factory=list)
+    documents: List[str] = Field(default_factory=list)
+
+
+class GraphContradictionModel(BaseModel):
+    source: GraphNodeModel
+    target: GraphNodeModel
+    relation: str
+    documents: List[str] = Field(default_factory=list)
+    weight: Optional[float] = None
+
+
+class GraphLeveragePointModel(BaseModel):
+    node: GraphNodeModel
+    influence: float
+    connections: int
+    documents: List[str] = Field(default_factory=list)
+    reason: str
+
+
+class GraphStrategyBriefModel(BaseModel):
+    generated_at: datetime
+    summary: str
+    focus_nodes: List[GraphNodeModel] = Field(default_factory=list)
+    argument_map: List[GraphArgumentEntryModel] = Field(default_factory=list)
+    contradictions: List[GraphContradictionModel] = Field(default_factory=list)
+    leverage_points: List[GraphLeveragePointModel] = Field(default_factory=list)
+
+
 class GraphNeighborResponse(BaseModel):
     nodes: List[GraphNodeModel]
     edges: List[GraphEdgeModel]
@@ -377,6 +418,7 @@ class KnowledgeLessonDetailResponse(BaseModel):
     sections: List[KnowledgeLessonSectionModel]
     progress: KnowledgeProgressModel
     bookmarked: bool
+    strategy_brief: Optional[GraphStrategyBriefModel] = None
 
 
 class KnowledgeSearchFiltersModel(BaseModel):

@@ -284,3 +284,33 @@ def test_graph_service_neo4j_mode(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert any("MERGE (d:Document" in call[0] for call in dummy_driver.write_calls)
     assert any("MATCH (d:Document)-[:MENTIONS]->(e:Entity)" in call[0] for call in dummy_driver.read_calls)
+
+
+def test_synthesize_strategy_brief_maps_arguments(memory_graph: graph_module.GraphService) -> None:
+    service = memory_graph
+    service.upsert_entity("claim-alpha", "Claim", {"label": "Alpha Claim"})
+    service.upsert_entity("evidence-email", "Evidence", {"label": "Email Log"})
+    service.upsert_entity("memo", "Evidence", {"label": "Conflicting Memo"})
+    service.merge_relation(
+        "claim-alpha",
+        "SUPPORTED_BY",
+        "evidence-email",
+        {"doc_id": ["doc-1"], "predicate": "SUPPORTED_BY", "weight": 0.8, "stance": "support"},
+    )
+    service.merge_relation(
+        "memo",
+        "CONTRADICTS",
+        "claim-alpha",
+        {"doc_id": "doc-2", "predicate": "CONTRADICTS", "evidence": ["doc-2"], "stance": "oppose"},
+    )
+
+    brief = service.synthesize_strategy_brief(["claim-alpha"])
+    assert brief.argument_map
+    claim_entry = next(item for item in brief.argument_map if item.node["id"] == "claim-alpha")
+    assert claim_entry.supporting and claim_entry.supporting[0].node["id"] == "evidence-email"
+    assert claim_entry.opposing and claim_entry.opposing[0].node["id"] == "memo"
+    assert brief.contradictions
+    assert brief.focus_nodes
+    assert brief.leverage_points
+    payload = brief.to_dict()
+    assert payload["argument_map"][0]["node"]["id"] == "claim-alpha"

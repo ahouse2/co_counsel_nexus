@@ -330,6 +330,53 @@ export interface KnowledgeMedia {
   provider?: string | null;
 }
 
+export interface GraphNodeSummary {
+  id: string;
+  type: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphArgumentLink {
+  node: GraphNodeSummary;
+  relation: string;
+  stance: 'support' | 'contradiction' | 'neutral';
+  documents: string[];
+  weight?: number | null;
+}
+
+export interface GraphArgumentEntry {
+  node: GraphNodeSummary;
+  supporting: GraphArgumentLink[];
+  opposing: GraphArgumentLink[];
+  neutral: GraphArgumentLink[];
+  documents: string[];
+}
+
+export interface GraphContradictionEntry {
+  source: GraphNodeSummary;
+  target: GraphNodeSummary;
+  relation: string;
+  documents: string[];
+  weight?: number | null;
+}
+
+export interface GraphLeveragePoint {
+  node: GraphNodeSummary;
+  influence: number;
+  connections: number;
+  documents: string[];
+  reason: string;
+}
+
+export interface GraphStrategyBrief {
+  generated_at: string;
+  summary: string;
+  focus_nodes: GraphNodeSummary[];
+  argument_map: GraphArgumentEntry[];
+  contradictions: GraphContradictionEntry[];
+  leverage_points: GraphLeveragePoint[];
+}
+
 export interface KnowledgeProgress {
   completed_sections: string[];
   total_sections: number;
@@ -359,6 +406,7 @@ export interface KnowledgeLessonSummary {
 
 export interface KnowledgeLessonDetail extends KnowledgeLessonSummary {
   sections: KnowledgeLessonSection[];
+  strategy_brief?: GraphStrategyBrief | null;
 }
 
 export interface KnowledgeLessonListResponse {
