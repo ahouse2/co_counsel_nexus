@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { EvidenceModal } from '@/components/EvidenceModal';
 import { useQueryContext } from '@/context/QueryContext';
-import { Citation, EntityHighlight, RelationTag, TimelineEvent } from '@/types';
+import {
+  Citation,
+  EntityHighlight,
+  OutcomeProbability,
+  RelationTag,
+  TimelineEvent,
+} from '@/types';
 
 export function TimelineView(): JSX.Element {
   const {
@@ -11,6 +17,10 @@ export function TimelineView(): JSX.Element {
     loadMoreTimeline,
     timelineEntityFilter,
     setTimelineEntityFilter,
+    timelineRiskBand,
+    setTimelineRiskBand,
+    timelineDeadline,
+    setTimelineDeadline,
     citations,
     setActiveCitation,
   } = useQueryContext();
@@ -88,6 +98,44 @@ export function TimelineView(): JSX.Element {
           value={timelineEntityFilter ?? ''}
           onChange={(event) => setTimelineEntityFilter(event.target.value || null)}
         />
+        <div className="timeline-filters" role="group" aria-label="Advanced timeline filters">
+          <label htmlFor="timeline-risk" className="sr-only">
+            Filter by risk band
+          </label>
+          <select
+            id="timeline-risk"
+            value={timelineRiskBand ?? ''}
+            onChange={(event) =>
+              setTimelineRiskBand(event.target.value ? (event.target.value as 'low' | 'medium' | 'high') : null)
+            }
+          >
+            <option value="">All risk levels</option>
+            <option value="high">High risk</option>
+            <option value="medium">Medium risk</option>
+            <option value="low">Low risk</option>
+          </select>
+          <label htmlFor="timeline-deadline" className="sr-only">
+            Filter by motion deadline
+          </label>
+          <input
+            id="timeline-deadline"
+            type="date"
+            value={timelineDeadline?.slice(0, 10) ?? ''}
+            onChange={(event) => {
+              const value = event.target.value;
+              setTimelineDeadline(value ? `${value}T23:59:59` : null);
+            }}
+          />
+          {timelineDeadline && (
+            <button
+              type="button"
+              className="timeline-filter-clear"
+              onClick={() => setTimelineDeadline(null)}
+            >
+              Clear deadline
+            </button>
+          )}
+        </div>
       </header>
       <div className="timeline-summary" role="status" aria-live="polite">
         Rendering {timelineEvents.length} events {timelineMeta?.has_more ? 'with more available' : ''}
@@ -127,8 +175,14 @@ export function TimelineView(): JSX.Element {
               {typeof expandedEvent.confidence === 'number' && (
                 <span className="confidence">Confidence {(expandedEvent.confidence * 100).toFixed(0)}%</span>
               )}
+              {expandedEvent.risk_band && (
+                <span className={`risk-chip risk-chip--${expandedEvent.risk_band}`}>
+                  {expandedEvent.risk_band.toUpperCase()} risk
+                </span>
+              )}
             </header>
             <p>{expandedEvent.summary}</p>
+            <ProbabilityOverview event={expandedEvent} />
             {expandedEvent.citations.length > 0 && (
               <section>
                 <h4>Linked Citations</h4>
@@ -163,6 +217,11 @@ function TimelineCard({
   onExpand: () => void;
   onCitationLink: (docId: string) => void;
 }): JSX.Element {
+  const deadlineLabel = useMemo(() => {
+    if (!event.motion_deadline) return null;
+    return new Date(event.motion_deadline).toLocaleDateString();
+  }, [event.motion_deadline]);
+
   return (
     <li>
       <article
@@ -178,8 +237,14 @@ function TimelineCard({
           {typeof event.confidence === 'number' && (
             <span className="confidence">Confidence {(event.confidence * 100).toFixed(0)}%</span>
           )}
+          {event.risk_band && (
+            <span className={`risk-chip risk-chip--${event.risk_band}`}>
+              {event.risk_band.toUpperCase()} risk
+            </span>
+          )}
         </header>
         <p>{event.summary}</p>
+        <ProbabilityOverview event={event} compact />
         {event.entity_highlights.length > 0 && (
           <section>
             <h5>Entities</h5>
@@ -200,6 +265,12 @@ function TimelineCard({
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+        {deadlineLabel && (
+          <section className="timeline-deadline">
+            <h5>Motion deadline</h5>
+            <p>{deadlineLabel}</p>
           </section>
         )}
         <footer>
@@ -239,4 +310,77 @@ function groupByDay(events: TimelineEvent[]): { day: string; events: TimelineEve
       day: new Date(day).toLocaleDateString(),
       events: dayEvents.sort((left, right) => new Date(left.ts).getTime() - new Date(right.ts).getTime()),
     }));
+}
+
+function ProbabilityOverview({ event, compact }: { event: TimelineEvent; compact?: boolean }): JSX.Element | null {
+  if (!event.outcome_probabilities?.length && !event.recommended_actions?.length && !event.risk_score)
+    return null;
+
+  const probabilities = event.outcome_probabilities ?? [];
+  const actions = event.recommended_actions ?? [];
+
+  return (
+    <section className={`timeline-probability${compact ? ' timeline-probability--compact' : ''}`}>
+      {probabilities.length > 0 && (
+        <div className="timeline-probability__chart" aria-label="Outcome probability arcs">
+          <ProbabilityArcs probabilities={probabilities} />
+          <ul className="timeline-probability__legend">
+            {probabilities.map((item) => (
+              <li key={`${event.id}-${item.label}`}>
+                <span className="legend-label">{item.label}</span>
+                <span className="legend-value">{Math.round(item.probability * 100)}%</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {actions.length > 0 && (
+        <div className="timeline-probability__actions">
+          <h5>Recommended actions</h5>
+          <ul>
+            {actions.map((action, index) => (
+              <li key={`${event.id}-action-${index}`}>{action}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {typeof event.risk_score === 'number' && (
+        <p className="timeline-probability__score">Predicted risk score {(event.risk_score * 100).toFixed(0)}%</p>
+      )}
+    </section>
+  );
+}
+
+function ProbabilityArcs({ probabilities }: { probabilities: OutcomeProbability[] }): JSX.Element {
+  const radius = 32;
+  const center = 40;
+  const circumference = 2 * Math.PI * radius;
+  let cumulative = 0;
+  const palette = ['#ff6b6b', '#4dabf7', '#ffd43b'];
+
+  return (
+    <svg viewBox="0 0 80 80" className="probability-arcs" role="presentation">
+      <circle className="probability-arcs__background" cx={center} cy={center} r={radius} />
+      {probabilities.map((item, index) => {
+        const value = Math.max(0, Math.min(item.probability, 1));
+        const length = value * circumference;
+        const dasharray = `${length} ${circumference - length}`;
+        const rotation = (cumulative / circumference) * 360;
+        cumulative += length;
+        return (
+          <circle
+            key={`${item.label}-${index}`}
+            className="probability-arcs__segment"
+            cx={center}
+            cy={center}
+            r={radius}
+            strokeDasharray={dasharray}
+            transform={`rotate(${rotation - 90} ${center} ${center})`}
+            data-index={index}
+            style={{ stroke: palette[index % palette.length] }}
+          />
+        );
+      })}
+    </svg>
+  );
 }

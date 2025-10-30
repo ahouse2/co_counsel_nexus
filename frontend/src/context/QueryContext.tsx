@@ -30,6 +30,10 @@ type QueryContextValue = {
   refreshTimelineOnDemand: () => Promise<void>;
   timelineEntityFilter: string | null;
   setTimelineEntityFilter: (entity: string | null) => void;
+  timelineRiskBand: 'low' | 'medium' | 'high' | null;
+  setTimelineRiskBand: (band: 'low' | 'medium' | 'high' | null) => void;
+  timelineDeadline: string | null;
+  setTimelineDeadline: (isoDate: string | null) => void;
   retrievalMode: 'precision' | 'recall';
   setRetrievalMode: (mode: 'precision' | 'recall') => void;
 };
@@ -44,6 +48,8 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [timelineMeta, setTimelineMeta] = useState<TimelineResponse['meta'] | null>(initialMeta);
   const [timelineEntityFilter, setTimelineEntityFilter] = useState<string | null>(null);
+  const [timelineRiskBand, setTimelineRiskBand] = useState<'low' | 'medium' | 'high' | null>(null);
+  const [timelineDeadline, setTimelineDeadline] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -155,7 +161,12 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
   const refreshTimelineOnDemand = useCallback(async () => {
     setTimelineLoading(true);
     try {
-      const response = await fetchTimeline({ entity: timelineEntityFilter ?? undefined, limit: 20 });
+      const response = await fetchTimeline({
+        entity: timelineEntityFilter ?? undefined,
+        limit: 20,
+        risk_band: timelineRiskBand ?? undefined,
+        motion_due_before: timelineDeadline ?? undefined,
+      });
       persistTimeline(response.events);
       setTimelineMeta(response.meta);
       setTimelineLoading(false);
@@ -163,7 +174,7 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       console.warn('Timeline refresh failed', timelineError);
       setTimelineLoading(false);
     }
-  }, [persistTimeline, timelineEntityFilter]);
+  }, [persistTimeline, timelineEntityFilter, timelineRiskBand, timelineDeadline]);
 
   const completeViaHttp = useCallback(
     async (assistantId: string, prompt: string) => {
@@ -264,11 +275,13 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
     if (!timelineMeta?.has_more) return;
     setTimelineLoading(true);
     try {
-      const response = await fetchTimeline({
-        cursor: timelineMeta.cursor ?? undefined,
-        entity: timelineEntityFilter ?? undefined,
-        limit: timelineMeta.limit ?? 20,
-      });
+        const response = await fetchTimeline({
+          cursor: timelineMeta.cursor ?? undefined,
+          entity: timelineEntityFilter ?? undefined,
+          limit: timelineMeta.limit ?? 20,
+          risk_band: timelineRiskBand ?? undefined,
+          motion_due_before: timelineDeadline ?? undefined,
+        });
       const merged = [...timelineEvents, ...response.events];
       persistTimeline(merged);
       setTimelineMeta(response.meta);
@@ -277,7 +290,14 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       console.warn('Timeline pagination failed', errorTimeline);
       setTimelineLoading(false);
     }
-  }, [persistTimeline, timelineEntityFilter, timelineEvents, timelineMeta]);
+  }, [
+    persistTimeline,
+    timelineEntityFilter,
+    timelineEvents,
+    timelineMeta,
+    timelineRiskBand,
+    timelineDeadline,
+  ]);
 
   const value = useMemo<QueryContextValue>(
     () => ({
@@ -296,6 +316,10 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       refreshTimelineOnDemand,
       timelineEntityFilter,
       setTimelineEntityFilter,
+      timelineRiskBand,
+      setTimelineRiskBand,
+      timelineDeadline,
+      setTimelineDeadline,
       retrievalMode,
       setRetrievalMode,
     }),
@@ -313,6 +337,8 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       loadMoreTimeline,
       refreshTimelineOnDemand,
       timelineEntityFilter,
+      timelineRiskBand,
+      timelineDeadline,
       retrievalMode,
       setRetrievalMode,
     ]

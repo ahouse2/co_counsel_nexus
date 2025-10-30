@@ -137,7 +137,16 @@ export async function submitOnboarding(
 }
 
 export async function fetchTimeline(
-  params: { cursor?: string | null; entity?: string | null; from_ts?: string | null; to_ts?: string | null; limit?: number } = {}
+  params: {
+    cursor?: string | null;
+    entity?: string | null;
+    from_ts?: string | null;
+    to_ts?: string | null;
+    limit?: number;
+    risk_band?: 'low' | 'medium' | 'high' | null;
+    motion_due_before?: string | null;
+    motion_due_after?: string | null;
+  } = {}
 ): Promise<TimelineResponse> {
   const search = new URLSearchParams();
   if (params.cursor) search.set('cursor', params.cursor);
@@ -145,6 +154,9 @@ export async function fetchTimeline(
   if (params.from_ts) search.set('from_ts', params.from_ts);
   if (params.to_ts) search.set('to_ts', params.to_ts);
   if (typeof params.limit === 'number') search.set('limit', String(params.limit));
+  if (params.risk_band) search.set('risk_band', params.risk_band);
+  if (params.motion_due_before) search.set('motion_due_before', params.motion_due_before);
+  if (params.motion_due_after) search.set('motion_due_after', params.motion_due_after);
   const response = await fetch(withBase(`/timeline?${search.toString()}`));
   if (!response.ok) {
     throw new Error(`Timeline request failed with status ${response.status}`);

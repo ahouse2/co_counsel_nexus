@@ -838,6 +838,36 @@ video {
   gap: 1.5rem;
 }
 
+.timeline-view header {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.timeline-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.timeline-filters select,
+.timeline-filters input[type='date'] {
+  background: rgba(12, 15, 22, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+}
+
+.timeline-filter-clear {
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+}
+
 .timeline-summary {
   font-size: 0.9rem;
   color: var(--color-text-muted);
@@ -879,6 +909,30 @@ video {
   gap: 1rem;
   color: var(--color-text-muted);
   font-size: 0.85rem;
+}
+
+.risk-chip {
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.risk-chip--high {
+  background: rgba(255, 107, 107, 0.18);
+  color: #ff8787;
+}
+
+.risk-chip--medium {
+  background: rgba(255, 212, 59, 0.18);
+  color: #ffd43b;
+}
+
+.risk-chip--low {
+  background: rgba(77, 171, 247, 0.18);
+  color: #4dabf7;
 }
 
 .timeline-card h4 {
@@ -936,6 +990,94 @@ video {
 .timeline-popout {
   display: grid;
   gap: 0.75rem;
+}
+
+.timeline-probability {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.timeline-probability--compact {
+  padding: 0.5rem 0;
+}
+
+.timeline-probability__chart {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.timeline-probability__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.timeline-probability__legend li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.legend-label {
+  color: var(--color-text-secondary);
+}
+
+.legend-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.probability-arcs {
+  width: 5rem;
+  height: 5rem;
+}
+
+.probability-arcs__background {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 8;
+}
+
+.probability-arcs__segment {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+.timeline-probability__actions ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.timeline-probability__actions h5 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--color-text-primary);
+}
+
+.timeline-probability__score {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.timeline-deadline {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.5rem;
+}
+
+.timeline-deadline h5 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
 }
 
 /* Evidence modal */
