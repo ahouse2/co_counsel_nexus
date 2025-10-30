@@ -1,21 +1,25 @@
 import { useEffect, useId, useState } from 'react';
-import { ChatView } from '@/components/ChatView';
 import { CitationPanel } from '@/components/CitationPanel';
 import { TimelineView } from '@/components/TimelineView';
 import { KnowledgeHub } from '@/components/KnowledgeHub';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { RetrievalSettings } from '@/components/RetrievalSettings';
-import { SimulationWorkbench } from '@/components/simulation/SimulationWorkbench';
 import { DevTeamSection } from '@/components/dev-team';
+import { CinematicMetrics } from '@/components/CinematicMetrics';
+import { EvidenceUploadZone } from '@/components/EvidenceUploadZone';
+import { GraphExplorerPanel } from '@/components/GraphExplorerPanel';
+import { TrialUniversityPanel } from '@/components/TrialUniversityPanel';
+import { LiveCoCounselPanel } from '@/components/LiveCoCounselPanel';
+import { MockTrialArenaPanel } from '@/components/MockTrialArenaPanel';
 import { useQueryContext } from '@/context/QueryContext';
 
 const sections = [
-  { id: 'chat', label: 'Chat' },
+  { id: 'chat', label: 'Co-Counsel' },
   { id: 'timeline', label: 'Timeline' },
-  { id: 'documents', label: 'Documents' },
+  { id: 'documents', label: 'Evidence' },
   { id: 'trial-university', label: 'Trial University' },
-  { id: 'mock-court', label: 'Mock Court' },
+  { id: 'mock-court', label: 'Mock Trial' },
   { id: 'dev-team', label: 'Dev Team' },
 ] as const;
 
@@ -74,28 +78,30 @@ function App(): JSX.Element {
   }, []);
 
   return (
-    <div className="app-shell" data-section={activeSection}>
+    <div className="cinematic-app" data-section={activeSection}>
+      <div className="cinematic-backdrop" aria-hidden />
       <a href="#main" className="skip-link">
         Skip to content
       </a>
-      <header className="app-header" role="banner">
-        <div className="brand">
-          <span aria-hidden="true" className="brand-mark">
+      <header className="cinematic-header" role="banner">
+        <div className="header-brand">
+          <span aria-hidden className="brand-emblem">
             ⚖️
           </span>
           <div>
-            <h1>Co-Counsel Workspace</h1>
-            <p className="subtitle">Cinematic discovery with verified provenance</p>
+            <p className="eyebrow">F1-grade litigation command center</p>
+            <h1>Co-Counsel Nexus</h1>
+            <p className="hero-subtitle">AI-amplified discovery, trial prep, and evidence mastery.</p>
           </div>
         </div>
-        <div className="header-controls">
+        <div className="header-actions">
           <RetrievalSettings />
           <ThemeToggle />
           <OfflineIndicator />
         </div>
       </header>
-      <div className="app-body">
-        <nav className="app-sidebar" role="navigation" aria-labelledby={tabsId}>
+      <div className="cinematic-body">
+        <aside className="cinematic-nav" role="navigation" aria-labelledby={tabsId}>
           <h2 id={tabsId} className="sr-only">
             Workspace sections
           </h2>
@@ -111,20 +117,22 @@ function App(): JSX.Element {
                   className={activeSection === section.id ? 'active' : ''}
                   onClick={() => setActiveSection(section.id)}
                 >
+                  <span className="tab-glow" aria-hidden />
                   {section.label}
                 </button>
               </li>
             ))}
           </ul>
-        </nav>
-        <main id="main" className="app-main" role="main">
+        </aside>
+        <main id="main" className="cinematic-main" role="main">
+          <CinematicMetrics />
           <section
             id={`${panelId}-chat`}
             role="tabpanel"
             aria-labelledby={`${tabsId}-chat`}
             hidden={activeSection !== 'chat'}
           >
-            <ChatView />
+            <LiveCoCounselPanel />
           </section>
           <section
             id={`${panelId}-timeline`}
@@ -132,7 +140,13 @@ function App(): JSX.Element {
             aria-labelledby={`${tabsId}-timeline`}
             hidden={activeSection !== 'timeline'}
           >
-            <TimelineView />
+            <div className="panel-shell">
+              <header>
+                <h2>Timeline Pulse</h2>
+                <p>Adaptive chronology with neon event markers and deposition overlays.</p>
+              </header>
+              <TimelineView />
+            </div>
           </section>
           <section
             id={`${panelId}-documents`}
@@ -140,7 +154,15 @@ function App(): JSX.Element {
             aria-labelledby={`${tabsId}-documents`}
             hidden={activeSection !== 'documents'}
           >
-            <CitationPanel />
+            <EvidenceUploadZone />
+            <GraphExplorerPanel />
+            <div className="panel-shell">
+              <header>
+                <h2>Evidence Citations</h2>
+                <p>Source-grounded references with privilege posture indicators.</p>
+              </header>
+              <CitationPanel />
+            </div>
           </section>
           <section
             id={`${panelId}-trial-university`}
@@ -148,7 +170,14 @@ function App(): JSX.Element {
             aria-labelledby={`${tabsId}-trial-university`}
             hidden={activeSection !== 'trial-university'}
           >
-            <KnowledgeHub />
+            <TrialUniversityPanel />
+            <div className="panel-shell">
+              <header>
+                <h2>Knowledge Hub</h2>
+                <p>Cinematic dossiers, briefs, and AI explainers ready for court.</p>
+              </header>
+              <KnowledgeHub />
+            </div>
           </section>
           <section
             id={`${panelId}-mock-court`}
@@ -156,7 +185,7 @@ function App(): JSX.Element {
             aria-labelledby={`${tabsId}-mock-court`}
             hidden={activeSection !== 'mock-court'}
           >
-            <SimulationWorkbench />
+            <MockTrialArenaPanel />
           </section>
           <section
             id={`${panelId}-dev-team`}
@@ -164,14 +193,20 @@ function App(): JSX.Element {
             aria-labelledby={`${tabsId}-dev-team`}
             hidden={activeSection !== 'dev-team'}
           >
-            <DevTeamSection />
+            <div className="panel-shell">
+              <header>
+                <h2>Dev Team Workspace</h2>
+                <p>Velocity dashboards, backlog intelligence, and agent orchestration.</p>
+              </header>
+              <DevTeamSection />
+            </div>
           </section>
         </main>
       </div>
-      <footer className="app-footer" role="contentinfo">
+      <footer className="cinematic-footer" role="contentinfo">
         <p>
           Streaming answers powered by Co-Counsel telemetry. Shortcuts: <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send, <kbd>g</kbd> for
-          timeline, <kbd>d</kbd> for documents, <kbd>n</kbd>/<kbd>p</kbd> to step through events.
+          timeline, <kbd>d</kbd> for evidence, <kbd>n</kbd>/<kbd>p</kbd> to step through events.
         </p>
       </footer>
     </div>
