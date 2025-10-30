@@ -61,7 +61,23 @@ class PrivilegeClassifierService:
         self._train()
 
     def classify(self, doc_id: str, text: str, metadata: Dict[str, object] | None = None) -> PrivilegeDecision:
+        metadata = metadata or {}
         text = (text or "").strip()
+        linked_summary = metadata.get("linked_doc_summary")
+        if linked_summary and isinstance(linked_summary, str):
+            summary_clean = linked_summary.strip()
+            if summary_clean:
+                text = f"{text}\n\n{summary_clean}" if text else summary_clean
+        source_type = str(metadata.get("source_type") or "").lower()
+        if source_type in {"courtlistener", "caselaw"}:
+            explanation = self._build_external_explanation(metadata)
+            return PrivilegeDecision(
+                doc_id=doc_id,
+                label="non_privileged",
+                score=0.0,
+                explanation=explanation,
+                source="classifier",
+            )
         if not text:
             explanation = "No textual content supplied for privilege analysis."
             return PrivilegeDecision(doc_id=doc_id, label="unknown", score=0.0, explanation=explanation)
@@ -131,6 +147,16 @@ class PrivilegeClassifierService:
         if metadata.get("type"):
             hints.append(f"type={metadata['type']}")
         hints.append(f"confidence={score:.2f}")
+        return ", ".join(hints)
+
+    def _build_external_explanation(self, metadata: Dict[str, object]) -> str:
+        hints: List[str] = ["source=external_case_law"]
+        case_name = metadata.get("case_name") or metadata.get("title")
+        if case_name:
+            hints.append(f"case={case_name}")
+        linked = metadata.get("linked_doc_title")
+        if linked:
+            hints.append(f"linked={linked}")
         return ", ".join(hints)
 
 

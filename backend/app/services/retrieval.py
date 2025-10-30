@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from itertools import zip_longest
 from time import perf_counter
-from typing import Any, Dict, Iterator, List, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Set, Tuple
+from urllib.parse import urljoin
 
 try:  # pragma: no cover - optional dependency for vector retrieval
     from qdrant_client.http import models as qmodels
@@ -23,6 +25,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for test environments
 
     qmodels = _StubModels()  # type: ignore[assignment]
 
+import httpx
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
@@ -51,6 +54,7 @@ from .vector import VectorService, get_vector_service
 
 _tracer = trace.get_tracer(__name__)
 _meter = metrics.get_meter(__name__)
+_logger = logging.getLogger(__name__)
 _retrieval_queries_counter = _meter.create_counter(
     "retrieval_queries_total",
     unit="1",
@@ -82,10 +86,244 @@ _retrieval_partial_latency = _meter.create_histogram(
     description="Latency from query execution to first streamed chunk",
 )
 
+_CONTRADICTION_TERMS: Tuple[Tuple[str, str], ...] = (
+    ("granted", "denied"),
+    ("denied", "granted"),
+    ("affirmed", "reversed"),
+    ("reversed", "affirmed"),
+    ("affirmed", "vacated"),
+    ("liable", "not liable"),
+    ("allowed", "barred"),
+)
+
 
 class RetrievalMode(str, Enum):
     PRECISION = "precision"
     RECALL = "recall"
+
+
+class CourtListenerCaseLawAdapter:
+    """Lightweight CourtListener client that emits scored opinion payloads."""
+
+    _MAX_PAGE_SIZE = 100
+    _MAX_PAGES = 3
+
+    def __init__(
+        self,
+        endpoint: str,
+        token: str | None,
+        *,
+        timeout: float = 10.0,
+        client_factory: Callable[[], httpx.Client] | None = None,
+    ) -> None:
+        self.endpoint = endpoint.rstrip("/") + "/"
+        self.token = token
+        self.timeout = timeout
+        self._client_factory = client_factory or (lambda: httpx.Client(timeout=self.timeout))
+
+    def search(self, query: str, *, limit: int) -> List[qmodels.ScoredPoint]:
+        if not query.strip() or limit <= 0:
+            return []
+        params = {"q": query, "page_size": min(max(limit, 1), self._MAX_PAGE_SIZE)}
+        headers = self._headers()
+        points: List[qmodels.ScoredPoint] = []
+        next_url = self.endpoint
+        page = 0
+        try:
+            with self._client_factory() as client:
+                while next_url and len(points) < limit and page < self._MAX_PAGES:
+                    response = client.get(
+                        next_url,
+                        params=params if page == 0 else None,
+                        headers=headers,
+                    )
+                    if response.status_code >= 400:
+                        _logger.warning(
+                            "CourtListener request failed", extra={"url": next_url, "status": response.status_code}
+                        )
+                        break
+                    payload = response.json()
+                    results = payload.get("results") or []
+                    for item in results:
+                        point = self._point_from_result(item, query, len(points))
+                        if point is None:
+                            continue
+                        points.append(point)
+                        if len(points) >= limit:
+                            break
+                    next_url = payload.get("next")
+                    page += 1
+        except httpx.HTTPError as exc:  # pragma: no cover - network failure path
+            _logger.warning("CourtListener adapter error", exc_info=exc, extra={"query": query})
+        return points
+
+    def _headers(self) -> Dict[str, str]:
+        headers = {"User-Agent": "CoCounsel-Retrieval/1.0", "Accept": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Token {self.token}"
+        return headers
+
+    def _point_from_result(
+        self, item: Dict[str, object], query: str, rank: int
+    ) -> qmodels.ScoredPoint | None:
+        identifier = item.get("id") or item.get("cluster") or item.get("absolute_url")
+        if identifier is None:
+            return None
+        text = self._extract_text(item)
+        if not text:
+            return None
+        case_name = str(item.get("case_name") or item.get("caption") or "").strip()
+        docket = item.get("docket_number")
+        doc_id = f"courtlistener::{identifier}"
+        uri = item.get("absolute_url")
+        payload = {
+            "doc_id": doc_id,
+            "text": text,
+            "source_type": "courtlistener",
+            "retriever": "external:courtlistener",
+            "retrievers": ["external:courtlistener"],
+            "case_name": case_name,
+            "query": query,
+            "docket_number": docket,
+            "decision_date": item.get("date_filed"),
+            "citations": item.get("citations"),
+            "uri": urljoin("https://www.courtlistener.com", str(uri or "")) if uri else None,
+            "title": case_name or str(uri or doc_id),
+            "entity_labels": [case_name] if case_name else [],
+            "entity_ids": [f"case::{identifier}"],
+            "holding": self._holding_from_text(text),
+        }
+        score = 1.0 / float(rank + 1)
+        return qmodels.ScoredPoint(id=doc_id, score=score, payload=payload, version=1)
+
+    def _extract_text(self, item: Dict[str, object]) -> str:
+        primary = item.get("plain_text") or item.get("html_with_citations")
+        if isinstance(primary, str) and primary.strip():
+            text = primary.strip()
+        else:
+            text = ""
+        return text[:2000]
+
+    @staticmethod
+    def _holding_from_text(text: str) -> str:
+        cleaned = " ".join(text.split())
+        if not cleaned:
+            return ""
+        sentence_end = cleaned.find(".")
+        return cleaned if sentence_end == -1 else cleaned[: sentence_end + 1]
+
+
+class CaseLawApiAdapter:
+    """Adapter for the Harvard CaseLaw API (api.case.law)."""
+
+    _MAX_PAGE_SIZE = 100
+
+    def __init__(
+        self,
+        endpoint: str,
+        api_key: str | None,
+        *,
+        timeout: float = 10.0,
+        client_factory: Callable[[], httpx.Client] | None = None,
+        max_results: int = 10,
+    ) -> None:
+        self.endpoint = endpoint.rstrip("/") + "/"
+        self.api_key = api_key
+        self.timeout = timeout
+        self.max_results = max_results
+        self._client_factory = client_factory or (lambda: httpx.Client(timeout=self.timeout))
+
+    def search(self, query: str, *, limit: int) -> List[qmodels.ScoredPoint]:
+        if not query.strip() or limit <= 0 or self.max_results == 0:
+            return []
+        limit = min(limit, self.max_results)
+        params = {"search": query, "page_size": min(limit, self._MAX_PAGE_SIZE)}
+        headers = {"User-Agent": "CoCounsel-Retrieval/1.0", "Accept": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Token {self.api_key}"
+        points: List[qmodels.ScoredPoint] = []
+        next_url = self.endpoint
+        try:
+            with self._client_factory() as client:
+                while next_url and len(points) < limit:
+                    response = client.get(
+                        next_url,
+                        params=params if next_url == self.endpoint else None,
+                        headers=headers,
+                    )
+                    if response.status_code >= 400:
+                        _logger.warning(
+                            "CaseLaw API request failed",
+                            extra={"url": next_url, "status": response.status_code},
+                        )
+                        break
+                    payload = response.json()
+                    results = payload.get("results") or []
+                    for item in results:
+                        point = self._point_from_result(item, query, len(points))
+                        if point is None:
+                            continue
+                        points.append(point)
+                        if len(points) >= limit:
+                            break
+                    next_url = payload.get("next")
+        except httpx.HTTPError as exc:  # pragma: no cover - network failure path
+            _logger.warning("CaseLaw adapter error", exc_info=exc, extra={"query": query})
+        return points
+
+    def _point_from_result(
+        self, item: Dict[str, object], query: str, rank: int
+    ) -> qmodels.ScoredPoint | None:
+        identifier = item.get("id") or item.get("url")
+        if identifier is None:
+            return None
+        text = self._extract_text(item)
+        if not text:
+            return None
+        name = str(item.get("name") or item.get("case_name") or "").strip()
+        docket = item.get("docket_number") or item.get("docket")
+        doc_id = f"caselaw::{identifier}"
+        payload = {
+            "doc_id": doc_id,
+            "text": text,
+            "source_type": "caselaw",
+            "retriever": "external:caselaw",
+            "retrievers": ["external:caselaw"],
+            "case_name": name,
+            "query": query,
+            "docket_number": docket,
+            "decision_date": item.get("decision_date"),
+            "citations": item.get("citations"),
+            "uri": item.get("url") or item.get("frontend_url"),
+            "title": name or str(identifier),
+            "entity_labels": [name] if name else [],
+            "entity_ids": [f"case::{identifier}"],
+            "holding": self._holding_from_text(text),
+        }
+        score = 1.0 / float(rank + 1)
+        return qmodels.ScoredPoint(id=doc_id, score=score, payload=payload, version=1)
+
+    def _extract_text(self, item: Dict[str, object]) -> str:
+        casebody = item.get("casebody") or {}
+        data = casebody.get("data") if isinstance(casebody, dict) else {}
+        opinions = data.get("opinions") if isinstance(data, dict) else []
+        if isinstance(opinions, list) and opinions:
+            first = opinions[0] or {}
+            text = first.get("text")
+            if isinstance(text, str) and text.strip():
+                return text.strip()[:2000]
+        body = casebody.get("casebody") if isinstance(casebody, dict) else None
+        if isinstance(body, str) and body.strip():
+            return body.strip()[:2000]
+        return ""
+
+    @staticmethod
+    def _holding_from_text(text: str) -> str:
+        cleaned = " ".join(text.split())
+        if not cleaned:
+            return ""
+        sentence_end = cleaned.find(".")
+        return cleaned if sentence_end == -1 else cleaned[: sentence_end + 1]
 
 
 @dataclass
@@ -209,6 +447,15 @@ class RetrievalService:
             KeywordRetrieverAdapter(self.document_store),
             cross_encoder_model=cross_encoder_model,
         )
+        self.courtlistener_adapter = CourtListenerCaseLawAdapter(
+            self.settings.courtlistener_endpoint,
+            self.settings.courtlistener_token,
+        )
+        self.caselaw_adapter = CaseLawApiAdapter(
+            self.settings.caselaw_endpoint,
+            self.settings.caselaw_api_key,
+            max_results=self.settings.caselaw_max_results,
+        )
 
     def query(
         self,
@@ -228,7 +475,15 @@ class RetrievalService:
             raise ValueError("page_size must be between 1 and 50")
         start_time = perf_counter()
         filters = filters or {}
-        allowed_sources = {"local", "s3", "sharepoint", "onedrive", "courtlistener", "websearch"}
+        allowed_sources = {
+            "local",
+            "s3",
+            "sharepoint",
+            "onedrive",
+            "courtlistener",
+            "caselaw",
+            "websearch",
+        }
 
         with _tracer.start_as_current_span("retrieval.query") as span:
             span.set_attribute("retrieval.page", page)
@@ -278,6 +533,7 @@ class RetrievalService:
                 graph_window = min(self.settings.retrieval_graph_hop_window * 2, 12)
                 keyword_window = 10
 
+            external_points: List[qmodels.ScoredPoint] = []
             with _tracer.start_as_current_span("retrieval.hybrid") as hybrid_span:
                 bundle: HybridRetrievalBundle = self.query_engine.retrieve(
                     question,
@@ -293,6 +549,18 @@ class RetrievalService:
                 hybrid_span.set_attribute("retrieval.fused_candidates", len(bundle.fused_points))
                 hybrid_span.set_attribute("retrieval.reranker", bundle.reranker)
 
+            with _tracer.start_as_current_span("retrieval.external_case_law") as external_span:
+                external_points = self._retrieve_external_case_law(
+                    question,
+                    top_k=search_window,
+                    source_filter=source_filter,
+                )
+                external_span.set_attribute("retrieval.external.count", len(external_points))
+                if external_points:
+                    bundle = self._join_external_results(bundle, external_points, search_window)
+                    external_points = bundle.external_points
+            external_points = getattr(bundle, "external_points", external_points)
+
             with _tracer.start_as_current_span("retrieval.vector_search") as vector_span:
                 vector_span.set_attribute("retrieval.vector.count", len(bundle.vector_points))
                 vector_span.set_attribute("retrieval.vector.window", vector_window)
@@ -307,6 +575,7 @@ class RetrievalService:
                 "mode": mode.value,
                 "reranker": bundle.reranker,
             }
+            metric_attrs["external_results"] = len(external_points)
 
             total_items = len(filtered_results)
             if total_items == 0:
@@ -422,6 +691,19 @@ class RetrievalService:
                     "adjust pagination or filters to view existing evidence."
                 )
 
+            authoritative_holdings = self._authoritative_holdings(external_points)
+            contradictions = self._detect_contradictions(answer, authoritative_holdings)
+            if contradictions:
+                span.add_event(
+                    "retrieval.contradiction",
+                    {
+                        "count": len(contradictions),
+                        "first_holding": contradictions[0],
+                    },
+                )
+                metric_attrs["contradictions"] = len(contradictions)
+                self._log_contradictions(question, answer, contradictions)
+
             meta = QueryMeta(
                 page=page,
                 page_size=page_size,
@@ -516,6 +798,267 @@ class RetrievalService:
     def _format_graph_answer(self, relation_statements: List[str]) -> str:
         summary = "; ".join(relation_statements[:3])
         return f"Graph evidence indicates: {summary}."
+
+    def _retrieve_external_case_law(
+        self,
+        question: str,
+        *,
+        top_k: int,
+        source_filter: str | None,
+    ) -> List[qmodels.ScoredPoint]:
+        adapters: List[tuple[str, object]] = []
+        if source_filter in (None, "courtlistener"):
+            adapters.append(("courtlistener", self.courtlistener_adapter))
+        if source_filter in (None, "caselaw"):
+            adapters.append(("caselaw", self.caselaw_adapter))
+        if not adapters:
+            return []
+        inventory = self.document_store.list_documents()
+        aggregated: List[qmodels.ScoredPoint] = []
+        for label, adapter in adapters:
+            try:
+                points = adapter.search(question, limit=top_k)
+            except Exception as exc:  # pragma: no cover - defensive path
+                _logger.warning(
+                    "External case law adapter failed",
+                    exc_info=exc,
+                    extra={"adapter": label, "question": question},
+                )
+                continue
+            reconciled = self._reconcile_external_evidence(points, inventory)
+            aggregated.extend(reconciled)
+        aggregated.sort(key=lambda point: float(point.score or 0.0), reverse=True)
+        return aggregated[:top_k]
+
+    def _reconcile_external_evidence(
+        self,
+        points: Iterable[qmodels.ScoredPoint],
+        inventory: List[Dict[str, object]],
+    ) -> List[qmodels.ScoredPoint]:
+        reconciled: List[qmodels.ScoredPoint] = []
+        for point in points:
+            payload = dict(point.payload or {})
+            payload.setdefault("fusion_score", float(point.score))
+            payload.setdefault("confidence", float(point.score))
+            payload["external_case_law"] = True
+            linked = self._link_internal_case_law(payload, inventory)
+            if linked:
+                payload["linked_doc_id"] = linked.get("id")
+                payload["linked_doc_title"] = linked.get("title") or linked.get("name")
+                payload["linked_doc_source_type"] = linked.get("source_type")
+                payload["linked_doc_summary"] = linked.get("summary")
+                payload["linked_doc_citations"] = linked.get("citations")
+            payload["retrievers"] = self._citation_retrievers(payload)
+            reconciled.append(
+                qmodels.ScoredPoint(
+                    id=point.id,
+                    score=float(point.score),
+                    payload=payload,
+                    version=point.version,
+                )
+            )
+        return reconciled
+
+    def _link_internal_case_law(
+        self,
+        payload: Dict[str, object],
+        inventory: List[Dict[str, object]],
+    ) -> Dict[str, object] | None:
+        case_name = str(payload.get("case_name") or payload.get("title") or "").strip().lower()
+        docket = str(payload.get("docket_number") or "").strip().lower()
+        citations = self._normalise_citation_list(payload.get("citations"))
+        for record in inventory:
+            record_name = str(record.get("title") or record.get("name") or "").strip().lower()
+            record_docket = str(record.get("docket_number") or record.get("docket") or "").strip().lower()
+            record_citations = self._normalise_citation_list(record.get("citations"))
+            if case_name and record_name and case_name == record_name:
+                return record
+            if docket and record_docket and docket == record_docket:
+                return record
+            if citations and record_citations and citations & record_citations:
+                return record
+        return None
+
+    def _normalise_citation_list(self, value: object) -> Set[str]:
+        citations: Set[str] = set()
+        if value is None:
+            return citations
+        if isinstance(value, (list, tuple, set)):
+            iterable = value
+        else:
+            iterable = [value]
+        for item in iterable:
+            normalised = self._normalise_citation(item)
+            if normalised:
+                citations.add(normalised)
+        return citations
+
+    def _normalise_citation(self, citation: object) -> str:
+        if isinstance(citation, dict):
+            candidate = citation.get("cite") or citation.get("citation") or citation.get("value") or ""
+        else:
+            candidate = citation or ""
+        text = str(candidate)
+        cleaned = re.sub(r"\s+", " ", text).strip().lower()
+        return cleaned
+
+    def _join_external_results(
+        self,
+        bundle: HybridRetrievalBundle,
+        external_points: List[qmodels.ScoredPoint],
+        limit: int,
+    ) -> HybridRetrievalBundle:
+        keyed: Dict[str, qmodels.ScoredPoint] = {
+            self._point_key(point): point for point in bundle.fused_points
+        }
+        normalised_external = [self._standardise_external_point(point) for point in external_points]
+        for point in normalised_external:
+            key = self._point_key(point)
+            existing = keyed.get(key)
+            if existing is None:
+                keyed[key] = point
+            else:
+                keyed[key] = self._merge_points(existing, point)
+        fused = list(keyed.values())
+        fused.sort(key=lambda item: float(item.score or 0.0), reverse=True)
+        bundle.fused_points = fused[:limit]
+        bundle.external_points = normalised_external
+        for point in bundle.fused_points:
+            key = self._point_key(point)
+            bundle.fusion_scores.setdefault(key, float(point.score))
+        return bundle
+
+    def _standardise_external_point(self, point: qmodels.ScoredPoint) -> qmodels.ScoredPoint:
+        payload = dict(point.payload or {})
+        payload.setdefault("fusion_score", float(point.score))
+        payload.setdefault("confidence", float(point.score))
+        payload.setdefault("retrievers", self._citation_retrievers(payload))
+        payload.setdefault("external_case_law", True)
+        return qmodels.ScoredPoint(
+            id=point.id,
+            score=float(payload.get("fusion_score", point.score)),
+            payload=payload,
+            version=point.version,
+        )
+
+    def _merge_points(
+        self,
+        primary: qmodels.ScoredPoint,
+        external: qmodels.ScoredPoint,
+    ) -> qmodels.ScoredPoint:
+        payload = dict(primary.payload or {})
+        other = external.payload or {}
+        existing_retrievers = set(self._citation_retrievers(payload))
+        external_retrievers = set(self._citation_retrievers(other))
+        payload["retrievers"] = sorted(existing_retrievers | external_retrievers)
+        payload.setdefault("fusion_score", float(primary.score))
+        payload["fusion_score"] = max(float(payload.get("fusion_score", primary.score)), float(other.get("fusion_score", external.score)))
+        payload["confidence"] = max(float(payload.get("confidence", primary.score)), float(other.get("confidence", external.score)))
+        for key in (
+            "uri",
+            "title",
+            "source_type",
+            "case_name",
+            "docket_number",
+            "decision_date",
+            "holding",
+            "linked_doc_id",
+            "linked_doc_title",
+            "linked_doc_source_type",
+            "linked_doc_summary",
+            "linked_doc_citations",
+            "citations",
+        ):
+            value = other.get(key)
+            if value and not payload.get(key):
+                payload[key] = value
+        text_existing = str(payload.get("text", ""))
+        text_external = str(other.get("text", ""))
+        if len(text_external) > len(text_existing):
+            payload["text"] = text_external
+        payload["external_case_law"] = payload.get("external_case_law", False) or other.get("external_case_law", False)
+        return qmodels.ScoredPoint(
+            id=primary.id,
+            score=float(payload.get("fusion_score", primary.score)),
+            payload=payload,
+            version=primary.version,
+        )
+
+    @staticmethod
+    def _point_key(point: qmodels.ScoredPoint) -> str:
+        payload = point.payload or {}
+        doc_id = payload.get("doc_id") or payload.get("id")
+        chunk_index = payload.get("chunk_index")
+        return f"{doc_id or point.id}::{chunk_index if chunk_index is not None else 'na'}::{point.id}"
+
+    def _augment_privilege_metadata(
+        self, payload: Dict[str, object], doc_id: str
+    ) -> Dict[str, object]:
+        metadata = {key: value for key, value in payload.items() if key != "text"}
+        source_type = str(metadata.get("source_type") or "").lower()
+        if source_type in {"courtlistener", "caselaw"}:
+            linked_id = metadata.get("linked_doc_id")
+            linked_record: Dict[str, object] | None = None
+            if linked_id:
+                try:
+                    linked_record = self.document_store.read_document(str(linked_id))
+                except FileNotFoundError:
+                    linked_record = None
+            if linked_record:
+                metadata.setdefault("linked_doc_title", linked_record.get("title") or linked_record.get("name"))
+                metadata.setdefault("linked_doc_source_type", linked_record.get("source_type"))
+                metadata.setdefault("linked_doc_summary", linked_record.get("summary"))
+            metadata.setdefault("external_case_law", True)
+            metadata.setdefault("linked_doc_hint", linked_id)
+        metadata.setdefault("doc_id", doc_id)
+        return metadata
+
+    def _authoritative_holdings(
+        self, points: Iterable[qmodels.ScoredPoint]
+    ) -> List[str]:
+        holdings: List[str] = []
+        for point in points:
+            payload = point.payload or {}
+            holding = payload.get("holding") or payload.get("text")
+            if not isinstance(holding, str):
+                continue
+            excerpt = " ".join(holding.split())
+            if excerpt:
+                holdings.append(excerpt[:400])
+        return holdings
+
+    def _detect_contradictions(self, answer: str, holdings: List[str]) -> List[str]:
+        contradictions: List[str] = []
+        if not answer or not holdings:
+            return contradictions
+        answer_lower = answer.lower()
+        for holding in holdings:
+            holding_lower = holding.lower()
+            for positive, negative in _CONTRADICTION_TERMS:
+                if positive in answer_lower and negative in holding_lower:
+                    contradictions.append(holding)
+                    break
+                if negative in answer_lower and positive in holding_lower:
+                    contradictions.append(holding)
+                    break
+        return contradictions
+
+    def _log_contradictions(
+        self,
+        question: str,
+        answer: str,
+        contradictions: List[str],
+    ) -> None:
+        if not contradictions:
+            return
+        _logger.warning(
+            "Contradiction detected between generated answer and authoritative holdings",
+            extra={
+                "question": question,
+                "answer_excerpt": answer[:200],
+                "contradictions": contradictions,
+            },
+        )
 
     def _citation_snippet(self, text: str) -> str:
         clean = " ".join(text.split())
@@ -795,7 +1338,7 @@ class RetrievalService:
             if doc_id is None:
                 continue
             text = payload.get("text")
-            metadata = {key: value for key, value in payload.items() if key != "text"}
+            metadata = self._augment_privilege_metadata(payload, str(doc_id))
             decision = self.privilege_classifier.classify(str(doc_id), str(text or ""), metadata)
             decisions.append(decision)
         return self.privilege_classifier.format_trace(decisions)

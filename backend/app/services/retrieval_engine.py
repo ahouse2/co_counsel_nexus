@@ -37,6 +37,7 @@ class HybridRetrievalBundle:
     relation_statements: List[Tuple[str, str | None]]
     reranker: str
     fusion_scores: Dict[str, float]
+    external_points: List[qmodels.ScoredPoint] = field(default_factory=list)
 
 
 class VectorRetrieverAdapter:
@@ -233,6 +234,7 @@ class HybridQueryEngine:
             relation_statements=relation_statements,
             reranker=reranker_label,
             fusion_scores=contributions,
+            external_points=[],
         )
 
     def _fuse(
