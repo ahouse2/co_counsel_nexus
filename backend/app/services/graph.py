@@ -342,6 +342,24 @@ class GraphExecutionResult:
         )
 
 
+@dataclass(slots=True)
+class GraphTextToCypherResult:
+    question: str
+    prompt: str
+    cypher: str
+    used_generator: bool
+    warnings: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "question": self.question,
+            "prompt": self.prompt,
+            "cypher": self.cypher,
+            "used_generator": self.used_generator,
+            "warnings": list(self.warnings),
+        }
+
+
 class GraphService:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -818,6 +836,50 @@ class GraphService:
             return template.format(schema=schema_text, question=question)
         return f"Schema:\n{schema_text}\nQuestion: {question}\nCypher:"
 
+    def text_to_cypher(
+        self, question: str, *, schema: str | None = None
+    ) -> GraphTextToCypherResult:
+        question_text = question.strip()
+        if not question_text:
+            raise ValueError("Question must not be empty for text-to-Cypher generation")
+        prompt = self.build_text_to_cypher_prompt(question_text, schema)
+        generator = getattr(self._property_graph, "text_to_cypher", None)
+        warnings: List[str] = []
+        cypher = ""
+        used_generator = False
+        if callable(generator):
+            schema_text = schema or self.describe_schema()
+            try:
+                try:
+                    raw = generator(question_text, schema=schema_text)
+                except TypeError:
+                    raw = generator(question_text)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                warnings.append(f"text_to_cypher invocation failed: {exc}")
+            else:
+                used_generator = True
+                if isinstance(raw, str):
+                    cypher = raw.strip()
+                elif isinstance(raw, dict):
+                    cypher = str(raw.get("cypher", "")).strip()
+                    prompt_override = raw.get("prompt")
+                    if isinstance(prompt_override, str) and prompt_override.strip():
+                        prompt = prompt_override.strip()
+                else:
+                    cypher_attr = getattr(raw, "cypher", None)
+                    if cypher_attr is not None:
+                        cypher = str(cypher_attr).strip()
+                    prompt_attr = getattr(raw, "prompt", None)
+                    if isinstance(prompt_attr, str) and prompt_attr.strip():
+                        prompt = prompt_attr.strip()
+        return GraphTextToCypherResult(
+            question=question_text,
+            prompt=prompt,
+            cypher=cypher,
+            used_generator=used_generator,
+            warnings=warnings,
+        )
+
     def execute_agent_cypher(
         self,
         question: str,
@@ -853,7 +915,8 @@ class GraphService:
                 status_code=400,
             )
         sanitized = self._sanitize_agent_cypher(raw_query)
-        warnings: List[str] = []
+        prompt_info = self.text_to_cypher(question_text)
+        warnings: List[str] = list(prompt_info.warnings)
         if sandbox:
             enforced, added_limit = self._enforce_limit_clause(sanitized, limit=limit)
             sanitized = enforced
@@ -886,7 +949,7 @@ class GraphService:
         result = GraphExecutionResult(
             question=question_text,
             cypher=sanitized,
-            prompt=prompt or self.build_text_to_cypher_prompt(question_text),
+            prompt=prompt or prompt_info.prompt,
             records=[dict(record) for record in records],
             summary=summary,
             documents=documents,

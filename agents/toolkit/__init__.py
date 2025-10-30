@@ -12,6 +12,7 @@ from .graph_explorer import (
     community_overview,
     describe_graph_schema,
     run_cypher,
+    text_to_cypher,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "community_overview",
     "describe_graph_schema",
     "run_cypher",
+    "text_to_cypher",
 ]
