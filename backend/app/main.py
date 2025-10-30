@@ -107,6 +107,7 @@ from .services.scenarios import (
     get_scenario_engine,
 )
 from .services.timeline import TimelineService, get_timeline_service
+from .graphql import graphql_app
 from .services.tts import TextToSpeechService, get_tts_service
 from .services.voice import VoiceService, VoiceServiceError, VoiceSessionOutcome, get_voice_service
 from .security.authz import Principal
@@ -134,6 +135,8 @@ settings = get_settings()
 setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.add_middleware(MTLSMiddleware, config=create_mtls_config())
+app.add_route("/graphql", graphql_app)
+app.add_websocket_route("/graphql", graphql_app)
 
 
 def _raise_workflow_exception(exc: WorkflowException) -> None:
@@ -589,9 +592,30 @@ def timeline(
     from_ts: datetime | None = Query(default=None, description="Return events on/after this timestamp"),
     to_ts: datetime | None = Query(default=None, description="Return events on/before this timestamp"),
     entity: str | None = Query(default=None, description="Filter events by entity identifier or label"),
+    risk_band: str | None = Query(
+        default=None,
+        description="Filter events by machine-learned risk band (low, medium, high)",
+    ),
+    motion_due_before: datetime | None = Query(
+        default=None,
+        description="Return motion events with deadlines strictly before this timestamp",
+    ),
+    motion_due_after: datetime | None = Query(
+        default=None,
+        description="Return motion events with deadlines strictly after this timestamp",
+    ),
 ) -> TimelineResponse:
     try:
-        result = service.list_events(cursor=cursor, limit=limit, from_ts=from_ts, to_ts=to_ts, entity=entity)
+        result = service.list_events(
+            cursor=cursor,
+            limit=limit,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            entity=entity,
+            risk_band=risk_band,
+            motion_due_before=motion_due_before,
+            motion_due_after=motion_due_after,
+        )
     except WorkflowException as exc:
         _raise_workflow_exception(exc)
     except ValueError as exc:
@@ -609,6 +633,9 @@ def timeline(
             "entity": bool(entity),
             "from_ts": bool(from_ts),
             "to_ts": bool(to_ts),
+            "risk_band": bool(risk_band),
+            "motion_due_before": bool(motion_due_before),
+            "motion_due_after": bool(motion_due_after),
         },
     )
     return TimelineResponse(
@@ -622,6 +649,11 @@ def timeline(
                 entity_highlights=event.entity_highlights,
                 relation_tags=event.relation_tags,
                 confidence=event.confidence,
+                risk_score=event.risk_score,
+                risk_band=event.risk_band,
+                outcome_probabilities=event.outcome_probabilities,
+                recommended_actions=event.recommended_actions,
+                motion_deadline=event.motion_deadline,
             )
             for event in result.events
         ],

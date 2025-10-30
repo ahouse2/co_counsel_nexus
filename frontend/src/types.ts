@@ -26,6 +26,7 @@ export interface RelationTag {
   target: string;
   type: string;
   label: string;
+  doc?: string | null;
 }
 
 export interface ChatMessage {
@@ -39,6 +40,11 @@ export interface ChatMessage {
   mode?: 'precision' | 'recall';
 }
 
+export interface OutcomeProbability {
+  label: string;
+  probability: number;
+}
+
 export interface TimelineEvent {
   id: string;
   ts: string;
@@ -48,6 +54,11 @@ export interface TimelineEvent {
   entity_highlights: EntityHighlight[];
   relation_tags: RelationTag[];
   confidence?: number | null;
+  risk_score?: number | null;
+  risk_band?: 'low' | 'medium' | 'high' | null;
+  outcome_probabilities: OutcomeProbability[];
+  recommended_actions: string[];
+  motion_deadline?: string | null;
 }
 
 export interface TimelineResponse {

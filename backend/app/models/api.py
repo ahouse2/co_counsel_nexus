@@ -127,6 +127,11 @@ class QueryResponse(BaseModel):
     meta: QueryPaginationModel
 
 
+class OutcomeProbabilityModel(BaseModel):
+    label: str
+    probability: float
+
+
 class TimelineEventModel(BaseModel):
     id: str
     ts: datetime
@@ -136,6 +141,11 @@ class TimelineEventModel(BaseModel):
     entity_highlights: List[dict] = Field(default_factory=list)
     relation_tags: List[dict] = Field(default_factory=list)
     confidence: float | None = None
+    risk_score: float | None = None
+    risk_band: str | None = None
+    outcome_probabilities: List[OutcomeProbabilityModel] = Field(default_factory=list)
+    recommended_actions: List[str] = Field(default_factory=list)
+    motion_deadline: Optional[datetime] = None
 
 
 class TimelineResponse(BaseModel):
