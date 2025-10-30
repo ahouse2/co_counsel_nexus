@@ -39,6 +39,7 @@ from .models.api import (
     BillingUsageResponse,
     DevAgentApplyRequest,
     DevAgentApplyResponse,
+    DevAgentMetricsModel,
     DevAgentProposalListResponse,
     DevAgentProposalModel,
     DevAgentTaskModel,
@@ -163,6 +164,8 @@ def _proposal_from_record(
         validation=dict(proposal.validation),
         approvals=[dict(entry) for entry in proposal.approvals],
         rationale=list(proposal.rationale),
+        validated_at=proposal.validated_at,
+        governance=dict(proposal.governance),
     )
 
 
@@ -890,7 +893,20 @@ def dev_agent_proposals(
 ) -> DevAgentProposalListResponse:
     _ = principal
     backlog_models = [_task_from_record(task) for task in service.list_backlog()]
-    return DevAgentProposalListResponse(backlog=backlog_models)
+    metrics = service.metrics()
+    metrics_model = DevAgentMetricsModel(
+        generated_at=datetime.fromisoformat(metrics["generated_at"]),
+        total_tasks=metrics["total_tasks"],
+        triaged_tasks=metrics["triaged_tasks"],
+        rollout_pending=metrics["rollout_pending"],
+        validated_proposals=metrics["validated_proposals"],
+        quality_gate_pass_rate=metrics["quality_gate_pass_rate"],
+        velocity_per_day=metrics["velocity_per_day"],
+        active_rollouts=metrics["active_rollouts"],
+        ci_workflows=list(metrics["ci_workflows"]),
+        feature_toggles=[dict(toggle) for toggle in metrics["feature_toggles"]],
+    )
+    return DevAgentProposalListResponse(backlog=backlog_models, metrics=metrics_model)
 
 
 @app.post("/dev-agent/apply", response_model=DevAgentApplyResponse)
@@ -903,10 +919,24 @@ def dev_agent_apply(
     task_model = _task_from_record(result.task)
     proposal_model = _proposal_from_record(result.task, result.proposal)
     execution_model = _execution_from_result(result.execution)
+    metrics = service.metrics()
+    metrics_model = DevAgentMetricsModel(
+        generated_at=datetime.fromisoformat(metrics["generated_at"]),
+        total_tasks=metrics["total_tasks"],
+        triaged_tasks=metrics["triaged_tasks"],
+        rollout_pending=metrics["rollout_pending"],
+        validated_proposals=metrics["validated_proposals"],
+        quality_gate_pass_rate=metrics["quality_gate_pass_rate"],
+        velocity_per_day=metrics["velocity_per_day"],
+        active_rollouts=metrics["active_rollouts"],
+        ci_workflows=list(metrics["ci_workflows"]),
+        feature_toggles=[dict(toggle) for toggle in metrics["feature_toggles"]],
+    )
     return DevAgentApplyResponse(
         proposal=proposal_model,
         task=task_model,
         execution=execution_model,
+        metrics=metrics_model,
     )
 
 

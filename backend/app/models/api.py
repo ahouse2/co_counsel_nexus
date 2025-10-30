@@ -487,6 +487,8 @@ class DevAgentProposalModel(BaseModel):
     validation: Dict[str, Any]
     approvals: List[Dict[str, Any]] = Field(default_factory=list)
     rationale: List[str] = Field(default_factory=list)
+    validated_at: datetime | None = None
+    governance: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DevAgentTaskModel(BaseModel):
@@ -504,8 +506,22 @@ class DevAgentTaskModel(BaseModel):
     proposals: List[DevAgentProposalModel] = Field(default_factory=list)
 
 
+class DevAgentMetricsModel(BaseModel):
+    generated_at: datetime
+    total_tasks: int
+    triaged_tasks: int
+    rollout_pending: int
+    validated_proposals: int
+    quality_gate_pass_rate: float
+    velocity_per_day: float
+    active_rollouts: int
+    ci_workflows: List[str]
+    feature_toggles: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class DevAgentProposalListResponse(BaseModel):
     backlog: List[DevAgentTaskModel]
+    metrics: DevAgentMetricsModel
 
 
 class DevAgentApplyRequest(BaseModel):
@@ -516,6 +532,7 @@ class DevAgentApplyResponse(BaseModel):
     proposal: DevAgentProposalModel
     task: DevAgentTaskModel
     execution: SandboxExecutionModel
+    metrics: DevAgentMetricsModel
 
 
 class ScenarioParticipantModel(BaseModel):

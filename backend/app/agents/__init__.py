@@ -1,9 +1,10 @@
 """Microsoft Agents SDK orchestration primitives for the backend."""
 
+from __future__ import annotations
+
 from .runner import MicrosoftAgentsOrchestrator, get_orchestrator
 
 __all__ = ["MicrosoftAgentsOrchestrator", "get_orchestrator"]
-from __future__ import annotations
 
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
