@@ -696,6 +696,39 @@ class VoiceSegmentModel(BaseModel):
     confidence: float
 
 
+class VoicePersonaDirectiveModel(BaseModel):
+    persona_id: str
+    speaker_id: str | None = None
+    tone: str
+    language: str
+    pace: float = Field(gt=0.0, le=2.5)
+    glossary: Dict[str, str] = Field(default_factory=dict)
+    rationale: str
+
+
+class VoiceSentimentArcPointModel(BaseModel):
+    offset: float = Field(ge=0.0)
+    score: float = Field(ge=0.0, le=1.0)
+    label: Literal["positive", "negative", "neutral"]
+
+
+class VoicePersonaShiftModel(BaseModel):
+    at: float = Field(ge=0.0)
+    persona_id: str
+    tone: str
+    language: str
+    pace: float = Field(gt=0.0, le=2.5)
+    trigger: str
+
+
+class VoiceTranslationModel(BaseModel):
+    source_language: str
+    target_language: str
+    translated_text: str
+    bilingual_text: str
+    glossary: Dict[str, str] = Field(default_factory=dict)
+
+
 class VoiceSessionModel(BaseModel):
     session_id: str
     thread_id: str
@@ -703,6 +736,10 @@ class VoiceSessionModel(BaseModel):
     persona_id: str
     transcript: str
     sentiment: VoiceSentimentModel
+    persona_directive: VoicePersonaDirectiveModel
+    sentiment_arc: List[VoiceSentimentArcPointModel]
+    persona_shifts: List[VoicePersonaShiftModel]
+    translation: VoiceTranslationModel
     segments: List[VoiceSegmentModel]
     created_at: datetime
     updated_at: datetime
