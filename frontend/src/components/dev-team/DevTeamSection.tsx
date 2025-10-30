@@ -5,6 +5,8 @@ import { BacklogList } from './BacklogList';
 import { ProposalDetail } from './ProposalDetail';
 import { ValidationResults } from './ValidationResults';
 import { ApprovalList } from './ApprovalList';
+import { MetricsDashboard } from './MetricsDashboard';
+import { GovernancePanel } from './GovernancePanel';
 
 function normaliseProposalValidation(proposal: DevAgentProposal | null): SandboxExecution | null {
   if (!proposal) {
@@ -51,6 +53,7 @@ export function DevTeamSection(): JSX.Element {
     lastExecution,
     lastExecutionProposalId,
     lastUpdated,
+    metrics,
     applyProposal,
     error,
   } = useDevTeamContext();
@@ -89,8 +92,11 @@ export function DevTeamSection(): JSX.Element {
     void applyProposal(selectedProposal.proposal_id);
   }, [applyProposal, selectedProposal]);
 
+  const governance = <GovernancePanel proposal={selectedProposal ?? null} />;
+
   return (
     <div className="dev-team-section">
+      <MetricsDashboard metrics={metrics} />
       <div className="dev-team-grid">
         <BacklogList
           tasks={backlog}
@@ -115,6 +121,7 @@ export function DevTeamSection(): JSX.Element {
             onApprove={selectedProposal ? handleApprove : null}
             validation={<ValidationResults execution={execution} status={validationStatus} />}
             approvals={<ApprovalList approvals={selectedProposal?.approvals ?? []} />}
+            governance={governance}
             error={error}
           />
         </div>

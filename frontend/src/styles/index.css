@@ -1563,6 +1563,72 @@ video {
   gap: 1.5rem;
 }
 
+.dev-team-metrics {
+  background: var(--surface-elevated);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dev-team-metrics header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.dev-team-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.dev-team-metrics-grid article {
+  background: var(--surface-subtle);
+  padding: 1rem;
+  border-radius: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dev-team-metric-value {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.dev-team-metric-subtext {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.dev-team-metrics-toggles ul,
+.dev-team-metrics-workflows ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dev-team-metrics-toggles li,
+.dev-team-metrics-workflows li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: var(--surface-subtle);
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+}
+
+.dev-team-metrics-toggles code {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
 .dev-team-grid {
   display: grid;
   grid-template-columns: minmax(280px, 320px) 1fr;
@@ -1879,6 +1945,54 @@ video {
 .dev-team-detail-footer {
   display: grid;
   gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.dev-team-governance-block {
+  background: var(--surface-subtle);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dev-team-governance-status {
+  font-weight: 600;
+}
+
+.dev-team-governance-status.status-passed {
+  color: var(--success-500);
+}
+
+.dev-team-governance-status.status-failed {
+  color: var(--danger-500);
+}
+
+.dev-team-governance-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dev-team-governance-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dev-team-governance-failures {
+  font-size: 0.9rem;
+}
+
+.dev-team-governance-failures ul {
+  list-style: none;
+  padding: 0.5rem 0 0;
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
 }
 
 .dev-team-validation {
