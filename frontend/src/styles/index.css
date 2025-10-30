@@ -552,6 +552,52 @@ video {
   color: var(--color-text-muted);
 }
 
+.voice-console__persona-directive {
+  margin-top: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  background: rgba(14, 18, 26, 0.9);
+  padding: 1.25rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.voice-console__persona-directive h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-accent-cyan);
+}
+
+.voice-console__persona-directive p {
+  margin: 0;
+}
+
+.voice-console__persona-rationale {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.voice-console__glossary {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.voice-console__glossary dt {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+
+.voice-console__glossary dd {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-text-primary);
+}
+
 .voice-console__controls {
   display: flex;
   flex-wrap: wrap;
@@ -630,6 +676,93 @@ video {
 .voice-console__transcript-empty {
   list-style: none;
   color: var(--color-text-muted);
+}
+
+.voice-console__translation,
+.voice-console__sentiment-arc,
+.voice-console__persona-shifts {
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  background: rgba(12, 16, 24, 0.85);
+  padding: 1.1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.voice-console__translation h3,
+.voice-console__sentiment-arc h3,
+.voice-console__persona-shifts h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.voice-console__translation-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+}
+
+.voice-console__sentiment-arc ol,
+.voice-console__persona-shifts ol {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.voice-console__sentiment-arc li,
+.voice-console__persona-shifts li {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.88rem;
+}
+
+.voice-console__arc-offset,
+.voice-console__shift-time {
+  font-family: var(--font-mono);
+  color: var(--color-accent-violet);
+}
+
+.voice-console__arc-score {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(24, 224, 252, 0.8), rgba(139, 93, 255, 0.6));
+}
+
+.voice-console__arc-score--negative {
+  background: linear-gradient(90deg, rgba(255, 64, 64, 0.85), rgba(255, 138, 76, 0.7));
+}
+
+.voice-console__arc-score--neutral {
+  background: linear-gradient(90deg, rgba(180, 180, 200, 0.75), rgba(120, 120, 140, 0.6));
+}
+
+.voice-console__arc-label {
+  text-transform: capitalize;
+  color: var(--color-text-muted);
+}
+
+.voice-console__shift-tone {
+  color: var(--color-accent-gold);
+  text-transform: capitalize;
+}
+
+.voice-console__shift-language {
+  font-family: var(--font-mono);
+  color: var(--color-accent-cyan);
+}
+
+.voice-console__shift-trigger {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
 }
 
 .voice-console__status {

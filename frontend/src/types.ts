@@ -418,6 +418,39 @@ export interface VoiceSegment {
   confidence: number;
 }
 
+export interface VoicePersonaDirective {
+  persona_id: string;
+  speaker_id?: string | null;
+  tone: string;
+  language: string;
+  pace: number;
+  glossary: Record<string, string>;
+  rationale: string;
+}
+
+export interface VoiceSentimentArcPoint {
+  offset: number;
+  score: number;
+  label: 'positive' | 'negative' | 'neutral';
+}
+
+export interface VoicePersonaShift {
+  at: number;
+  persona_id: string;
+  tone: string;
+  language: string;
+  pace: number;
+  trigger: string;
+}
+
+export interface VoiceTranslation {
+  source_language: string;
+  target_language: string;
+  translated_text: string;
+  bilingual_text: string;
+  glossary: Record<string, string>;
+}
+
 export interface VoiceSession {
   session_id: string;
   thread_id: string;
@@ -425,6 +458,10 @@ export interface VoiceSession {
   persona_id: string;
   transcript: string;
   sentiment: VoiceSentiment;
+  persona_directive: VoicePersonaDirective;
+  sentiment_arc: VoiceSentimentArcPoint[];
+  persona_shifts: VoicePersonaShift[];
+  translation: VoiceTranslation;
   segments: VoiceSegment[];
   created_at: string;
   updated_at: string;

@@ -11,7 +11,7 @@ import pytest
 from backend.app.config import Settings
 from backend.app.services.voice.adapters import TranscriptionResult, TranscriptionSegment
 from backend.app.services.voice.sentiment import SentimentResult
-from backend.app.services.voice.service import VoiceService
+from backend.app.services.voice.service import TranslationResult, VoiceService
 from backend.app.services.voice.session import VoiceSessionStore
 from backend.app.storage.agent_memory_store import AgentMemoryStore, AgentThreadRecord
 
@@ -40,12 +40,14 @@ class StubSentiment:
 class StubSynthesizer:
     def __init__(self, sample_rate: int) -> None:
         self.sample_rate = sample_rate
+        self.last_text: str | None = None
 
     def available_speakers(self):
         return ("p273", "p270")
 
     def synthesize(self, text: str, *, speaker_id: str | None, speed: float, sample_rate: int | None = None) -> bytes:
         assert text
+        self.last_text = text
         sr = sample_rate or self.sample_rate
         duration = 0.05
         t = np.linspace(0, duration, int(sr * duration), endpoint=False)
@@ -55,6 +57,54 @@ class StubSynthesizer:
 
         sf.write(buffer, tone, sr, format="WAV")
         return buffer.getvalue()
+
+
+class StubTranslator:
+    def __init__(self) -> None:
+        self.calls: list[Dict[str, Any]] = []
+
+    def translate(
+        self,
+        text: str,
+        *,
+        source_language: str,
+        target_language: str,
+        glossary: Dict[str, str] | None = None,
+    ) -> TranslationResult:
+        payload = {
+            "text": text,
+            "source": source_language,
+            "target": target_language,
+            "glossary": dict(glossary or {}),
+        }
+        self.calls.append(payload)
+        translated = text
+        applied: Dict[str, str] = {}
+        for key, value in (glossary or {}).items():
+            if key.lower() in translated.lower():
+                translated = translated.replace(key, value)
+                applied[key] = value
+        if target_language != source_language:
+            translated_text = f"{translated} [{target_language}]"
+            bilingual = f"{translated_text} / {text}"
+        else:
+            translated_text = translated
+            bilingual = translated
+        return TranslationResult(
+            source_language=source_language,
+            target_language=target_language,
+            translated_text=translated_text,
+            bilingual_text=bilingual,
+            applied_glossary=applied,
+        )
+
+
+class StubGlossary:
+    def resolve(self, *, case_id: str, persona_id: str) -> Dict[str, str]:
+        return {
+            "compliance": "cumplimiento",
+            "case": "caso",
+        }
 
 
 class StubAgentsService:
@@ -100,6 +150,15 @@ def voice_service(tmp_path: Path) -> VoiceService:
     settings.prepare_directories()
     memory_store = AgentMemoryStore(settings.agent_threads_dir)
     session_store = VoiceSessionStore(settings.voice_sessions_dir)
+    settings.voice_personas["aurora"].update(
+        {
+            "bilingual": True,
+            "secondary_language": "es",
+            "glossary": {"compliance": "cumplimiento"},
+        }
+    )
+    translator = StubTranslator()
+    glossary = StubGlossary()
     service = VoiceService(
         settings=settings,
         transcriber=StubTranscriber("How is the compliance case progressing?"),
@@ -107,6 +166,8 @@ def voice_service(tmp_path: Path) -> VoiceService:
         sentiment=StubSentiment(),
         session_store=session_store,
         agents_service=StubAgentsService(memory_store),
+        translator=translator,
+        glossary=glossary,
     )
     return service
 
@@ -124,13 +185,38 @@ def test_voice_service_round_trip(voice_service: VoiceService) -> None:
     assert session.persona_id == "aurora"
     assert session.sentiment_label == "positive"
     assert pytest.approx(session.sentiment_score, rel=1e-3) == 0.82
+    assert session.translation["target_language"] == "es"
+    assert "cumplimiento" in session.translation["translated_text"]
+    assert len(session.persona_shifts) >= 2
+    assert session.persona_directive["tone"].lower() in {"celebratory", "reassuring", "analytical"}
     assert session.input_audio_path == Path("input.wav")
     stored_session = voice_service.sessions.load(session.session_id)
     assert stored_session.response_audio_path == Path("response.wav")
     stream = list(voice_service.stream_response_audio(session.session_id))
     assert stream, "Streamed audio should contain chunks"
+    assert isinstance(voice_service.translator, StubTranslator)
+    translator_calls = voice_service.translator.calls  # type: ignore[attr-defined]
+    assert translator_calls and translator_calls[0]["target"] == "es"
+    assert voice_service.synthesizer.last_text is not None  # type: ignore[attr-defined]
+    assert voice_service.synthesizer.last_text.endswith("[es]")  # type: ignore[attr-defined]
     thread_payload = voice_service.agents_service.get_thread(session.thread_id)
     voice_memory = thread_payload["memory"]["voice_sessions"][session.session_id]
     assert voice_memory["persona_id"] == "aurora"
     assert voice_memory["sentiment_label"] == "positive"
     assert voice_memory["segments"][0]["text"].startswith("How is the")
+    assert voice_memory["translation"]["glossary"]["compliance"] == "cumplimiento"
+
+
+def test_voice_service_persona_transitions(voice_service: VoiceService) -> None:
+    outcome = voice_service.create_session(
+        case_id="CASE-INTL-002",
+        audio_payload=b"audio",
+        persona_id="aurora",
+        principal=None,
+    )
+    assert len(outcome.sentiment_arc) >= 1
+    assert len(outcome.persona_shifts) >= 2
+    last_shift = outcome.persona_shifts[-1]
+    assert last_shift["language"] == "es"
+    assert "sentiment" in last_shift["trigger"].lower()
+    assert outcome.translation.target_language == "es"

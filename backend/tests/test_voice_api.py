@@ -13,7 +13,12 @@ from fastapi.testclient import TestClient
 from backend.app.models.api import VoicePersonaListResponse
 from backend.app.services.voice.adapters import TranscriptionResult, TranscriptionSegment
 from backend.app.services.voice.sentiment import SentimentResult
-from backend.app.services.voice.service import VoiceServiceError, VoiceSessionOutcome
+from backend.app.services.voice.service import (
+    PersonaDirective,
+    TranslationResult,
+    VoiceServiceError,
+    VoiceSessionOutcome,
+)
 from backend.app.services.voice.session import VoiceSession, VoiceTurn
 from backend.app.services.voice import get_voice_service
 
@@ -89,6 +94,35 @@ class ApiStubVoiceService:
             sentiment=SentimentResult(label="neutral", score=0.5, pace=1.0),
             assistant_text="Assistant reply",
             thread_payload=self.agents_service.persist_thread(session.thread_id, session.case_id, session.transcript),
+            persona_directive=PersonaDirective(
+                persona_id=session.persona_id,
+                speaker_id=None,
+                tone="analytical",
+                language="en",
+                pace=1.0,
+                glossary={},
+                rationale="Stub directive",
+            ),
+            translation=TranslationResult(
+                source_language="en",
+                target_language="en",
+                translated_text="Assistant reply",
+                bilingual_text="Assistant reply",
+                applied_glossary={},
+            ),
+            sentiment_arc=(
+                {"offset": 0.0, "score": 0.5, "label": "neutral"},
+            ),
+            persona_shifts=(
+                {
+                    "at": 0.0,
+                    "persona_id": session.persona_id,
+                    "tone": "listening",
+                    "language": "en",
+                    "pace": 1.0,
+                    "trigger": "user sentiment intake",
+                },
+            ),
         )
         self._sessions[session_id] = outcome
         return outcome
