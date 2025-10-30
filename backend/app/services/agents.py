@@ -10,7 +10,7 @@ from uuid import uuid4
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
-from ..agents import AdaptiveAgentsOrchestrator, get_orchestrator
+from ..agents import MicrosoftAgentsOrchestrator, get_orchestrator
 from ..agents.graph_manager import GraphManagerAgent
 from ..agents.qa import QAAgent
 from ..agents.types import AgentThread, AgentTurn
@@ -134,7 +134,7 @@ class AgentsService:
         memory_store: AgentMemoryStore | None = None,
         document_store: DocumentStore | None = None,
         qa_agent: QAAgent | None = None,
-        orchestrator: AdaptiveAgentsOrchestrator | None = None,
+        orchestrator: MicrosoftAgentsOrchestrator | None = None,
         graph_service: GraphService | None = None,
         timeline_store: TimelineStore | None = None,
         graph_agent: GraphManagerAgent | None = None,

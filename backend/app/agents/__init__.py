@@ -1,5 +1,5 @@
 """Microsoft Agents SDK orchestration primitives for the backend."""
 
-from .runner import AdaptiveAgentsOrchestrator, get_orchestrator
+from .runner import MicrosoftAgentsOrchestrator, get_orchestrator
 
-__all__ = ["AdaptiveAgentsOrchestrator", "get_orchestrator"]
+__all__ = ["MicrosoftAgentsOrchestrator", "get_orchestrator"]

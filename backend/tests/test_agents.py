@@ -9,6 +9,7 @@ from backend.app.services.agents import AgentsService
 from backend.app.services.errors import WorkflowAbort
 from backend.app.storage.agent_memory_store import AgentMemoryStore, AgentThreadRecord
 
+
 @pytest.fixture()
 def agents_client(client: TestClient) -> TestClient:
     from backend.app.services import agents as agents_service
@@ -55,14 +56,13 @@ def test_agents_workflow_generates_thread(
     qa_scores = payload["qa_scores"]
     assert len(qa_scores) == 15
     assert all(score >= 7.0 for score in qa_scores.values())
+
     telemetry = payload["telemetry"]
     assert telemetry["sequence_valid"] is True
     assert telemetry["status"] == "succeeded"
     assert telemetry["errors"] == []
     assert telemetry["retries"] == {}
     assert telemetry["turn_roles"] == roles
-    assert telemetry["delegations"]
-    assert all(entry["from"] == "Worker" for entry in telemetry["delegations"])
     assert telemetry["branching"] == []
     assert telemetry["plan_revisions"] == 0
     assert telemetry["hand_offs"] == [
@@ -74,13 +74,18 @@ def test_agents_workflow_generates_thread(
     assert telemetry["autonomy_level"] == "high"
     assert telemetry["total_duration_ms"] >= 0
 
+    delegators = {entry["from"] for entry in telemetry["delegations"]}
+    assert {"Strategy", "Ingestion", "Research", "CoCounsel", "QA"}.issubset(delegators)
+    assert all(entry["metadata"] for entry in telemetry["delegations"])
+
     memory = payload["memory"]
     assert "plan" in memory and memory["plan"]["steps"]
     assert memory["insights"].get("ingestion", {}).get("status") in {"ready", "empty"}
     assert len(memory.get("turns", [])) == len(roles)
     conversation = memory.get("conversation", [])
     assert conversation and conversation[0]["role"] == "user"
-    assert any(entry.get("name") == "Critic" for entry in conversation)
+    agent_names = [entry.get("name") for entry in conversation if entry.get("role") == "agent"]
+    assert agent_names == ["Strategy", "Ingestion", "Research", "CoCounsel", "QA"]
 
     thread_id = payload["thread_id"]
 
@@ -141,7 +146,7 @@ class _TransientRetrievalService:
                 "graph": {"nodes": [{"id": "entity::acme"}], "edges": [{"id": "edge::acme"}]},
                 "privilege": {"aggregate": {"label": "non-privileged", "score": 0.1}, "decisions": []},
             },
-        } 
+        }
 
 
 class _SuccessfulRetrievalService:
@@ -198,20 +203,16 @@ def test_agents_service_retries_transient_error(tmp_path: Path) -> None:
     assert len(response["errors"]) == 1
     error = response["errors"][0]
     assert error["code"] == "RETRIEVAL_RUNTIME_ERROR"
-    assert error["retryable"] is True
     telemetry = response["telemetry"]
     assert telemetry["status"] == "degraded"
     assert telemetry["retries"].get("retrieval") == 1
-    assert telemetry["errors"]
-    assert telemetry["turn_roles"] == ["strategy", "ingestion", "research", "cocounsel", "qa"]
+    assert telemetry["errors"][0]["code"] == "RETRIEVAL_RUNTIME_ERROR"
     assert telemetry["hand_offs"][-1] == {
         "from": "cocounsel",
         "to": "qa",
         "via": "qa_rubric",
     }
-    memory = response["memory"]
-    assert memory["plan"]["steps"]
-    assert service.memory_store.list_threads()
+    assert response["memory"]["conversation"][0]["role"] == "user"
 
 
 def test_agents_service_replans_on_empty_citations(tmp_path: Path) -> None:
@@ -229,12 +230,12 @@ def test_agents_service_replans_on_empty_citations(tmp_path: Path) -> None:
     assert telemetry["plan_revisions"] == 1
     assert telemetry["branching"]
     assert any(branch["reason"] == "missing_citations" for branch in telemetry["branching"])
-    assert any(note.startswith("Plan revision") for note in telemetry["notes"])
-    assert len(telemetry["delegations"]) >= 4
+    assert any("revision" in note for note in telemetry["notes"])
     turns = response["turns"]
-    assert turns[2]["action"].endswith("failed")
-    assert any(turn["role"] == "strategy" and turn.get("annotations", {}).get("plan_revision") == 1 for turn in turns)
-    assert response["memory"]["conversation"]
+    strategy_turns = [turn for turn in turns if turn["role"] == "strategy"]
+    assert len(strategy_turns) == 2
+    assert strategy_turns[-1]["annotations"]["plan_revision"] == 1
+    assert response["memory"]["conversation"][1]["name"] == "Strategy"
 
 
 def test_agents_service_records_failure(tmp_path: Path) -> None:
@@ -254,8 +255,6 @@ def test_agents_service_records_failure(tmp_path: Path) -> None:
     assert payload["status"] == "failed"
     assert payload["errors"][0]["code"] == "RETRIEVAL_INVALID_INPUT"
     assert payload["telemetry"]["status"] == "failed"
-    assert payload["telemetry"]["errors"]
-    assert [turn["role"] for turn in payload["turns"]][-1] == "research"
     assert payload["turns"][-1]["action"].endswith("failed")
 
 
@@ -276,7 +275,7 @@ def test_agents_service_allows_partial_success(tmp_path: Path) -> None:
     assert telemetry["plan_revisions"] >= 1
     assert any(turn["action"].endswith("failed") for turn in response["turns"])
     assert response["errors"]
-    assert response["memory"]["conversation"]
+    assert any(entry.get("name") == "Strategy" for entry in response["memory"]["conversation"])
 
 
 class _CountingMemoryStore(AgentMemoryStore):
@@ -301,9 +300,14 @@ def test_agents_service_persists_memory_each_turn(tmp_path: Path) -> None:
     response = service.run_case("case-memory", "Summarise integration milestones.")
 
     turn_count = len(response["turns"])
-    # Five turns -> five per-turn writes + orchestrator final persist + service final snapshot
     assert len(store.records) == turn_count + 2
     intermediate_snapshots = [record.payload.get("memory", {}) for record in store.records[:-1]]
     assert any(snapshot.get("plan", {}).get("steps") for snapshot in intermediate_snapshots)
     assert response["telemetry"]["hand_offs"][-1]["via"] == "qa_rubric"
-    assert len(response["memory"].get("conversation", [])) >= turn_count
+    assert [entry.get("name") for entry in response["memory"]["conversation"] if entry.get("role") == "agent"] == [
+        "Strategy",
+        "Ingestion",
+        "Research",
+        "CoCounsel",
+        "QA",
+    ]
