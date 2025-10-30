@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ScenarioConfigurator } from './ScenarioConfigurator';
 import { SimulationCanvas } from './SimulationCanvas';
+import { BeatAuthoringPanel } from './BeatAuthoringPanel';
 import { useScenario } from '@/context/ScenarioContext';
 import type { ScenarioRunTurn } from '@/types';
 
@@ -149,6 +150,7 @@ export function SimulationWorkbench(): JSX.Element {
           <div className="simulation-workbench__progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
             <div className="simulation-workbench__progress-bar" style={{ width: `${progress}%` }} />
           </div>
+          <BeatAuthoringPanel />
           <section className="simulation-workbench__transcript" aria-live="polite">
             {transcript.length ? (
               <ol>

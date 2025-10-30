@@ -546,6 +546,40 @@ class ScenarioEvidenceSpecModel(BaseModel):
     document_id: Optional[str] = None
 
 
+class ScenarioDirectorMotionModel(BaseModel):
+    direction: Literal["none", "left", "right", "forward", "back"]
+    intensity: float
+    tempo: float
+
+
+class ScenarioDirectorLightingModel(BaseModel):
+    preset: str
+    palette: List[str]
+    intensity: float
+    focus: float
+    ambient: float
+
+
+class ScenarioDirectorPersonaModel(BaseModel):
+    expression: str
+    vocal_register: str
+    confidence: float
+
+
+class ScenarioDirectorBeatModel(BaseModel):
+    beat_id: str
+    emotional_tone: str
+    counter_argument: Optional[str] = None
+    lighting: ScenarioDirectorLightingModel
+    motion: ScenarioDirectorMotionModel
+    persona: ScenarioDirectorPersonaModel
+
+
+class ScenarioDirectorManifestModel(BaseModel):
+    version: str
+    beats: Dict[str, ScenarioDirectorBeatModel]
+
+
 class ScenarioBeatSpecModel(BaseModel):
     id: str
     kind: Literal["scripted", "dynamic"]
@@ -569,6 +603,7 @@ class ScenarioDefinitionModel(BaseModel):
     variables: Dict[str, ScenarioVariableModel]
     evidence: List[ScenarioEvidenceSpecModel]
     beats: List[ScenarioBeatSpecModel]
+    director: ScenarioDirectorManifestModel
 
 
 class ScenarioMetadataModel(BaseModel):
@@ -598,6 +633,7 @@ class ScenarioRunRequestModel(BaseModel):
     variables: Dict[str, str] = Field(default_factory=dict)
     evidence: Dict[str, ScenarioEvidenceBindingModel] = Field(default_factory=dict)
     enable_tts: bool = False
+    director_overrides: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 class ScenarioRunAudioModel(BaseModel):
@@ -619,6 +655,7 @@ class ScenarioRunTurnModel(BaseModel):
     duration_ms: Optional[float]
     thread_id: Optional[str]
     audio: Optional[ScenarioRunAudioModel] = None
+    director: Optional[ScenarioDirectorBeatModel] = None
 
 
 class ScenarioRunResponseModel(BaseModel):
