@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass, field
 from enum import Enum
-from dataclasses import dataclass
+from itertools import zip_longest
 from time import perf_counter
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, Iterator, List, Set, Tuple
 
 from qdrant_client.http import models as qmodels
 
@@ -80,6 +82,13 @@ class Citation:
     uri: str | None
     page_label: str | None
     chunk_index: int | None
+    page_number: int | None = None
+    title: str | None = None
+    source_type: str | None = None
+    retrievers: List[str] = field(default_factory=list)
+    fusion_score: float | None = None
+    confidence: float | None = None
+    entities: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, object]:
         payload: Dict[str, object] = {"docId": self.doc_id, "span": self.span}
@@ -89,6 +98,20 @@ class Citation:
             payload["pageLabel"] = self.page_label
         if self.chunk_index is not None:
             payload["chunkIndex"] = self.chunk_index
+        if self.page_number is not None:
+            payload["pageNumber"] = self.page_number
+        if self.title:
+            payload["title"] = self.title
+        if self.source_type:
+            payload["sourceType"] = self.source_type
+        if self.retrievers:
+            payload["retrievers"] = self.retrievers
+        if self.fusion_score is not None:
+            payload["fusionScore"] = self.fusion_score
+        if self.confidence is not None:
+            payload["confidence"] = self.confidence
+        if self.entities:
+            payload["entities"] = self.entities
         return payload
 
 
@@ -416,23 +439,26 @@ class RetrievalService:
 
     def _build_citations(self, results: List[qmodels.ScoredPoint]) -> List[Citation]:
         citations: List[Citation] = []
+        doc_cache: Dict[str, Dict[str, object]] = {}
         for point in results:
             payload = point.payload or {}
             raw_doc_id = payload.get("doc_id")
             if raw_doc_id is None:
                 continue
             doc_id = str(raw_doc_id)
-            uri = payload.get("uri")
-            if uri is None:
-                try:
-                    doc_record = self.document_store.read_document(doc_id)
-                    uri = doc_record.get("uri") if isinstance(doc_record, dict) else None
-                except FileNotFoundError:
-                    uri = None
+            doc_record = self._document_record(doc_id, doc_cache)
+            uri = self._citation_uri(payload, doc_record)
             text = str(payload.get("text", ""))
             span = self._citation_snippet(text)
             chunk_index = self._safe_int(payload.get("chunk_index"))
             page_label = self._page_label(payload, chunk_index)
+            page_number = self._page_number(payload, page_label, chunk_index)
+            title = self._citation_title(payload, doc_record)
+            source_type = self._citation_source(payload, doc_record)
+            retrievers = self._citation_retrievers(payload)
+            fusion_score = self._safe_float(payload.get("fusion_score"))
+            confidence = self._safe_float(point.score)
+            entities = self._citation_entities(payload, doc_record)
             citations.append(
                 Citation(
                     doc_id=doc_id,
@@ -440,6 +466,13 @@ class RetrievalService:
                     uri=uri,
                     page_label=page_label,
                     chunk_index=chunk_index,
+                    page_number=page_number,
+                    title=title,
+                    source_type=source_type,
+                    retrievers=retrievers,
+                    fusion_score=fusion_score,
+                    confidence=confidence,
+                    entities=entities,
                 )
             )
         return citations
@@ -498,6 +531,159 @@ class RetrievalService:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    def _safe_float(self, value: object) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _document_record(
+        self, doc_id: str, cache: Dict[str, Dict[str, object]]
+    ) -> Dict[str, object]:
+        if doc_id not in cache:
+            try:
+                cache[doc_id] = self.document_store.read_document(doc_id)
+            except FileNotFoundError:
+                cache[doc_id] = {}
+        return cache[doc_id]
+
+    def _citation_uri(
+        self, payload: Dict[str, object], doc_record: Dict[str, object] | None
+    ) -> str | None:
+        uri = payload.get("uri")
+        if isinstance(uri, str) and uri.strip():
+            return uri.strip()
+        if not doc_record:
+            return None
+        record_uri = doc_record.get("uri")
+        if isinstance(record_uri, str) and record_uri.strip():
+            return record_uri.strip()
+        return None
+
+    def _citation_title(
+        self, payload: Dict[str, object], doc_record: Dict[str, object] | None
+    ) -> str | None:
+        candidates = [
+            payload.get("title"),
+            payload.get("document_title"),
+            doc_record.get("title") if doc_record else None,
+            doc_record.get("name") if doc_record else None,
+        ]
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return None
+
+    def _citation_source(
+        self, payload: Dict[str, object], doc_record: Dict[str, object] | None
+    ) -> str | None:
+        candidates = [
+            payload.get("source_type"),
+            doc_record.get("source_type") if doc_record else None,
+        ]
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip().lower()
+        return None
+
+    def _citation_retrievers(self, payload: Dict[str, object]) -> List[str]:
+        retrievers_raw = payload.get("retrievers")
+        retrievers: List[str] = []
+        if isinstance(retrievers_raw, (list, tuple, set)):
+            retrievers.extend(str(item).strip() for item in retrievers_raw if str(item).strip())
+        single = payload.get("retriever")
+        if single:
+            retrievers.append(str(single).strip())
+        ordered = sorted({item for item in retrievers if item})
+        return ordered
+
+    def _citation_entities(
+        self,
+        payload: Dict[str, object],
+        doc_record: Dict[str, object] | None,
+    ) -> List[Dict[str, str]]:
+        labels = self._normalise_str_list(payload.get("entity_labels"))
+        ids = self._normalise_str_list(payload.get("entity_ids"))
+        types = self._normalise_str_list(payload.get("entity_types"))
+        if doc_record:
+            labels.extend(self._normalise_str_list(doc_record.get("entity_labels")))
+            ids.extend(self._normalise_str_list(doc_record.get("entity_ids")))
+            types.extend(self._normalise_str_list(doc_record.get("entity_types")))
+        highlights: List[Dict[str, str]] = []
+        seen: Set[Tuple[str, str, str]] = set()
+        for label, entity_id, entity_type in zip_longest(labels, ids, types, fillvalue=None):
+            label_value = (label or "").strip()
+            entity_id_value = (entity_id or "").strip()
+            entity_type_value = (entity_type or "").strip()
+            if not label_value and not entity_id_value:
+                continue
+            if not entity_id_value:
+                entity_id_value = label_value or "entity::unknown"
+            if not entity_type_value:
+                entity_type_value = "entity"
+            key = (
+                entity_id_value.lower(),
+                label_value.lower() or entity_id_value.lower(),
+                entity_type_value.lower(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            highlights.append(
+                {
+                    "id": entity_id_value,
+                    "label": label_value or entity_id_value,
+                    "type": entity_type_value,
+                }
+            )
+        return highlights
+
+    def _normalise_str_list(self, value: object) -> List[str]:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return [stripped] if stripped else []
+        if isinstance(value, (list, tuple, set)):
+            normalised: List[str] = []
+            for item in value:
+                if item is None:
+                    continue
+                text = str(item).strip()
+                if text:
+                    normalised.append(text)
+            return normalised
+        return []
+
+    def _page_number(
+        self,
+        payload: Dict[str, object],
+        page_label: str | None,
+        chunk_index: int | None,
+    ) -> int | None:
+        explicit = payload.get("page_number") or payload.get("page")
+        number = self._extract_page_number(explicit)
+        if number is not None:
+            return number
+        number = self._extract_page_number(page_label)
+        if number is not None:
+            return number
+        if chunk_index is not None and chunk_index >= 0:
+            return chunk_index + 1
+        return None
+
+    def _extract_page_number(self, value: object) -> int | None:
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            match = re.search(r"\d+", value)
+            if match:
+                try:
+                    return int(match.group(0))
+                except ValueError:
+                    return None
+        return None
 
     def _build_trace(
         self, results: List[qmodels.ScoredPoint], entity_ids: List[str]
@@ -873,35 +1059,37 @@ class RetrievalService:
         *,
         attributes: Dict[str, object],
         chunk_size: int = 160,
-    ) -> List[str]:
-        start = perf_counter()
-        events: List[str] = []
-        meta_event = {
-            "type": "meta",
-            "meta": result.meta.to_dict(),
-            "hasEvidence": result.has_evidence,
-        }
-        events.append(json.dumps(meta_event))
-        first_latency = (perf_counter() - start) * 1000.0
-        _retrieval_partial_latency.record(first_latency, attributes=attributes)
-        emitted = 0
-        answer = result.answer or ""
-        for idx in range(0, len(answer), chunk_size):
-            chunk = answer[idx : idx + chunk_size]
-            if not chunk:
-                continue
-            events.append(json.dumps({"type": "answer", "delta": chunk}))
-            emitted += 1
-        final_event = {
-            "type": "final",
-            "answer": result.answer,
-            "citations": [citation.to_dict() for citation in result.citations],
-            "traces": result.trace.to_dict(),
-            "meta": result.meta.to_dict(),
-        }
-        events.append(json.dumps(final_event))
-        _retrieval_stream_chunks_counter.add(emitted, attributes=attributes)
-        return events
+    ) -> Iterator[str]:
+        def _iterator() -> Iterator[str]:
+            start = perf_counter()
+            meta_event = {
+                "type": "meta",
+                "meta": result.meta.to_dict(),
+                "hasEvidence": result.has_evidence,
+            }
+            meta_payload = json.dumps(meta_event)
+            first_latency = (perf_counter() - start) * 1000.0
+            _retrieval_partial_latency.record(first_latency, attributes=attributes)
+            yield meta_payload
+            emitted = 0
+            answer = result.answer or ""
+            for idx in range(0, len(answer), chunk_size):
+                chunk = answer[idx : idx + chunk_size]
+                if not chunk:
+                    continue
+                yield json.dumps({"type": "answer", "delta": chunk})
+                emitted += 1
+            final_event = {
+                "type": "final",
+                "answer": result.answer,
+                "citations": [citation.to_dict() for citation in result.citations],
+                "traces": result.trace.to_dict(),
+                "meta": result.meta.to_dict(),
+            }
+            yield json.dumps(final_event)
+            _retrieval_stream_chunks_counter.add(emitted, attributes=attributes)
+
+        return _iterator()
 
 
 def get_retrieval_service() -> RetrievalService:

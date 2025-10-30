@@ -120,11 +120,29 @@ def test_build_trace_includes_graph_payload(retrieval_service: retrieval_module.
 def test_build_citations_includes_page_context(
     retrieval_service: retrieval_module.RetrievalService,
 ) -> None:
-    retrieval_service.document_store.write_document("doc-1", {"id": "doc-1", "uri": "file://doc"})
+    retrieval_service.document_store.write_document(
+        "doc-1",
+        {
+            "id": "doc-1",
+            "uri": "file://doc",
+            "title": "Doc Title",
+            "source_type": "local",
+            "entity_labels": ["Acme Corporation"],
+            "entity_ids": ["entity::acme"],
+        },
+    )
     point = qmodels.ScoredPoint(
         id="vec-1",
         score=0.8,
-        payload={"doc_id": "doc-1", "text": "Example snippet", "chunk_index": 2},
+        payload={
+            "doc_id": "doc-1",
+            "text": "Example snippet",
+            "chunk_index": 2,
+            "retrievers": ["vector", "keyword"],
+            "fusion_score": 0.42,
+            "entity_labels": ["Acme Corporation"],
+            "entity_ids": ["entity::acme"],
+        },
         version=1,
     )
     citations = retrieval_service._build_citations([point])
@@ -132,6 +150,16 @@ def test_build_citations_includes_page_context(
     citation = citations[0]
     assert citation.page_label == "Page 3"
     assert citation.chunk_index == 2
+    assert citation.page_number == 3
+    assert citation.title == "Doc Title"
+    assert citation.source_type == "local"
+    assert citation.retrievers == ["keyword", "vector"]
+    assert citation.fusion_score == pytest.approx(0.42)
+    assert citation.confidence == pytest.approx(0.8)
+    assert citation.entities and citation.entities[0]["label"] == "Acme Corporation"
+    payload = citation.to_dict()
+    assert payload["pageNumber"] == 3
+    assert payload["retrievers"] == ["keyword", "vector"]
 
 
 def test_merge_relation_statements_deduplicates(
@@ -185,10 +213,12 @@ def test_stream_result_generates_events(
         meta=meta,
         has_evidence=True,
     )
-    events = retrieval_service.stream_result(
-        result,
-        attributes={"mode": "precision", "reranker": "rrf", "stream": True},
-        chunk_size=7,
+    events = list(
+        retrieval_service.stream_result(
+            result,
+            attributes={"mode": "precision", "reranker": "rrf", "stream": True},
+            chunk_size=7,
+        )
     )
     assert events[0].startswith("{\"type\": \"meta\"")
     assert any("\"type\": \"answer\"" in event for event in events)
