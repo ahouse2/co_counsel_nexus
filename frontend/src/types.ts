@@ -5,6 +5,12 @@ export interface Citation {
   span: string;
   uri?: string | null;
   title?: string;
+  pageLabel?: string;
+  chunkIndex?: number;
+  pageNumber?: number;
+  sourceType?: string | null;
+  retrievers?: string[];
+  fusionScore?: number | null;
   confidence?: number | null;
   entities?: EntityHighlight[];
 }
