@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 from ..services.forensics import ForensicsService
-from ..services.errors import WorkflowComponent
+from ..services.errors import WorkflowComponent, WorkflowException
 from ..services.retrieval import QueryResult, RetrievalService
 from ..storage.document_store import DocumentStore
 from .context import AgentContext
+from .graph_manager import GraphManagerAgent
 from .qa import QAAgent
 from .types import AgentTurn
 
@@ -59,12 +60,13 @@ class AgentTool:
 
 
 class StrategyTool(AgentTool):
-    def __init__(self) -> None:
+    def __init__(self, graph_agent: GraphManagerAgent | None = None) -> None:
         super().__init__(
             name="strategy_plan",
             description="Crafts a structured CoCounsel plan grounded in TRD personas.",
             component=WorkflowComponent.STRATEGY,
         )
+        self.graph_agent = graph_agent
 
     def execute(self, context: AgentContext) -> Tuple[AgentTurn, Dict[str, Any]]:
         started = _utcnow()
@@ -76,7 +78,7 @@ class StrategyTool(AgentTool):
             "Attach forensics evidence to all cited documents",
             "Run QA adjudication against rubric baseline",
         ]
-        plan = {
+        plan: Dict[str, Any] = {
             "objective": context.question,
             "steps": steps,
             "focus_entities": unique_keywords,
@@ -95,8 +97,36 @@ class StrategyTool(AgentTool):
         context.memory.append_note(
             "Strategy agent emphasised ingestion validation and multi-modal evidence alignment."
         )
+        graph_section: Dict[str, Any] | None = None
+        graph_documents = 0
+        if self.graph_agent is not None:
+            try:
+                insight = self.graph_agent.ensure_insight(context)
+            except WorkflowException as exc:
+                graph_section = {
+                    "status": "failed",
+                    "error_code": exc.error.code,
+                }
+                context.memory.append_note(
+                    f"Graph insight generation failed: {exc.error.message}"
+                )
+            else:
+                graph_documents = len(insight.execution.documents)
+                graph_section = {
+                    "status": "succeeded",
+                    "documents": graph_documents,
+                    "timeline_event_id": insight.timeline_event_id,
+                    "insight": insight.to_payload(),
+                }
+                plan.setdefault("insights", {})["graph"] = graph_section["insight"]
+        if graph_section:
+            plan["graph"] = graph_section
         completed = _utcnow()
-        metrics = {"step_count": len(steps), "keyword_count": len(unique_keywords)}
+        metrics = {
+            "step_count": len(steps),
+            "keyword_count": len(unique_keywords),
+            "graph_documents": graph_documents,
+        }
         turn = AgentTurn(
             role="strategy",
             action="draft_plan",
@@ -113,14 +143,25 @@ class StrategyTool(AgentTool):
         steps = payload.get("steps", [])
         focuses = payload.get("focus_entities", [])
         focus_text = ", ".join(focuses[:3]) if focuses else "general case signals"
-        return (
-            f"Planner drafted {len(steps)} steps prioritising {focus_text}."
-        )
+        graph_section = payload.get("graph", {})
+        if graph_section.get("status") == "succeeded":
+            documents = graph_section.get("documents", 0)
+            return (
+                f"Planner drafted {len(steps)} steps prioritising {focus_text} and surfaced {documents} graph-backed document(s)."
+            )
+        if graph_section.get("status") == "failed":
+            return (
+                f"Planner drafted {len(steps)} steps prioritising {focus_text} (graph insight unavailable)."
+            )
+        return f"Planner drafted {len(steps)} steps prioritising {focus_text}."
 
     def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        graph_section = payload.get("graph", {})
         return {
             "delegated_to": ["ingestion", "research", "cocounsel", "qa"],
             "step_count": len(payload.get("steps", [])),
+            "graph_status": graph_section.get("status", "unknown"),
+            "graph_documents": graph_section.get("documents", 0),
         }
 
 
@@ -176,13 +217,18 @@ class IngestionTool(AgentTool):
 
 
 class ResearchTool(AgentTool):
-    def __init__(self, retrieval_service: RetrievalService) -> None:
+    def __init__(
+        self,
+        retrieval_service: RetrievalService,
+        graph_agent: GraphManagerAgent | None = None,
+    ) -> None:
         super().__init__(
             name="research_retrieval",
             description="Runs vector+graph retrieval to generate a CoCounsel briefing.",
             component=WorkflowComponent.RETRIEVAL,
         )
         self.retrieval_service = retrieval_service
+        self.graph_agent = graph_agent
 
     def execute(self, context: AgentContext) -> Tuple[AgentTurn, Dict[str, Any]]:
         started = _utcnow()
@@ -195,6 +241,27 @@ class ResearchTool(AgentTool):
             "graph_edges": len(output.get("traces", {}).get("graph", {}).get("edges", [])),
             "citations": len(output.get("citations", [])),
         }
+        graph_section: Dict[str, Any] | None = None
+        if self.graph_agent is not None:
+            try:
+                insight = self.graph_agent.ensure_insight(context)
+            except WorkflowException as exc:
+                graph_section = {
+                    "status": "failed",
+                    "error_code": exc.error.code,
+                }
+            else:
+                graph_section = {
+                    "status": "succeeded",
+                    "documents": len(insight.execution.documents),
+                    "timeline_event_id": insight.timeline_event_id,
+                    "insight": insight.to_payload(),
+                }
+        if graph_section:
+            output.setdefault("graph", graph_section)
+            metrics["graph_documents"] = graph_section.get("documents", 0)
+        else:
+            metrics.setdefault("graph_documents", 0)
         privilege = output.get("traces", {}).get("privilege", {})
         metrics["privileged_docs"] = sum(
             1 for item in privilege.get("decisions", []) if item.get("label") == "privileged"
@@ -218,16 +285,26 @@ class ResearchTool(AgentTool):
         traces = payload.get("traces", {})
         vector_hits = len(traces.get("vector", []))
         graph_nodes = len(traces.get("graph", {}).get("nodes", []))
-        return (
+        summary = (
             f"Research agent retrieved {len(citations)} citations "
             f"with {vector_hits} vector hits and {graph_nodes} graph nodes."
         )
+        graph_section = payload.get("graph", {})
+        if graph_section.get("status") == "succeeded":
+            documents = graph_section.get("documents", 0)
+            return summary + f" Graph insight linked {documents} document(s)."
+        if graph_section.get("status") == "failed":
+            return summary + " Graph insight unavailable."
+        return summary
 
     def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         privilege = payload.get("traces", {}).get("privilege", {})
+        graph_section = payload.get("graph", {})
         return {
             "citations": len(payload.get("citations", [])),
             "privilege_label": privilege.get("aggregate", {}).get("label", "unknown"),
+            "graph_status": graph_section.get("status", "unknown"),
+            "graph_documents": graph_section.get("documents", 0),
         }
 
 

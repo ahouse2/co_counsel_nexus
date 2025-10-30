@@ -13,6 +13,7 @@ class WorkflowComponent(str, Enum):
     STRATEGY = "strategy"
     INGESTION = "ingestion"
     RETRIEVAL = "retrieval"
+    GRAPH = "graph"
     FORENSICS = "forensics"
     QA = "qa"
     TIMELINE = "timeline"

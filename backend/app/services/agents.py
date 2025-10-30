@@ -11,12 +11,14 @@ from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
 from ..agents import AdaptiveAgentsOrchestrator, get_orchestrator
+from ..agents.graph_manager import GraphManagerAgent
 from ..agents.qa import QAAgent
 from ..agents.types import AgentThread, AgentTurn
 from ..config import get_settings
 from ..security.authz import Principal
 from ..storage.agent_memory_store import AgentMemoryStore, AgentThreadRecord
 from ..storage.document_store import DocumentStore
+from ..storage.timeline_store import TimelineStore
 from ..utils.audit import AuditEvent, get_audit_trail
 from .errors import (
     CircuitOpenError,
@@ -28,6 +30,7 @@ from .errors import (
     http_status_for_error,
 )
 from .forensics import ForensicsService, get_forensics_service
+from .graph import GraphService, get_graph_service
 from .retrieval import RetrievalService, get_retrieval_service
 
 
@@ -132,6 +135,9 @@ class AgentsService:
         document_store: DocumentStore | None = None,
         qa_agent: QAAgent | None = None,
         orchestrator: AdaptiveAgentsOrchestrator | None = None,
+        graph_service: GraphService | None = None,
+        timeline_store: TimelineStore | None = None,
+        graph_agent: GraphManagerAgent | None = None,
     ) -> None:
         self.settings = get_settings()
         self.retrieval_service = retrieval_service or get_retrieval_service()
@@ -139,12 +145,19 @@ class AgentsService:
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.memory_store = memory_store or AgentMemoryStore(self.settings.agent_threads_dir)
         self.qa_agent = qa_agent or QAAgent()
+        self.graph_service = graph_service or get_graph_service()
+        self.timeline_store = timeline_store or TimelineStore(self.settings.timeline_path)
+        self.graph_agent = graph_agent or GraphManagerAgent(
+            graph_service=self.graph_service,
+            timeline_store=self.timeline_store,
+        )
         self.orchestrator = orchestrator or get_orchestrator(
             self.retrieval_service,
             self.forensics_service,
             self.document_store,
             self.qa_agent,
             self.memory_store,
+            self.graph_agent,
         )
         self.audit = get_audit_trail()
         self.retry_attempts = max(1, self.settings.agent_retry_attempts)
@@ -160,6 +173,7 @@ class AgentsService:
             WorkflowComponent.STRATEGY: CircuitBreaker(WorkflowComponent.STRATEGY, **breaker_config),
             WorkflowComponent.INGESTION: CircuitBreaker(WorkflowComponent.INGESTION, **breaker_config),
             WorkflowComponent.RETRIEVAL: CircuitBreaker(WorkflowComponent.RETRIEVAL, **breaker_config),
+            WorkflowComponent.GRAPH: CircuitBreaker(WorkflowComponent.GRAPH, **breaker_config),
             WorkflowComponent.FORENSICS: CircuitBreaker(WorkflowComponent.FORENSICS, **breaker_config),
             WorkflowComponent.QA: CircuitBreaker(WorkflowComponent.QA, **breaker_config),
         }

@@ -507,10 +507,11 @@ def get_orchestrator(
     document_store,
     qa_agent: QAAgent,
     memory_store: AgentMemoryStore,
+    graph_agent: "GraphManagerAgent",
 ) -> AdaptiveAgentsOrchestrator:
-    strategy_tool = StrategyTool()
+    strategy_tool = StrategyTool(graph_agent)
     ingestion_tool = IngestionTool(document_store)
-    research_tool = ResearchTool(retrieval_service)
+    research_tool = ResearchTool(retrieval_service, graph_agent)
     forensics_tool = ForensicsTool(document_store, forensics_service)
     qa_tool = QATool(qa_agent)
     return AdaptiveAgentsOrchestrator(

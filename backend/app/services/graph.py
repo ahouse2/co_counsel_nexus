@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from neo4j import GraphDatabase
 
 from ..config import get_settings
+from .errors import WorkflowAbort, WorkflowComponent, WorkflowError, WorkflowSeverity
 
 try:  # Optional NetworkX support for analytics/community detection
     import networkx as nx  # type: ignore
@@ -289,6 +290,56 @@ class GraphSubgraph:
                 continue
             documents.add(str(doc_raw))
         return documents
+
+
+@dataclass(slots=True)
+class GraphExecutionResult:
+    question: str
+    cypher: str
+    prompt: str
+    records: List[Dict[str, object]]
+    summary: Dict[str, object]
+    documents: List[str]
+    evidence_nodes: List[Dict[str, object]]
+    warnings: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "question": self.question,
+            "cypher": self.cypher,
+            "prompt": self.prompt,
+            "records": [dict(record) for record in self.records],
+            "summary": dict(self.summary),
+            "documents": list(self.documents),
+            "evidence_nodes": [dict(node) for node in self.evidence_nodes],
+            "warnings": list(self.warnings),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, object]) -> "GraphExecutionResult":
+        question = str(payload.get("question", ""))
+        cypher = str(payload.get("cypher", ""))
+        prompt = str(payload.get("prompt", ""))
+        records_raw = payload.get("records", [])
+        summary_raw = payload.get("summary", {})
+        documents_raw = payload.get("documents", [])
+        evidence_raw = payload.get("evidence_nodes", [])
+        warnings_raw = payload.get("warnings", [])
+        records = [dict(record) for record in records_raw if isinstance(record, dict)]
+        summary = dict(summary_raw) if isinstance(summary_raw, dict) else {}
+        documents = [str(doc) for doc in documents_raw if doc is not None]
+        evidence_nodes = [dict(node) for node in evidence_raw if isinstance(node, dict)]
+        warnings = [str(item) for item in warnings_raw if item is not None]
+        return cls(
+            question=question,
+            cypher=cypher,
+            prompt=prompt,
+            records=records,
+            summary=summary,
+            documents=documents,
+            evidence_nodes=evidence_nodes,
+            warnings=warnings,
+        )
 
 
 class GraphService:
@@ -767,6 +818,83 @@ class GraphService:
             return template.format(schema=schema_text, question=question)
         return f"Schema:\n{schema_text}\nQuestion: {question}\nCypher:"
 
+    def execute_agent_cypher(
+        self,
+        question: str,
+        cypher: str,
+        *,
+        parameters: Dict[str, object] | None = None,
+        sandbox: bool = True,
+        limit: int = 50,
+        prompt: str | None = None,
+    ) -> GraphExecutionResult:
+        question_text = question.strip()
+        if not question_text:
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.GRAPH,
+                    code="GRAPH_EMPTY_QUESTION",
+                    message="Graph question must not be empty",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                ),
+                status_code=400,
+            )
+        raw_query = cypher.strip()
+        if not raw_query:
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.GRAPH,
+                    code="GRAPH_EMPTY_CYPHER",
+                    message="Graph agent produced an empty Cypher statement",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                ),
+                status_code=400,
+            )
+        sanitized = self._sanitize_agent_cypher(raw_query)
+        warnings: List[str] = []
+        if sandbox:
+            enforced, added_limit = self._enforce_limit_clause(sanitized, limit=limit)
+            sanitized = enforced
+            if added_limit:
+                warnings.append(f"LIMIT {limit} appended for sandbox execution")
+        try:
+            execution = self.run_cypher(sanitized, parameters or {})
+        except ValueError as exc:  # pragma: no cover - defensive guard for unsupported queries
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.GRAPH,
+                    code="GRAPH_UNSUPPORTED_QUERY",
+                    message=str(exc),
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                    context={"cypher": sanitized},
+                ),
+                status_code=400,
+            ) from exc
+        records = execution.get("records", [])
+        documents, evidence_nodes = self._collect_documents(records)
+        summary = {
+            "question": question_text,
+            "record_count": len(records),
+            "document_count": len(documents),
+            "mode": execution.get("summary", {}).get("mode", self.mode),
+            "insight": self._summarise_execution(question_text, documents, len(records)),
+        }
+        summary.update(execution.get("summary", {}))
+        result = GraphExecutionResult(
+            question=question_text,
+            cypher=sanitized,
+            prompt=prompt or self.build_text_to_cypher_prompt(question_text),
+            records=[dict(record) for record in records],
+            summary=summary,
+            documents=documents,
+            evidence_nodes=evidence_nodes,
+            warnings=warnings,
+        )
+        return result
+
     def run_cypher(
         self, query: str, parameters: Dict[str, object] | None = None
     ) -> Dict[str, object]:
@@ -845,12 +973,16 @@ class GraphService:
     ) -> Dict[str, object]:
         text = query.strip()
         lowered = re.sub(r"\s+", " ", text.lower())
+        lowered = re.sub(r" limit \d+;?", "", lowered).strip()
+        lowered = lowered.rstrip(";")
         records: List[Dict[str, object]] = []
         node_match = re.match(
-            r"match\s*\(\s*([a-z])\s*(?:\{\s*id\s*:\s*'([^']+)'\s*\})?\s*\)\s*return", lowered
+            r"match\s*\(\s*([a-z])(?:\s*:\s*[A-Za-z][A-Za-z0-9_]*)?\s*(?:\{\s*id\s*:\s*'([^']+)'\s*\})?\s*\)\s*return",
+            lowered,
         )
         edge_match = re.match(
-            r"match\s*\(\s*([a-z])\s*\)-\[([a-z])\]->\(\s*([a-z])\s*\)\s*return", lowered
+            r"match\s*\(\s*([a-z])(?:\s*:\s*[A-Za-z][A-Za-z0-9_]*)?\s*\)-\s*\[([a-z])[^]]*\]\s*->\s*\(\s*([a-z])(?:\s*:\s*[A-Za-z][A-Za-z0-9_]*)?\s*\)\s*return",
+            lowered,
         )
         if node_match and not edge_match:
             node_id = node_match.group(2)
@@ -1026,6 +1158,114 @@ class GraphService:
             else:
                 merged[key] = value
         return merged
+
+    def _sanitize_agent_cypher(self, query: str) -> str:
+        cleaned = query.strip()
+        cleaned = re.sub(r"```(?:cypher)?", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.strip()
+        forbidden = [
+            "call ",
+            "create ",
+            "delete ",
+            "remove ",
+            "merge ",
+            "drop ",
+            "load ",
+            "apoc",
+            "set ",
+        ]
+        lowered = cleaned.lower()
+        if not lowered.startswith("match"):
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.GRAPH,
+                    code="GRAPH_UNSAFE_QUERY",
+                    message="Agent-generated Cypher must begin with MATCH",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                    context={"cypher": query},
+                ),
+                status_code=400,
+            )
+        for keyword in forbidden:
+            if keyword in lowered:
+                raise WorkflowAbort(
+                    WorkflowError(
+                        component=WorkflowComponent.GRAPH,
+                        code="GRAPH_FORBIDDEN_KEYWORD",
+                        message=f"Cypher contains forbidden keyword: {keyword.strip()}",
+                        severity=WorkflowSeverity.ERROR,
+                        retryable=False,
+                        context={"cypher": query},
+                    ),
+                    status_code=400,
+                )
+        if "return" not in lowered:
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.GRAPH,
+                    code="GRAPH_RETURN_REQUIRED",
+                    message="Cypher must include a RETURN clause",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                    context={"cypher": query},
+                ),
+                status_code=400,
+            )
+        return cleaned.rstrip(";")
+
+    @staticmethod
+    def _enforce_limit_clause(query: str, *, limit: int) -> Tuple[str, bool]:
+        if re.search(r"limit\s+\d+", query, flags=re.IGNORECASE):
+            return query, False
+        trimmed = query.rstrip(";")
+        return f"{trimmed} LIMIT {limit}", True
+
+    def _collect_documents(
+        self, records: Iterable[Dict[str, object]]
+    ) -> Tuple[List[str], List[Dict[str, object]]]:
+        documents: Dict[str, str] = {}
+        evidence_nodes: Dict[str, Dict[str, object]] = {}
+
+        def visit(value: Any) -> None:
+            if isinstance(value, dict):
+                if {"id", "type", "properties"}.issubset(value.keys()):
+                    node_id = str(value.get("id"))
+                    node_type = str(value.get("type", ""))
+                    properties = value.get("properties", {})
+                    if isinstance(properties, dict):
+                        doc_id = properties.get("doc_id")
+                        if doc_id is not None:
+                            documents[str(doc_id)] = str(doc_id)
+                        label = properties.get("label") or node_type or node_id
+                    else:
+                        label = node_type or node_id
+                    if node_type.lower() == "document":
+                        documents[node_id] = node_id
+                    payload = {
+                        "id": node_id,
+                        "type": node_type,
+                        "label": str(label),
+                        "properties": dict(properties) if isinstance(properties, dict) else {},
+                    }
+                    evidence_nodes[node_id] = payload
+                for nested in value.values():
+                    visit(nested)
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item)
+
+        for record in records:
+            visit(record)
+
+        return sorted(documents.keys()), list(evidence_nodes.values())
+
+    @staticmethod
+    def _summarise_execution(question: str, documents: List[str], record_count: int) -> str:
+        doc_text = "no linked documents" if not documents else f"{len(documents)} linked document(s)"
+        return (
+            f"Graph query answering '{question}' returned {record_count} record(s) with {doc_text}."
+        )
 
     # endregion
 
