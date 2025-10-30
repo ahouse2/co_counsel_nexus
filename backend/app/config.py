@@ -189,6 +189,14 @@ class Settings(BaseSettings):
     ingestion_queue_maxsize: int = Field(default=32)
     ingestion_worker_concurrency: int = Field(default=1)
 
+    courtlistener_endpoint: str = Field(
+        default="https://www.courtlistener.com/api/rest/v3/opinions/"
+    )
+    courtlistener_token: Optional[str] = Field(default=None)
+    caselaw_endpoint: str = Field(default="https://api.case.law/v1/cases/")
+    caselaw_api_key: Optional[str] = Field(default=None)
+    caselaw_max_results: int = Field(default=10, ge=0, le=100)
+
     retrieval_max_search_window: int = Field(default=60)
     retrieval_graph_hop_window: int = Field(default=12)
     retrieval_cross_encoder_model: Optional[str] = Field(default=None)

@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import pytest
+import httpx
 from qdrant_client.http import models as qmodels
 
 from backend.app import config
 from backend.app.services import graph as graph_module
 from backend.app.services import retrieval as retrieval_module
+from backend.app.services.retrieval_engine import HybridRetrievalBundle
 from backend.app.storage.document_store import DocumentStore
 from backend.app.storage.timeline_store import TimelineEvent, TimelineStore
 
@@ -80,6 +83,18 @@ def retrieval_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     service.privilege_classifier = _DummyPrivilege()
     service.timeline_store = TimelineStore(service.settings.timeline_path)
     return service
+
+
+@pytest.fixture()
+def cassette_loader() -> Callable[[str], dict]:
+    base = Path(__file__).parent / "fixtures" / "cassettes"
+
+    def _load(name: str) -> dict:
+        path = base / f"{name}.json"
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+    return _load
 
 
 def test_build_trace_includes_graph_payload(retrieval_service: retrieval_module.RetrievalService) -> None:
@@ -170,6 +185,116 @@ def test_merge_relation_statements_deduplicates(
     merged = retrieval_service._merge_relation_statements(primary, secondary)
     assert merged == [("A relates B", "doc-1"), ("C relates D", None)]
 
+
+def test_courtlistener_adapter_uses_cassette(cassette_loader) -> None:
+    payload = cassette_loader("courtlistener_search")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "courtlistener" in request.url.host
+        return httpx.Response(200, json=payload)
+
+    adapter = retrieval_module.CourtListenerCaseLawAdapter(
+        endpoint="https://www.courtlistener.com/api/rest/v3/opinions/",
+        token=None,
+        client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    points = adapter.search("Miranda", limit=3)
+    assert points
+    first = points[0]
+    assert first.payload["source_type"] == "courtlistener"
+    assert "Miranda" in first.payload["case_name"]
+
+
+def test_caselaw_adapter_uses_cassette(cassette_loader) -> None:
+    payload = cassette_loader("caselaw_search")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "case.law" in request.url.host
+        return httpx.Response(200, json=payload)
+
+    adapter = retrieval_module.CaseLawApiAdapter(
+        endpoint="https://api.case.law/v1/cases/",
+        api_key=None,
+        max_results=5,
+        client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    points = adapter.search("Miranda", limit=2)
+    assert points
+    first = points[0]
+    assert first.payload["source_type"] == "caselaw"
+    assert "Miranda" in first.payload["case_name"]
+
+
+def test_join_external_results_links_internal_case(
+    retrieval_service: retrieval_module.RetrievalService,
+) -> None:
+    retrieval_service.document_store.write_document(
+        "doc-internal",
+        {
+            "id": "doc-internal",
+            "title": "Miranda v. Arizona",
+            "source_type": "local",
+            "citations": [{"cite": "384 U.S. 436"}],
+        },
+    )
+    internal_point = qmodels.ScoredPoint(
+        id="vec-internal",
+        score=0.9,
+        payload={"doc_id": "doc-internal", "text": "internal context", "source_type": "local"},
+        version=1,
+    )
+    bundle = HybridRetrievalBundle(
+        fused_points=[internal_point],
+        vector_points=[internal_point],
+        graph_points=[],
+        keyword_points=[],
+        relation_statements=[],
+        reranker="rrf",
+        fusion_scores={},
+    )
+    external_raw = qmodels.ScoredPoint(
+        id="caselaw::67890",
+        score=1.0,
+        payload={
+            "doc_id": "caselaw::67890",
+            "text": "The conviction is reversed and the case is remanded for further proceedings.",
+            "source_type": "caselaw",
+            "case_name": "Miranda v. Arizona",
+            "citations": [{"cite": "384 U.S. 436"}],
+            "retrievers": ["external:caselaw"],
+        },
+        version=1,
+    )
+    inventory = retrieval_service.document_store.list_documents()
+    reconciled = retrieval_service._reconcile_external_evidence([external_raw], inventory)
+    retrieval_service._join_external_results(bundle, reconciled, limit=5)
+    assert bundle.external_points
+    external_payload = bundle.external_points[0].payload
+    assert external_payload["linked_doc_id"] == "doc-internal"
+    assert "external:caselaw" in external_payload["retrievers"]
+
+
+def test_contradiction_detection_logs_warning(
+    retrieval_service: retrieval_module.RetrievalService,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    external_point = qmodels.ScoredPoint(
+        id="courtlistener::1",
+        score=1.0,
+        payload={
+            "doc_id": "courtlistener::1",
+            "source_type": "courtlistener",
+            "holding": "The motion was denied.",
+            "text": "The motion was denied.",
+        },
+        version=1,
+    )
+    holdings = retrieval_service._authoritative_holdings([external_point])
+    contradictions = retrieval_service._detect_contradictions("The motion was granted.", holdings)
+    assert contradictions
+    with caplog.at_level("WARNING"):
+        retrieval_service._log_contradictions("Was the motion granted?", "The motion was granted.", contradictions)
+    assert any("Contradiction detected" in record.message for record in caplog.records)
 
 def test_stream_result_generates_events(
     retrieval_service: retrieval_module.RetrievalService,
