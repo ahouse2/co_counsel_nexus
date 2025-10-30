@@ -7,6 +7,7 @@ import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { RetrievalSettings } from '@/components/RetrievalSettings';
 import { SimulationWorkbench } from '@/components/simulation/SimulationWorkbench';
+import { DevTeamSection } from '@/components/dev-team';
 import { useQueryContext } from '@/context/QueryContext';
 
 const sections = [
@@ -15,6 +16,7 @@ const sections = [
   { id: 'documents', label: 'Documents' },
   { id: 'trial-university', label: 'Trial University' },
   { id: 'mock-court', label: 'Mock Court' },
+  { id: 'dev-team', label: 'Dev Team' },
 ] as const;
 
 type SectionId = (typeof sections)[number]['id'];
@@ -155,6 +157,14 @@ function App(): JSX.Element {
             hidden={activeSection !== 'mock-court'}
           >
             <SimulationWorkbench />
+          </section>
+          <section
+            id={`${panelId}-dev-team`}
+            role="tabpanel"
+            aria-labelledby={`${tabsId}-dev-team`}
+            hidden={activeSection !== 'dev-team'}
+          >
+            <DevTeamSection />
           </section>
         </main>
       </div>

@@ -56,6 +56,7 @@ Run
 - PRPs: see `AgentsMD_PRPs_and_AgentMemory/PRPs/*` — base, planning, spec, tasks
 - Rebuilt TRD/PRP: `AgentsMD_PRPs_and_AgentMemory/PRPs/ai_docs/TRD-PRP_legal_tech_2_rebuilt_msagents_llamaindex_swarms.md`
 - Reference SDKs: `Reference Code/agent-framework-main`, `Reference Code/llama-hub`, `swarms-master/`
+- Dev Team console: open the “Dev Team” workspace section to review `/dev-agent/proposals` backlog, inspect sandbox validation output, and approve proposals (requires `dev-agent:admin` scope or PlatformEngineer/AutomationService roles).
 
 ## 5) Dev Workflow
 - Draft/refine PRPs; implement minimal diffs; validate via gates
