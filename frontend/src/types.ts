@@ -371,3 +371,69 @@ export interface VoiceSessionResponse extends VoiceSession {
   assistant_text: string;
   audio_url: string;
 }
+
+export interface SandboxCommandResult {
+  command: string[];
+  return_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+}
+
+export interface SandboxExecution {
+  success: boolean;
+  workspace_id: string;
+  commands: SandboxCommandResult[];
+}
+
+export interface DevAgentApprovalRecord {
+  actor: {
+    client_id?: string;
+    subject?: string;
+    roles?: string[];
+    [key: string]: unknown;
+  };
+  timestamp: string;
+  outcome: string;
+  [key: string]: unknown;
+}
+
+export interface DevAgentProposal {
+  proposal_id: string;
+  task_id: string;
+  feature_request_id: string;
+  title: string;
+  summary: string;
+  diff: string;
+  status: string;
+  created_at: string;
+  created_by: Record<string, unknown>;
+  validation: Record<string, unknown> | SandboxExecution;
+  approvals: DevAgentApprovalRecord[];
+  rationale: string[];
+}
+
+export interface DevAgentTask {
+  task_id: string;
+  feature_request_id: string;
+  title: string;
+  description: string;
+  priority: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  planner_notes: string[];
+  risk_score: number | null;
+  metadata: Record<string, unknown>;
+  proposals: DevAgentProposal[];
+}
+
+export interface DevAgentProposalListResponse {
+  backlog: DevAgentTask[];
+}
+
+export interface DevAgentApplyResponse {
+  proposal: DevAgentProposal;
+  task: DevAgentTask;
+  execution: SandboxExecution;
+}
