@@ -83,12 +83,25 @@ class IngestionStatusResponse(BaseModel):
     status_details: IngestionStatusDetailsModel
 
 
+class CitationEntityModel(BaseModel):
+    id: str
+    label: str
+    type: str
+
+
 class CitationModel(BaseModel):
     docId: str
     span: str
     uri: Optional[HttpUrl | str] = None
     pageLabel: Optional[str] = None
     chunkIndex: Optional[int] = Field(default=None, ge=0)
+    pageNumber: Optional[int] = Field(default=None, ge=1)
+    title: Optional[str] = None
+    sourceType: Optional[str] = None
+    retrievers: List[str] = Field(default_factory=list)
+    fusionScore: Optional[float] = None
+    confidence: Optional[float] = None
+    entities: List[CitationEntityModel] = Field(default_factory=list)
 
 
 class TraceModel(BaseModel):

@@ -7,6 +7,13 @@ from .sandbox import (
     SandboxExecutionHarness,
     SandboxExecutionResult,
 )
+from .graph_explorer import (
+    build_text_to_cypher_prompt,
+    community_overview,
+    describe_graph_schema,
+    run_cypher,
+    text_to_cypher,
+)
 
 __all__ = [
     "CaseEvaluationResult",
@@ -22,6 +29,11 @@ __all__ = [
     "SandboxExecutionError",
     "SandboxExecutionHarness",
     "SandboxExecutionResult",
+    "build_text_to_cypher_prompt",
+    "community_overview",
+    "describe_graph_schema",
+    "run_cypher",
+    "text_to_cypher",
 ]
 
 try:  # pragma: no cover - optional graph explorer dependencies
