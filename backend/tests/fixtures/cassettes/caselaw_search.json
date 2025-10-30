@@ -1,0 +1,24 @@
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 67890,
+      "name": "Miranda v. Arizona",
+      "decision_date": "1966-06-13",
+      "docket_number": "759",
+      "url": "https://api.case.law/v1/cases/67890/",
+      "citations": [
+        {"type": "official", "cite": "384 U.S. 436"}
+      ],
+      "casebody": {
+        "data": {
+          "opinions": [
+            {"text": "The conviction is reversed and the case is remanded for further proceedings."}
+          ]
+        }
+      }
+    }
+  ]
+}
