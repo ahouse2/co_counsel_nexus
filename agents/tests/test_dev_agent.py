@@ -29,6 +29,10 @@ def _reset_state(tmp_path: Path) -> None:
     settings.agent_threads_dir = tmp_path / "threads"
     settings.audit_log_path = tmp_path / "audit.log"
     settings.dev_agent_validation_commands = (("lint", "--check"),)
+    settings.dev_agent_rollout_stages = ("canary", "general")
+    settings.dev_agent_feature_flag_prefix = "qa.flag"
+    settings.dev_agent_ci_workflows = ("backend_ci.yml",)
+    settings.dev_agent_governance_policy_version = "test-policy"
     settings.prepare_directories()
     reset_audit_trail()
 
@@ -102,15 +106,24 @@ def test_dev_agent_proposal_lifecycle(tmp_path: Path) -> None:
     result = service.apply_proposal(proposal.proposal_id, principal)
     assert result.execution.success is True
     assert result.proposal.status == "validated"
+    assert result.rollout_plan is not None
+    assert result.rollout_plan["policy_version"] == "test-policy"
     assert commands_executed, "sandbox commands should run"
     command, workspace = commands_executed[0]
     assert command == tuple(settings.dev_agent_validation_commands[0])
     assert workspace.name == "workspace"
 
     persisted = store.read_task(task.task_id)
-    assert persisted.status == "approved"
-    assert persisted.proposals[0].validation["success"] is True
-    assert persisted.proposals[0].validation["commands"][0]["command"][0] == "git"
+    assert persisted.status == "rollout_pending"
+    stored_proposal = persisted.proposals[0]
+    assert stored_proposal.validation["success"] is True
+    assert stored_proposal.validation["commands"][0]["command"][0] == "git"
+    assert stored_proposal.validation["status"] == "validated"
+    assert stored_proposal.validated_at is not None
+    assert stored_proposal.governance["rollout"]["stages"][0]["toggle"] == "qa.flag.FR-123.canary"
+    gate = stored_proposal.governance["regression_gate"]
+    assert gate["status"] == "passed"
+    assert gate["ci_workflows"][0]["workflow"] == "backend_ci.yml"
 
     audit_path = settings.audit_log_path
     assert audit_path.exists()
@@ -120,6 +133,11 @@ def test_dev_agent_proposal_lifecycle(tmp_path: Path) -> None:
     assert last_record["category"] == "dev_agent"
     assert last_record["subject"]["proposal_id"] == proposal.proposal_id
     assert last_record["metadata"]["status"] == "validated"
+
+    metrics = service.metrics()
+    assert metrics["validated_proposals"] == 1
+    assert metrics["active_rollouts"] == 1
+    assert metrics["feature_toggles"][0]["toggle"] == "qa.flag.FR-123.canary"
 
 
 def test_dev_agent_proposal_validation_failure(tmp_path: Path) -> None:
@@ -183,8 +201,11 @@ def test_dev_agent_proposal_validation_failure(tmp_path: Path) -> None:
 
     persisted = store.read_task(task.task_id)
     assert persisted.status == "needs_revision"
-    assert persisted.proposals[0].status == "failed"
-    assert persisted.proposals[0].validation["success"] is False
+    failed_proposal = persisted.proposals[0]
+    assert failed_proposal.status == "failed"
+    assert failed_proposal.validation["success"] is False
+    assert failed_proposal.governance["regression_gate"]["status"] == "failed"
+    assert failed_proposal.validated_at is None
 
     audit_path = settings.audit_log_path
     lines = audit_path.read_text().strip().splitlines()

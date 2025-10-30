@@ -512,6 +512,8 @@ export interface DevAgentProposal {
   validation: Record<string, unknown> | SandboxExecution;
   approvals: DevAgentApprovalRecord[];
   rationale: string[];
+  validated_at: string | null;
+  governance: Record<string, unknown>;
 }
 
 export interface DevAgentTask {
@@ -529,12 +531,33 @@ export interface DevAgentTask {
   proposals: DevAgentProposal[];
 }
 
+export interface DevAgentFeatureToggle {
+  stage?: string;
+  toggle: string;
+  status: string;
+}
+
+export interface DevAgentMetrics {
+  generated_at: string;
+  total_tasks: number;
+  triaged_tasks: number;
+  rollout_pending: number;
+  validated_proposals: number;
+  quality_gate_pass_rate: number;
+  velocity_per_day: number;
+  active_rollouts: number;
+  ci_workflows: string[];
+  feature_toggles: DevAgentFeatureToggle[];
+}
+
 export interface DevAgentProposalListResponse {
   backlog: DevAgentTask[];
+  metrics: DevAgentMetrics;
 }
 
 export interface DevAgentApplyResponse {
   proposal: DevAgentProposal;
   task: DevAgentTask;
   execution: SandboxExecution;
+  metrics: DevAgentMetrics;
 }
