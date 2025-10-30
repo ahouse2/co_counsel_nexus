@@ -102,6 +102,8 @@ from .services.ingestion import (
 from .services.knowledge import KnowledgeService, get_knowledge_service
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
 from .services.scenarios import (
+    ScenarioDirector,
+    ScenarioDirectorManifest,
     ScenarioEvidenceBinding,
     ScenarioRunOptions,
     get_scenario_engine,
@@ -818,7 +820,8 @@ def scenarios_detail(
         definition = engine.get(scenario_id)
     except WorkflowException as exc:
         _raise_workflow_exception(exc)
-    return _scenario_definition_model(definition)
+    manifest = engine.director_manifest(definition)
+    return _scenario_definition_model(definition, manifest)
 
 
 @app.post("/scenarios/run", response_model=ScenarioRunResponseModel)
@@ -834,7 +837,8 @@ def scenarios_run(
     except WorkflowException as exc:
         _raise_workflow_exception(exc)
     transcript_models = [ScenarioRunTurnModel.model_validate(turn) for turn in result.get("transcript", [])]
-    definition_model = _scenario_definition_model(definition)
+    manifest = engine.director_manifest(definition)
+    definition_model = _scenario_definition_model(definition, manifest)
     telemetry = dict(result.get("telemetry", {}))
     return ScenarioRunResponseModel(
         run_id=str(result.get("run_id")),
@@ -1051,7 +1055,10 @@ def _scenario_evidence_model(spec: ScenarioEvidenceRequirement) -> ScenarioEvide
     )
 
 
-def _scenario_definition_model(definition: ScenarioDefinition) -> ScenarioDefinitionModel:
+def _scenario_definition_model(
+    definition: ScenarioDefinition,
+    director_manifest: ScenarioDirectorManifest | None = None,
+) -> ScenarioDefinitionModel:
     beats: List[ScenarioBeatSpecModel] = []
     for beat in definition.beats:
         if beat.kind == "dynamic":
@@ -1081,6 +1088,8 @@ def _scenario_definition_model(definition: ScenarioDefinition) -> ScenarioDefini
                     duration_ms=scripted.duration_ms,
                 )
             )
+    manifest = director_manifest or ScenarioDirector().compose_manifest(definition)
+    manifest_model = ScenarioDirectorManifestModel.model_validate(manifest.to_dict())
     return ScenarioDefinitionModel(
         scenario_id=definition.id,
         title=definition.title,
@@ -1092,6 +1101,7 @@ def _scenario_definition_model(definition: ScenarioDefinition) -> ScenarioDefini
         variables={name: _scenario_variable_model(variable) for name, variable in definition.variables.items()},
         evidence=[_scenario_evidence_model(spec) for spec in definition.evidence],
         beats=beats,
+        director=manifest_model,
     )
 
 
@@ -1112,11 +1122,16 @@ def _scenario_run_options(payload: ScenarioRunRequestModel) -> ScenarioRunOption
         slot: ScenarioEvidenceBinding(slot_id=slot, value=binding.value, document_id=binding.document_id, type=binding.type)
         for slot, binding in payload.evidence.items()
     }
+    director_overrides = {
+        beat_id: dict(override)
+        for beat_id, override in payload.director_overrides.items()
+    }
     return ScenarioRunOptions(
         scenario_id=payload.scenario_id,
         case_id=payload.case_id,
-        variables=payload.variables,
+        variables=dict(payload.variables),
         evidence=evidence_bindings,
-        participants=payload.participants,
+        participants=list(payload.participants),
         use_tts=payload.enable_tts,
+        director_overrides=director_overrides,
     )

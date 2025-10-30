@@ -199,6 +199,42 @@ export interface ScenarioBeatSpec {
   top_k?: number | null;
 }
 
+export type ScenarioDirectorMotionDirection = 'none' | 'left' | 'right' | 'forward' | 'back';
+
+export interface ScenarioDirectorMotion {
+  direction: ScenarioDirectorMotionDirection;
+  intensity: number;
+  tempo: number;
+}
+
+export interface ScenarioDirectorLighting {
+  preset: string;
+  palette: string[];
+  intensity: number;
+  focus: number;
+  ambient: number;
+}
+
+export interface ScenarioDirectorPersona {
+  expression: string;
+  vocal_register: string;
+  confidence: number;
+}
+
+export interface ScenarioDirectorBeat {
+  beat_id: string;
+  emotional_tone: string;
+  counter_argument?: string | null;
+  lighting: ScenarioDirectorLighting;
+  motion: ScenarioDirectorMotion;
+  persona: ScenarioDirectorPersona;
+}
+
+export interface ScenarioDirectorManifest {
+  version: string;
+  beats: Record<string, ScenarioDirectorBeat>;
+}
+
 export interface ScenarioDefinition {
   scenario_id: string;
   title: string;
@@ -210,6 +246,7 @@ export interface ScenarioDefinition {
   variables: Record<string, ScenarioVariable>;
   evidence: ScenarioEvidenceSpec[];
   beats: ScenarioBeatSpec[];
+  director: ScenarioDirectorManifest;
 }
 
 export interface ScenarioMetadata {
@@ -251,6 +288,7 @@ export interface ScenarioRunTurn {
   duration_ms?: number | null;
   thread_id?: string | null;
   audio?: ScenarioRunAudio | null;
+  director?: ScenarioDirectorBeat;
 }
 
 export interface ScenarioRunResponse {
@@ -267,6 +305,15 @@ export interface ScenarioRunRequestPayload {
   variables: Record<string, string>;
   evidence: Record<string, ScenarioEvidenceBinding>;
   enable_tts: boolean;
+  director_overrides?: Record<string, ScenarioDirectorBeatOverride>;
+}
+
+export interface ScenarioDirectorBeatOverride {
+  emotional_tone?: string;
+  counter_argument?: string | null;
+  lighting?: Partial<ScenarioDirectorLighting>;
+  motion?: Partial<ScenarioDirectorMotion>;
+  persona?: Partial<ScenarioDirectorPersona>;
 }
 
 export interface TextToSpeechResponsePayload {

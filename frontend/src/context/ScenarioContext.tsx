@@ -10,6 +10,8 @@ import {
 
 import {
   ScenarioDefinition,
+  ScenarioDirectorBeatOverride,
+  ScenarioDirectorManifest,
   ScenarioEvidenceBinding,
   ScenarioListResponse,
   ScenarioMetadata,
@@ -44,6 +46,8 @@ interface ScenarioState {
   runError?: string;
   runResult?: ScenarioRunResponse;
   voicePreview?: TextToSpeechResponsePayload;
+  directorManifest?: ScenarioDirectorManifest;
+  directorOverrides: Record<string, ScenarioDirectorBeatOverride>;
 }
 
 interface ScenarioContextValue {
@@ -56,6 +60,8 @@ interface ScenarioContextValue {
   updateCaseId: (caseId: string) => void;
   runScenario: () => Promise<void>;
   previewVoice: (participantId: string, sampleText: string) => Promise<void>;
+  updateDirectorOverride: (beatId: string, override: ScenarioDirectorBeatOverride) => void;
+  resetDirectorOverride: (beatId?: string) => void;
 }
 
 const ScenarioContext = createContext<ScenarioContextValue | undefined>(undefined);
@@ -74,6 +80,7 @@ const INITIAL_STATE: ScenarioState = {
   scenarioStatus: 'idle',
   configuration: INITIAL_CONFIGURATION,
   running: false,
+  directorOverrides: {},
 };
 
 type Action =
@@ -91,7 +98,9 @@ type Action =
   | { type: 'run:start' }
   | { type: 'run:error'; error: string }
   | { type: 'run:success'; result: ScenarioRunResponse }
-  | { type: 'tts:preview'; payload?: TextToSpeechResponsePayload };
+  | { type: 'tts:preview'; payload?: TextToSpeechResponsePayload }
+  | { type: 'director:update'; beatId: string; override: ScenarioDirectorBeatOverride }
+  | { type: 'director:reset'; beatId?: string };
 
 function reducer(state: ScenarioState, action: Action): ScenarioState {
   switch (action.type) {
@@ -102,9 +111,21 @@ function reducer(state: ScenarioState, action: Action): ScenarioState {
     case 'metadata:loaded':
       return { ...state, metadataStatus: 'loaded', metadata: action.payload };
     case 'scenario:loading':
-      return { ...state, scenarioStatus: 'loading', scenarioError: undefined };
+      return {
+        ...state,
+        scenarioStatus: 'loading',
+        scenarioError: undefined,
+        directorManifest: undefined,
+        directorOverrides: {},
+      };
     case 'scenario:error':
-      return { ...state, scenarioStatus: 'error', scenarioError: action.error };
+      return {
+        ...state,
+        scenarioStatus: 'error',
+        scenarioError: action.error,
+        directorManifest: undefined,
+        directorOverrides: {},
+      };
     case 'scenario:loaded':
       return {
         ...state,
@@ -113,6 +134,8 @@ function reducer(state: ScenarioState, action: Action): ScenarioState {
         configuration: action.configuration,
         runResult: undefined,
         runError: undefined,
+        directorManifest: action.payload.director,
+        directorOverrides: {},
       };
     case 'config:update':
       return { ...state, configuration: { ...state.configuration, ...action.payload } };
@@ -165,6 +188,24 @@ function reducer(state: ScenarioState, action: Action): ScenarioState {
       return { ...state, running: false, runResult: action.result, runError: undefined };
     case 'tts:preview':
       return { ...state, voicePreview: action.payload };
+    case 'director:update': {
+      const current = state.directorOverrides[action.beatId] ?? {};
+      return {
+        ...state,
+        directorOverrides: {
+          ...state.directorOverrides,
+          [action.beatId]: { ...current, ...action.override },
+        },
+      };
+    }
+    case 'director:reset': {
+      if (!action.beatId) {
+        return { ...state, directorOverrides: {} };
+      }
+      const next = { ...state.directorOverrides };
+      delete next[action.beatId];
+      return { ...state, directorOverrides: next };
+    }
     default:
       return state;
   }
@@ -324,6 +365,7 @@ export function ScenarioProvider({ children }: { children: ReactNode }): JSX.Ele
       variables: state.configuration.variables,
       evidence: state.configuration.evidence,
       enable_tts: state.configuration.enableTTS,
+      director_overrides: state.directorOverrides,
     };
     dispatch({ type: 'run:start' });
     try {
@@ -352,6 +394,20 @@ export function ScenarioProvider({ children }: { children: ReactNode }): JSX.Ele
     [state.scenario]
   );
 
+  const updateDirectorOverride = useCallback(
+    (beatId: string, override: ScenarioDirectorBeatOverride) => {
+      dispatch({ type: 'director:update', beatId, override });
+    },
+    []
+  );
+
+  const resetDirectorOverride = useCallback(
+    (beatId?: string) => {
+      dispatch({ type: 'director:reset', beatId });
+    },
+    []
+  );
+
   const value = useMemo<ScenarioContextValue>(
     () => ({
       state,
@@ -363,6 +419,8 @@ export function ScenarioProvider({ children }: { children: ReactNode }): JSX.Ele
       updateCaseId,
       runScenario,
       previewVoice,
+      updateDirectorOverride,
+      resetDirectorOverride,
     }),
     [
       state,
@@ -374,6 +432,8 @@ export function ScenarioProvider({ children }: { children: ReactNode }): JSX.Ele
       updateCaseId,
       runScenario,
       previewVoice,
+      updateDirectorOverride,
+      resetDirectorOverride,
     ]
   );
 
