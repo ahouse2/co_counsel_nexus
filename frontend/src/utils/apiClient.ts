@@ -18,6 +18,8 @@ import {
   VoicePersona,
   VoiceSession,
   VoiceSessionResponse,
+  DevAgentApplyResponse,
+  DevAgentProposalListResponse,
 } from '@/types';
 
 const BASE = (() => {
@@ -32,6 +34,34 @@ const BASE = (() => {
 
 function withBase(path: string): string {
   return `${BASE}${path}`;
+}
+
+export class HttpError extends Error {
+  status: number;
+  detail?: unknown;
+
+  constructor(message: string, status: number, detail?: unknown) {
+    super(message);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function readErrorDetail(response: Response): Promise<unknown> {
+  const clone = response.clone();
+  try {
+    const contentType = clone.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      return await clone.json();
+    }
+    return await clone.text();
+  } catch {
+    try {
+      return await clone.text();
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 type QueryPayload = {
@@ -120,6 +150,43 @@ export async function fetchTimeline(
     throw new Error(`Timeline request failed with status ${response.status}`);
   }
   return (await response.json()) as TimelineResponse;
+}
+
+export async function fetchDevAgentBacklog(): Promise<DevAgentProposalListResponse> {
+  const response = await fetch(withBase('/dev-agent/proposals'));
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError('Dev Team backlog access denied.', response.status, await readErrorDetail(response));
+  }
+  if (!response.ok) {
+    throw new HttpError(
+      `Failed to load Dev Team backlog (${response.status})`,
+      response.status,
+      await readErrorDetail(response)
+    );
+  }
+  return (await response.json()) as DevAgentProposalListResponse;
+}
+
+export async function applyDevAgentProposal(proposalId: string): Promise<DevAgentApplyResponse> {
+  const response = await fetch(withBase('/dev-agent/apply'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ proposal_id: proposalId }),
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError('Dev Team approvals require elevated access.', response.status, await readErrorDetail(response));
+  }
+  if (response.status === 422) {
+    throw new HttpError('Proposal validation failed.', response.status, await readErrorDetail(response));
+  }
+  if (!response.ok) {
+    throw new HttpError(
+      `Failed to approve proposal (${response.status})`,
+      response.status,
+      await readErrorDetail(response)
+    );
+  }
+  return (await response.json()) as DevAgentApplyResponse;
 }
 
 export function buildStreamUrl(params?: { mode?: string; filters?: Record<string, string> }): string {

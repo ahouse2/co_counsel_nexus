@@ -127,6 +127,8 @@ class DevAgentService:
                 detail={
                     "proposal_id": proposal.proposal_id,
                     "status": proposal.status,
+                    "workspace_id": execution.workspace_id,
+                    "success": execution.success,
                     "commands": [command.to_json() for command in execution.commands],
                 },
             )
