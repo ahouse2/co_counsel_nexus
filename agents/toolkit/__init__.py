@@ -7,12 +7,6 @@ from .sandbox import (
     SandboxExecutionHarness,
     SandboxExecutionResult,
 )
-from .graph_explorer import (
-    build_text_to_cypher_prompt,
-    community_overview,
-    describe_graph_schema,
-    run_cypher,
-)
 
 __all__ = [
     "CaseEvaluationResult",
@@ -28,8 +22,26 @@ __all__ = [
     "SandboxExecutionError",
     "SandboxExecutionHarness",
     "SandboxExecutionResult",
-    "build_text_to_cypher_prompt",
-    "community_overview",
-    "describe_graph_schema",
-    "run_cypher",
 ]
+
+try:  # pragma: no cover - optional graph explorer dependencies
+    from .graph_explorer import (
+        build_text_to_cypher_prompt,
+        community_overview,
+        describe_graph_schema,
+        run_cypher,
+    )
+except ModuleNotFoundError:  # pragma: no cover - optional graph explorer dependencies
+    build_text_to_cypher_prompt = None  # type: ignore[assignment]
+    community_overview = None  # type: ignore[assignment]
+    describe_graph_schema = None  # type: ignore[assignment]
+    run_cypher = None  # type: ignore[assignment]
+else:  # pragma: no cover - executed when dependencies available
+    __all__.extend(
+        [
+            "build_text_to_cypher_prompt",
+            "community_overview",
+            "describe_graph_schema",
+            "run_cypher",
+        ]
+    )
