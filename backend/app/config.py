@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     knowledge_progress_path: Path = Field(default=Path("storage/knowledge/progress.json"))
 
     privilege_classifier_threshold: float = Field(default=0.68)
+    privilege_policy_review_threshold: float = Field(default=0.68)
+    privilege_policy_block_threshold: float = Field(default=0.92)
+    privilege_policy_audit_category: str = Field(default="security.privilege")
 
     security_mtls_ca_path: Path | None = Field(default=None)
     security_mtls_registry_path: Path | None = Field(default=None)

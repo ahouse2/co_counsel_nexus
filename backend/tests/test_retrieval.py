@@ -322,7 +322,8 @@ def test_stream_result_generates_events(
         payload={"doc_id": "doc-trace", "text": "Context"},
         version=1,
     )
-    trace, _ = retrieval_service._build_trace([point], ["entity-graph"])
+    trace, _, doc_scope, privilege_decisions = retrieval_service._build_trace([point], ["entity-graph"])
+    trace.graph["events"] = retrieval_service._timeline_events_for_docs(doc_scope, privilege_decisions, None)
     meta = retrieval_module.QueryMeta(
         page=1,
         page_size=1,
