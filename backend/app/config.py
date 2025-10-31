@@ -14,6 +14,27 @@ class Settings(BaseSettings):
     app_name: str = "Co-Counsel API"
     app_version: str = "0.1.0"
 
+    model_providers_primary: str = Field(default="openai")
+    model_providers_secondary: str | None = Field(default="azure-openai")
+    default_chat_model: str = Field(default="gpt-4o")
+    default_embedding_model: str = Field(default="text-embedding-3-large")
+    default_vision_model: str = Field(default="gpt-4o")
+    provider_api_base_urls: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "openai": "https://api.openai.com/v1",
+            "azure-openai": "https://{resource-name}.openai.azure.com",
+            "gemini": "https://generativelanguage.googleapis.com/v1beta",
+            "huggingface": "https://api-inference.huggingface.co/models",
+        }
+    )
+    provider_local_runtime_paths: Dict[str, Path] = Field(
+        default_factory=lambda: {
+            "ollama": Path("runtime/ollama"),
+            "llama.cpp": Path("runtime/llama_cpp"),
+            "gguf-local": Path("runtime/gguf"),
+        }
+    )
+
     neo4j_uri: str = Field(default="neo4j://localhost:7687")
     neo4j_user: str = Field(default="neo4j")
     neo4j_password: str = Field(default="neo4j")
@@ -232,6 +253,8 @@ class Settings(BaseSettings):
         self.knowledge_progress_path.parent.mkdir(parents=True, exist_ok=True)
         self.voice_sessions_dir.mkdir(parents=True, exist_ok=True)
         self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
+        for runtime_path in self.provider_local_runtime_paths.values():
+            runtime_path.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)
