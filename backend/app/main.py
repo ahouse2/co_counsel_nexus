@@ -64,6 +64,9 @@ from .models.api import (
     OnboardingSubmission,
     OnboardingSubmissionResponse,
     QueryResponse,
+    ModelCatalogResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
     SandboxCommandResultModel,
     SandboxExecutionModel,
     TimelineEventModel,
@@ -102,6 +105,11 @@ from .services.ingestion import (
 )
 from .services.knowledge import KnowledgeService, get_knowledge_service
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
+from .services.settings import (
+    SettingsService,
+    SettingsValidationError,
+    get_settings_service,
+)
 from .services.scenarios import (
     ScenarioDirector,
     ScenarioDirectorManifest,
@@ -127,12 +135,15 @@ from .security.dependencies import (
     authorize_ingest_status,
     authorize_knowledge_read,
     authorize_knowledge_write,
+    authorize_settings_read,
+    authorize_settings_write,
     authorize_query,
     authorize_timeline,
     create_mtls_config,
 )
 from .security.mtls import MTLSMiddleware
 from .storage.agent_memory_store import ImprovementTaskRecord, PatchProposalRecord
+from .storage.settings_store import SettingsStoreError
 
 settings = get_settings()
 setup_telemetry(settings)
@@ -145,6 +156,42 @@ app.add_websocket_route("/graphql", graphql_app)
 def _raise_workflow_exception(exc: WorkflowException) -> None:
     status_code = exc.status_code or http_status_for_error(exc.error)
     raise HTTPException(status_code=status_code, detail=exc.error.to_dict()) from exc
+
+
+@app.get("/settings", response_model=SettingsResponse)
+def read_application_settings(
+    _principal: Principal = Depends(authorize_settings_read),
+    service: SettingsService = Depends(get_settings_service),
+) -> SettingsResponse:
+    return service.snapshot()
+
+
+@app.put("/settings", response_model=SettingsResponse)
+def update_application_settings(
+    request: SettingsUpdateRequest,
+    _principal: Principal = Depends(authorize_settings_write),
+    service: SettingsService = Depends(get_settings_service),
+) -> SettingsResponse:
+    try:
+        return service.update(request)
+    except SettingsValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except SettingsStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to persist settings",
+        ) from exc
+
+
+@app.get("/settings/models", response_model=ModelCatalogResponse)
+def list_model_catalog(
+    _principal: Principal = Depends(authorize_settings_read),
+    service: SettingsService = Depends(get_settings_service),
+) -> ModelCatalogResponse:
+    return service.model_catalog()
 
 
 def _proposal_from_record(

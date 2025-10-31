@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, ConfigDict
 
 
 class IngestionSource(BaseModel):
@@ -815,4 +815,86 @@ class VoiceSessionDetailResponse(VoiceSessionModel):
 
 class VoicePersonaListResponse(BaseModel):
     personas: List[VoicePersonaModel]
+
+
+class ProviderModelInfoModel(BaseModel):
+    model_id: str
+    display_name: str
+    context_window: int
+    modalities: List[str]
+    capabilities: List[str]
+    availability: str
+
+
+class ProviderCatalogEntryModel(BaseModel):
+    provider_id: str
+    display_name: str
+    capabilities: List[str]
+    models: List[ProviderModelInfoModel]
+
+
+class ModelCatalogResponse(BaseModel):
+    providers: List[ProviderCatalogEntryModel]
+
+
+class ProviderSettingsSnapshotModel(BaseModel):
+    primary: str
+    secondary: Optional[str]
+    defaults: Dict[str, str]
+    api_base_urls: Dict[str, str]
+    local_runtime_paths: Dict[str, str]
+    available: List[ProviderCatalogEntryModel]
+
+
+class CredentialStatusModel(BaseModel):
+    provider_id: str
+    has_api_key: bool
+
+
+class CredentialsSnapshotModel(BaseModel):
+    providers: List[CredentialStatusModel]
+    services: Dict[str, bool]
+
+
+class AppearanceSettingsSnapshotModel(BaseModel):
+    theme: Literal["system", "light", "dark"]
+
+
+class SettingsResponse(BaseModel):
+    providers: ProviderSettingsSnapshotModel
+    credentials: CredentialsSnapshotModel
+    appearance: AppearanceSettingsSnapshotModel
+    updated_at: Optional[datetime]
+
+
+class ProviderSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    primary: Optional[str] = None
+    secondary: Optional[str] = None
+    defaults: Optional[Dict[str, str]] = None
+    api_base_urls: Optional[Dict[str, str]] = None
+    local_runtime_paths: Optional[Dict[str, str]] = None
+
+
+class CredentialSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_api_keys: Optional[Dict[str, Optional[str]]] = None
+    courtlistener_token: Optional[str] = None
+    research_browser_api_key: Optional[str] = None
+
+
+class AppearanceSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    theme: Optional[Literal["system", "light", "dark"]] = None
+
+
+class SettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    providers: Optional[ProviderSettingsUpdate] = None
+    credentials: Optional[CredentialSettingsUpdate] = None
+    appearance: Optional[AppearanceSettingsUpdate] = None
 

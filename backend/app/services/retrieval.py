@@ -29,7 +29,9 @@ import httpx
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
+from .. import ProviderCapability, get_provider_registry
 from ..config import get_settings
+from ..providers.registry import ProviderCapabilityError
 from backend.ingestion.llama_index_factory import create_embedding_model, configure_global_settings
 from backend.ingestion.settings import build_runtime_config
 from ..security.privilege_policy import (
@@ -400,6 +402,10 @@ class QueryMeta:
     has_next: bool
     mode: RetrievalMode
     reranker: str
+    llm_provider: str
+    llm_model: str
+    embedding_provider: str
+    embedding_model: str
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -409,6 +415,10 @@ class QueryMeta:
             "has_next": self.has_next,
             "mode": self.mode.value,
             "reranker": self.reranker,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model": self.embedding_model,
         }
 
 
@@ -445,6 +455,20 @@ class RetrievalService:
         privilege_policy_engine: PrivilegePolicyEngine | None = None,
     ) -> None:
         self.settings = get_settings()
+        self.provider_registry = get_provider_registry()
+        self._chat_resolution = self.provider_registry.resolve(ProviderCapability.CHAT)
+        try:
+            self._embedding_resolution = self.provider_registry.resolve(ProviderCapability.EMBEDDINGS)
+        except ProviderCapabilityError:
+            self._embedding_resolution = None
+        self.llm_provider_id = self._chat_resolution.provider.descriptor.provider_id
+        self.llm_model_id = self._chat_resolution.model.model_id
+        if self._embedding_resolution is not None:
+            self.embedding_provider_id = self._embedding_resolution.provider.descriptor.provider_id
+            self.embedding_model_id = self._embedding_resolution.model.model_id
+        else:
+            self.embedding_provider_id = "unknown"
+            self.embedding_model_id = self.settings.default_embedding_model
         self.vector_service = vector_service or get_vector_service()
         self.graph_service = graph_service or get_graph_service()
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
@@ -612,6 +636,10 @@ class RetrievalService:
                     has_next=False,
                     mode=mode,
                     reranker=bundle.reranker,
+                    llm_provider=self.llm_provider_id,
+                    llm_model=self.llm_model_id,
+                    embedding_provider=self.embedding_provider_id,
+                    embedding_model=self.embedding_model_id,
                 )
                 answer = "No supporting evidence found for the supplied query."
                 return QueryResult(
@@ -763,6 +791,10 @@ class RetrievalService:
                 has_next=has_next,
                 mode=mode,
                 reranker=bundle.reranker,
+                llm_provider=self.llm_provider_id,
+                llm_model=self.llm_model_id,
+                embedding_provider=self.embedding_provider_id,
+                embedding_model=self.embedding_model_id,
             )
 
             has_evidence = True

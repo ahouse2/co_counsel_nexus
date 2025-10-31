@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     app_name: str = "Co-Counsel API"
     app_version: str = "0.1.0"
 
-    model_providers_primary: str = Field(default="openai")
-    model_providers_secondary: str | None = Field(default="azure-openai")
-    default_chat_model: str = Field(default="gpt-4o")
-    default_embedding_model: str = Field(default="text-embedding-3-large")
-    default_vision_model: str = Field(default="gpt-4o")
+    model_providers_primary: str = Field(default="gemini")
+    model_providers_secondary: str | None = Field(default="openai")
+    default_chat_model: str = Field(default="gemini-2.5-flash")
+    default_embedding_model: str = Field(default="text-embedding-004")
+    default_vision_model: str = Field(default="gemini-2.5-flash")
     provider_api_base_urls: Dict[str, str] = Field(
         default_factory=lambda: {
             "openai": "https://api.openai.com/v1",
@@ -76,6 +76,7 @@ class Settings(BaseSettings):
         default=("ingestion", "cocounsel")
     )
     credentials_registry_path: Path | None = Field(default=None)
+    settings_store_path: Path = Field(default=Path("storage/settings/preferences.json"))
     manifest_encryption_key_path: Path = Field(default=Path("storage/manifest.key"))
     manifest_retention_days: int = Field(default=30)
     audit_log_path: Path = Field(default=Path("storage/audit.log"))
@@ -117,6 +118,7 @@ class Settings(BaseSettings):
     security_audience_billing: str = Field(default="co-counsel.billing")
     security_audience_dev_agent: str = Field(default="co-counsel.dev-agent")
     security_audience_knowledge: str = Field(default="co-counsel.knowledge")
+    security_audience_settings: str = Field(default="co-counsel.settings")
 
     dev_agent_validation_commands: tuple[tuple[str, ...], ...] = Field(
         default=(
@@ -229,7 +231,11 @@ class Settings(BaseSettings):
     retrieval_graph_hop_window: int = Field(default=12)
     retrieval_cross_encoder_model: Optional[str] = Field(default=None)
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        protected_namespaces=(),
+    )
 
     def prepare_directories(self) -> None:
         self.vector_dir.mkdir(parents=True, exist_ok=True)
@@ -252,6 +258,7 @@ class Settings(BaseSettings):
         self.knowledge_content_dir.mkdir(parents=True, exist_ok=True)
         self.knowledge_progress_path.parent.mkdir(parents=True, exist_ok=True)
         self.voice_sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.settings_store_path.parent.mkdir(parents=True, exist_ok=True)
         self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
         for runtime_path in self.provider_local_runtime_paths.values():
             runtime_path.mkdir(parents=True, exist_ok=True)
