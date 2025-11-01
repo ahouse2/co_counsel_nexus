@@ -59,6 +59,10 @@ class VoiceSession:
     sentiment_label: str
     sentiment_score: float
     pace: float
+    persona_directive: Dict[str, object] = field(default_factory=dict)
+    sentiment_arc: List[Dict[str, object]] = field(default_factory=list)
+    persona_shifts: List[Dict[str, object]] = field(default_factory=list)
+    translation: Dict[str, object] = field(default_factory=dict)
     segments: List[Dict[str, object]] = field(default_factory=list)
     turns: List[VoiceTurn] = field(default_factory=list)
     input_audio_path: Path | None = None
@@ -76,6 +80,10 @@ class VoiceSession:
             "sentiment_label": self.sentiment_label,
             "sentiment_score": self.sentiment_score,
             "pace": self.pace,
+            "persona_directive": dict(self.persona_directive),
+            "sentiment_arc": list(self.sentiment_arc),
+            "persona_shifts": list(self.persona_shifts),
+            "translation": dict(self.translation),
             "segments": list(self.segments),
             "turns": [turn.to_json() for turn in self.turns],
             "input_audio_path": str(self.input_audio_path) if self.input_audio_path else None,
@@ -106,6 +114,10 @@ class VoiceSession:
             sentiment_label=str(payload.get("sentiment_label", "neutral")),
             sentiment_score=float(payload.get("sentiment_score", 0.0)),
             pace=float(payload.get("pace", 1.0)),
+            persona_directive=dict(payload.get("persona_directive", {})),
+            sentiment_arc=[dict(entry) for entry in payload.get("sentiment_arc", [])],
+            persona_shifts=[dict(entry) for entry in payload.get("persona_shifts", [])],
+            translation=dict(payload.get("translation", {})),
             segments=[dict(segment) for segment in segments_payload],
             turns=turns,
             input_audio_path=Path(input_path) if input_path else None,

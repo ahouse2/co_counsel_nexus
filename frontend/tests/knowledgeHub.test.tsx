@@ -75,6 +75,47 @@ describe('KnowledgeHub', () => {
       sections: [
         { id: 'overview', title: 'Overview', content: 'Issue litigation holds.', completed: false },
       ],
+      strategy_brief: {
+        generated_at: '2025-01-01T00:00:00Z',
+        summary: 'Strategy map synthesised with 1 argument focus node(s), 1 contradiction link(s), 1 leverage point(s).',
+        focus_nodes: [
+          { id: 'claim-alpha', type: 'Claim', properties: { label: 'Alpha Claim' } },
+        ],
+        argument_map: [
+          {
+            node: { id: 'claim-alpha', type: 'Claim', properties: { label: 'Alpha Claim' } },
+            supporting: [
+              {
+                node: { id: 'evidence-email', type: 'Evidence', properties: { label: 'Email Log' } },
+                relation: 'SUPPORTED_BY',
+                stance: 'support',
+                documents: ['doc-1'],
+                weight: 0.8,
+              },
+            ],
+            opposing: [],
+            neutral: [],
+            documents: ['doc-1'],
+          },
+        ],
+        contradictions: [
+          {
+            source: { id: 'memo', type: 'Evidence', properties: { label: 'Memo' } },
+            target: { id: 'claim-alpha', type: 'Claim', properties: { label: 'Alpha Claim' } },
+            relation: 'CONTRADICTS',
+            documents: ['doc-2'],
+          },
+        ],
+        leverage_points: [
+          {
+            node: { id: 'claim-alpha', type: 'Claim', properties: { label: 'Alpha Claim' } },
+            influence: 0.42,
+            connections: 3,
+            documents: ['doc-1', 'doc-2'],
+            reason: 'Alpha Claim is connected to 3 node(s), linked to 2 document(s).',
+          },
+        ],
+      },
     });
     (searchKnowledge as unknown as vi.Mock).mockResolvedValue({
       results: [
@@ -122,6 +163,11 @@ describe('KnowledgeHub', () => {
     const completeButton = await screen.findByRole('button', { name: /mark complete/i });
     fireEvent.click(completeButton);
     await waitFor(() => expect(updateKnowledgeProgress).toHaveBeenCalledWith('civil-discovery-foundations', 'overview', true));
+
+    expect(await screen.findByRole('heading', { level: 4, name: 'Strategy Map' })).toBeInTheDocument();
+    expect(screen.getByText(/Strategy map synthesised/i)).toBeInTheDocument();
+    expect(screen.getByText('Email Log')).toBeInTheDocument();
+    expect(screen.getByText(/Alpha Claim is connected/)).toBeInTheDocument();
   });
 
   it('submits search queries and renders results', async () => {

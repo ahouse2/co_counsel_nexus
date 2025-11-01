@@ -51,6 +51,14 @@ export function VoiceConsole(): JSX.Element {
 
   const transcriptSegments = useMemo(() => voice.detail?.segments ?? voice.session?.segments ?? [], [voice.detail, voice.session]);
   const fullTranscript = voice.detail?.transcript ?? voice.session?.transcript;
+  const personaDirective = voice.detail?.persona_directive ?? voice.session?.persona_directive;
+  const sentimentArc = voice.detail?.sentiment_arc ?? voice.session?.sentiment_arc ?? [];
+  const personaShifts = voice.detail?.persona_shifts ?? voice.session?.persona_shifts ?? [];
+  const translation = voice.detail?.translation ?? voice.session?.translation;
+  const glossaryEntries = useMemo(() => {
+    const entries = Object.entries(personaDirective?.glossary ?? translation?.glossary ?? {});
+    return entries.slice(0, 6);
+  }, [personaDirective?.glossary, translation?.glossary]);
 
   const handleCaseSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -100,6 +108,29 @@ export function VoiceConsole(): JSX.Element {
           </span>
         )}
       </div>
+      {personaDirective && (
+        <section className="voice-console__persona-directive" aria-label="Adaptive persona summary">
+          <header>
+            <h3>Adaptive Persona</h3>
+            <p>
+              Tone <strong>{personaDirective.tone}</strong> · Language{' '}
+              <strong>{personaDirective.language.toUpperCase()}</strong> · Pace{' '}
+              <strong>{personaDirective.pace.toFixed(2)}x</strong>
+            </p>
+          </header>
+          <p className="voice-console__persona-rationale">{personaDirective.rationale}</p>
+          {glossaryEntries.length > 0 && (
+            <dl className="voice-console__glossary">
+              {glossaryEntries.map(([term, value]) => (
+                <div key={term}>
+                  <dt>{term}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </section>
+      )}
       <div className="voice-console__controls">
         <button type="button" onClick={() => void handleRecord()} disabled={busy} className={microphone.recording ? 'recording' : ''}>
           {recordLabel}
@@ -141,6 +172,50 @@ export function VoiceConsole(): JSX.Element {
           )}
         </ol>
       </section>
+      {translation && (
+        <section className="voice-console__translation" aria-label="Bilingual response">
+          <header>
+            <h3>Bilingual Response</h3>
+            <p>
+              {translation.source_language.toUpperCase()} → {translation.target_language.toUpperCase()}
+            </p>
+          </header>
+          <p className="voice-console__translation-text">{translation.bilingual_text}</p>
+        </section>
+      )}
+      {sentimentArc.length > 0 && (
+        <section className="voice-console__sentiment-arc" aria-label="Sentiment arc visualization">
+          <header>
+            <h3>Sentiment Arc</h3>
+          </header>
+          <ol>
+            {sentimentArc.map((point) => (
+              <li key={point.offset}>
+                <span className="voice-console__arc-offset">{point.offset.toFixed(1)}s</span>
+                <span className={`voice-console__arc-score voice-console__arc-score--${point.label}`} style={{ width: `${point.score * 100}%` }} />
+                <span className="voice-console__arc-label">{point.label}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      {personaShifts.length > 0 && (
+        <section className="voice-console__persona-shifts" aria-label="Persona shifts">
+          <header>
+            <h3>Persona Shifts</h3>
+          </header>
+          <ol>
+            {personaShifts.map((shift, index) => (
+              <li key={`${shift.at}-${index}`}>
+                <span className="voice-console__shift-time">{shift.at.toFixed(1)}s</span>
+                <span className="voice-console__shift-tone">{shift.tone}</span>
+                <span className="voice-console__shift-language">{shift.language.toUpperCase()}</span>
+                <span className="voice-console__shift-trigger">{shift.trigger}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
       <footer className="voice-console__status">
         {microphone.error && (
           <p role="alert" className="voice-console__error">

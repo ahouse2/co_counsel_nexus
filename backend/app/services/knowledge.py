@@ -8,12 +8,13 @@ from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
-from typing import Dict, Iterable, List, Sequence
+from typing import Callable, Dict, Iterable, List, Sequence
 
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
 from ..config import get_settings
+from ..services.graph import GraphService, get_graph_service
 from ..security.authz import Principal
 from ..storage.knowledge_store import KnowledgeProfileStore
 from backend.ingestion.llama_index_factory import (
@@ -99,6 +100,8 @@ class KnowledgeService:
         self,
         *,
         profile_store: KnowledgeProfileStore | None = None,
+        graph_service: GraphService | None = None,
+        graph_service_factory: Callable[[], GraphService] | None = None,
     ) -> None:
         self.settings = get_settings()
         self.profile_store = profile_store or KnowledgeProfileStore(self.settings.knowledge_progress_path)
@@ -109,11 +112,32 @@ class KnowledgeService:
         self._embedding_model = create_embedding_model(self._runtime.embedding)
         self._index_lock = Lock()
         self._index = self._build_index(self._lessons)
+        self._graph_service: GraphService | None = graph_service
+        if graph_service_factory is None and graph_service is None:
+            graph_service_factory = get_graph_service
+        self._graph_service_factory: Callable[[], GraphService] | None = graph_service_factory
 
     @staticmethod
     def _slugify(value: str) -> str:
         base = re.sub(r"[^A-Za-z0-9]+", "-", value.strip().lower()).strip("-")
         return base or "section"
+
+    def _resolve_graph_service(self) -> GraphService | None:
+        if self._graph_service is not None:
+            return self._graph_service
+        if self._graph_service_factory is None:
+            return None
+        try:
+            service = self._graph_service_factory()
+        except Exception:  # pragma: no cover - optional dependency guard
+            self._graph_service_factory = None
+            return None
+        self._graph_service = service
+        return service
+
+    @property
+    def graph_service(self) -> GraphService | None:
+        return self._resolve_graph_service()
 
     def _load_lessons(self) -> Dict[str, KnowledgeLesson]:
         catalog_path = Path(self.settings.knowledge_catalog_path)
@@ -348,6 +372,15 @@ class KnowledgeService:
                 },
                 "bookmarked": lesson_id in profile.bookmarks,
             }
+            payload["strategy_brief"] = None
+            focus_candidates = [lesson.lesson_id, *lesson.tags, *lesson.jurisdictions]
+            graph_service = self._resolve_graph_service()
+            if graph_service is not None:
+                try:
+                    strategy_brief = graph_service.synthesize_strategy_brief(focus_candidates)
+                    payload["strategy_brief"] = strategy_brief.to_dict()
+                except Exception:  # pragma: no cover - defensive guard for optional graph features
+                    payload["strategy_brief"] = None
             _knowledge_lessons_counter.add(1, attributes={"action": "detail"})
             span.set_attribute("knowledge.sections", len(lesson.sections))
             span.set_status(Status(StatusCode.OK))

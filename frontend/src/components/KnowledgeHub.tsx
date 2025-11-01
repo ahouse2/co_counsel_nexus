@@ -9,6 +9,7 @@ import {
   updateKnowledgeProgress,
 } from '@/utils/apiClient';
 import {
+  GraphArgumentLink,
   KnowledgeLessonDetail,
   KnowledgeLessonSummary,
   KnowledgeSearchResult,
@@ -186,6 +187,38 @@ export function KnowledgeHub(): JSX.Element {
   };
 
   const activeLesson = lessonDetail;
+  const formatNodeLabel = (node: { properties?: Record<string, unknown>; id: string; type: string }): string => {
+    if (!node) return 'Unknown node';
+    const properties = node.properties ?? {};
+    const candidates = ['label', 'title', 'name'];
+    for (const key of candidates) {
+      const value = properties[key];
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+    return node.id;
+  };
+
+  const renderArgumentLinks = (heading: string, links: GraphArgumentLink[]): JSX.Element | null => {
+    if (!links.length) return null;
+    return (
+      <div className="strategy-links">
+        <p className="strategy-links-heading">{heading}</p>
+        <ul>
+          {links.map((link) => (
+            <li key={`${link.node.id}:${link.relation}:${link.stance}`}>
+              <span className="strategy-node-label">{formatNodeLabel(link.node)}</span>
+              <span className="strategy-relation">{link.relation}</span>
+              {link.documents.length > 0 && (
+                <span className="strategy-documents">Docs: {link.documents.join(', ')}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
 
   return (
     <div className="knowledge-hub">
@@ -371,6 +404,68 @@ export function KnowledgeHub(): JSX.Element {
                   </ul>
                 )}
               </section>
+              {activeLesson.strategy_brief && (
+                <section className="lesson-strategy-map" aria-label="Strategy map briefing">
+                  <h4>Strategy Map</h4>
+                  <p className="strategy-summary">{activeLesson.strategy_brief.summary}</p>
+                  {activeLesson.strategy_brief.focus_nodes.length > 0 && (
+                    <div className="strategy-focus">
+                      <h5>Focus Nodes</h5>
+                      <ul>
+                        {activeLesson.strategy_brief.focus_nodes.map((node) => (
+                          <li key={node.id}>
+                            <span className="strategy-node-label">{formatNodeLabel(node)}</span>
+                            <span className="strategy-node-type">{node.type}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {activeLesson.strategy_brief.argument_map.length > 0 && (
+                    <div className="strategy-arguments">
+                      <h5>Argument Map</h5>
+                      {activeLesson.strategy_brief.argument_map.map((entry) => (
+                        <div key={entry.node.id} className="strategy-argument">
+                          <h6>{formatNodeLabel(entry.node)}</h6>
+                          {renderArgumentLinks('Supporting', entry.supporting)}
+                          {renderArgumentLinks('Opposing', entry.opposing)}
+                          {renderArgumentLinks('Neutral', entry.neutral)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activeLesson.strategy_brief.contradictions.length > 0 && (
+                    <div className="strategy-contradictions">
+                      <h5>Contradictions</h5>
+                      <ul>
+                        {activeLesson.strategy_brief.contradictions.map((item, index) => (
+                          <li key={`${item.source.id}:${item.target.id}:${index}`}>
+                            <span className="strategy-node-label">{formatNodeLabel(item.source)}</span>
+                            <span className="strategy-relation">{item.relation}</span>
+                            <span className="strategy-node-label">{formatNodeLabel(item.target)}</span>
+                            {item.documents.length > 0 && (
+                              <span className="strategy-documents">Docs: {item.documents.join(', ')}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {activeLesson.strategy_brief.leverage_points.length > 0 && (
+                    <div className="strategy-leverage">
+                      <h5>Leverage Points</h5>
+                      <ul>
+                        {activeLesson.strategy_brief.leverage_points.map((point) => (
+                          <li key={point.node.id}>
+                            <span className="strategy-node-label">{formatNodeLabel(point.node)}</span>
+                            <span className="strategy-reason">{point.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </section>
+              )}
               <div className="lesson-sections">
                 {activeLesson.sections.map((section) => (
                   <details key={section.id} open>
