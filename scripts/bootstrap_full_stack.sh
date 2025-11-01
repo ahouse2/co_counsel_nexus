@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--profile community|pro|enterprise] [--with-gpu] [--skip-download] [--skip-migrations]
+Usage: $(basename "$0") [--profile community|pro|enterprise] [--provider gemini|openai|ollama|huggingface] [--secondary-provider PROVIDER_ID] [--model MODEL_ID] [--embedding-model MODEL_ID] [--vision-model MODEL_ID] [--with-gpu] [--skip-download] [--skip-migrations]
 
 Orchestrates full-stack bring-up: prepares Python dependencies, ensures model caches,
 starts Docker Compose services, and runs Neo4j/Qdrant migrations.
@@ -11,6 +11,11 @@ USAGE
 }
 
 PROFILE="community"
+PROVIDER="gemini"
+SECONDARY_PROVIDER="openai"
+CHAT_MODEL=""
+EMBEDDING_MODEL=""
+VISION_MODEL=""
 WITH_GPU=false
 SKIP_DOWNLOAD=false
 SKIP_MIGRATIONS=false
@@ -19,6 +24,26 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
       PROFILE="$2"
+      shift 2
+      ;;
+    --provider)
+      PROVIDER="$2"
+      shift 2
+      ;;
+    --model)
+      CHAT_MODEL="$2"
+      shift 2
+      ;;
+    --embedding-model)
+      EMBEDDING_MODEL="$2"
+      shift 2
+      ;;
+    --vision-model)
+      VISION_MODEL="$2"
+      shift 2
+      ;;
+    --secondary-provider)
+      SECONDARY_PROVIDER="$2"
       shift 2
       ;;
     --with-gpu)
@@ -49,6 +74,7 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 INFRA_DIR="${ROOT_DIR}/infra"
 PROFILE_FILE="${INFRA_DIR}/profiles/${PROFILE}.env"
 GPU_FILE="${INFRA_DIR}/profiles/gpu.env"
+RUNTIME_ENV_FILE="${INFRA_DIR}/profiles/.runtime-provider.env"
 
 if [[ ! -f "${PROFILE_FILE}" ]]; then
   echo "Profile file ${PROFILE_FILE} not found" >&2
@@ -85,6 +111,23 @@ mkdir -p "${ROOT_DIR}/var/models/huggingface" "${ROOT_DIR}/var/models/whisper" \
   "${ROOT_DIR}/var/storage/graphs" "${ROOT_DIR}/var/storage/telemetry" \
   "${ROOT_DIR}/var/audio" "${ROOT_DIR}/var/backups"
 
+# Prepare runtime provider overrides consumed by Compose/Helm
+{
+  echo "MODEL_PROVIDERS_PRIMARY=${PROVIDER}"
+  echo "MODEL_PROVIDERS_SECONDARY=${SECONDARY_PROVIDER}"
+  if [[ -n "${CHAT_MODEL}" ]]; then
+    echo "DEFAULT_CHAT_MODEL=${CHAT_MODEL}"
+  fi
+  if [[ -n "${EMBEDDING_MODEL}" ]]; then
+    echo "DEFAULT_EMBEDDING_MODEL=${EMBEDDING_MODEL}"
+  fi
+  if [[ -n "${VISION_MODEL}" ]]; then
+    echo "DEFAULT_VISION_MODEL=${VISION_MODEL}"
+  elif [[ -n "${CHAT_MODEL}" ]]; then
+    echo "DEFAULT_VISION_MODEL=${CHAT_MODEL}"
+  fi
+} > "${RUNTIME_ENV_FILE}"
+
 if [[ "${SKIP_DOWNLOAD}" == "false" ]]; then
   echo "Ensuring Hugging Face snapshot tooling present"
   "${PYTHON_BIN}" -m pip install --upgrade --quiet huggingface_hub==0.25.2 >/dev/null
@@ -112,7 +155,7 @@ except Exception as exc:
 PY
 fi
 
-COMPOSE_ARGS=(--project-directory "${INFRA_DIR}" --env-file "${PROFILE_FILE}")
+COMPOSE_ARGS=(--project-directory "${INFRA_DIR}" --env-file "${PROFILE_FILE}" --env-file "${RUNTIME_ENV_FILE}")
 if [[ "${WITH_GPU}" == "true" ]]; then
   COMPOSE_ARGS+=(--env-file "${GPU_FILE}" --profile gpu)
 fi

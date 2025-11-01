@@ -88,8 +88,56 @@ def test_scenario_engine_run(tmp_path: Path) -> None:
     assert result["run_id"]
     assert len(result["transcript"]) == len(scenario.beats)
     assert all(turn["text"].startswith("Dynamic response") for turn in result["transcript"] if turn["kind"] == "dynamic")
+    assert "director" in result["transcript"][0]
+    assert result["transcript"][0]["director"]["motion"]["direction"]
+    assert "director_manifest" in result["telemetry"]
     stored_runs = agents.memory_store.list_scenarios()
     assert stored_runs, "Scenario transcript was not persisted"
+
+
+def test_scenario_engine_applies_director_overrides(tmp_path: Path) -> None:
+    registry = ScenarioRegistry(_library_path())
+    agents = _StubAgentsService(tmp_path / "director_threads")
+    engine = ScenarioEngine(
+        registry=registry,
+        agents_service=agents,
+        memory_store=agents.memory_store,
+        tts_service=None,
+    )
+    scenario = registry.get("cross_examination_smith")
+    primary = scenario.beats[0].id
+    options = ScenarioRunOptions(
+        scenario_id=scenario.id,
+        case_id="case-director",
+        variables={
+            "issue": "Authentication gap",
+            "witness_fact": "Badge scans were missing",
+            "timeframe": "January 12 2025",
+        },
+        evidence={
+            "primary_document": ScenarioEvidenceBinding(
+                slot_id="primary_document",
+                value="Exhibit 12",
+            ),
+        },
+        participants=[participant.id for participant in scenario.participants],
+        use_tts=False,
+        director_overrides={
+            primary: {
+                "emotional_tone": "composed",
+                "motion": {"intensity": 0.2, "tempo": 0.4},
+                "lighting": {"preset": "custom", "intensity": 0.4},
+                "persona": {"expression": "neutral", "confidence": 0.95},
+                "counter_argument": "Maintain focus on {issue} regardless of challenge.",
+            }
+        },
+    )
+    result = engine.run(options)
+    override_turn = result["transcript"][0]["director"]
+    assert override_turn["emotional_tone"] == "composed"
+    assert override_turn["motion"]["intensity"] == pytest.approx(0.2)
+    assert override_turn["lighting"]["preset"] == "custom"
+    assert "{issue}" not in override_turn["counter_argument"]
 
 
 def test_scenario_engine_rejects_inactive_participant(tmp_path: Path) -> None:
@@ -165,6 +213,8 @@ def test_scenarios_api_endpoints(client, auth_headers_factory, tmp_path: Path) -
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["scenario_id"] == scenario_id
+    assert detail["director"]["version"]
+    assert scenario_id in detail["scenario_id"]
 
     run_headers = auth_headers_factory(
         scopes=["agents:run"],
@@ -185,12 +235,16 @@ def test_scenarios_api_endpoints(client, auth_headers_factory, tmp_path: Path) -
             "timeline_event": {"value": "Timeline marker"},
         },
         "enable_tts": False,
+        "director_overrides": {
+            detail["beats"][0]["id"]: {"emotional_tone": "steady", "motion": {"intensity": 0.3}},
+        },
     }
     run_response = client.post("/scenarios/run", headers=run_headers, json=run_payload)
     assert run_response.status_code == 200
     run_data = run_response.json()
     assert run_data["run_id"]
     assert len(run_data["transcript"]) == len(detail["beats"])
+    assert run_data["transcript"][0]["director"]["emotional_tone"] == "steady"
 
     tts_response = client.post("/tts/speak", headers=run_headers, json={"text": "Hello"})
     assert tts_response.status_code == 503

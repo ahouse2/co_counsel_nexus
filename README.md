@@ -1,64 +1,131 @@
-# NinthOctopusMitten — Full-Stack Co-Counsel Platform
+# NinthOctopusMitten — Multi-Provider Co-Counsel Platform
 
-NinthOctopusMitten delivers an end-to-end research and co-counsel workflow that blends document ingestion, graph reasoning, retrieval, multi-agent orchestration, and forensic analysis. This repository packages the full stack required for community evaluations through enterprise deployments with GPU-accelerated audio services, observability, and disaster recovery controls.
+NinthOctopusMitten delivers an end-to-end litigation co-counsel experience that blends document ingestion, knowledge graph reasoning, retrieval-augmented generation, multi-agent orchestration, and forensic tooling. The stack now ships with a provider-aware runtime, encrypted operator settings, and a production-ready neon UI for configuring model providers, credentials, and appearance.
+
+## Highlights
+- **Provider registry & catalog** — Gemini 2.5 Flash is the default chat/vision model with optional OpenAI, Azure OpenAI, Hugging Face Inference, Ollama, llama.cpp, and GGUF-local adapters. A machine-readable catalog (`/settings/models`) is current to 2025-10-30.
+- **Encrypted settings service** — `/settings` endpoints persist provider choices, API keys, CourtListener tokens, and research browser credentials using AES-GCM encryption behind `PlatformEngineer` scopes.
+- **Frontend settings panel** — The React app exposes tabs for Providers, Credentials, Research tools, and Appearance (system/dark/light) powered by the new `SettingsContext`.
+- **Observability & auditability** — Retrieval responses stream provider/model metadata, and all changes flow through FastAPI routes secured with mTLS + OAuth.
+- **Deployment matrix** — Docker Compose, Helm, and Terraform overlays support community, pro, and enterprise profiles with optional GPU acceleration and cloud-native backups.
 
 ## Quick Start
-1. **Install prerequisites** — Docker (with Compose v2), Python 3.11+, Node.js 20+, and optional `uv` for dependency management.
-2. **Bootstrap the stack**
+1. **Install prerequisites**
+   - Docker (Compose v2), Python 3.11+, Node.js 20+
+   - Optional: [`uv`](https://github.com/astral-sh/uv) for Python dependency management
+
+2. **Bootstrap with provider defaults**
    ```bash
-   ./scripts/bootstrap_full_stack.sh --profile community
-   docker compose --project-directory infra --env-file infra/profiles/community.env up -d
+   ./scripts/bootstrap_full_stack.sh \
+     --profile community \
+     --provider gemini \
+     --secondary-provider openai \
+     --model gemini-2.5-flash \
+     --embedding-model text-embedding-004
    ```
-   *GPU acceleration?* Append `--with-gpu` and include `--env-file infra/profiles/gpu.env` when starting Compose to request CUDA devices.
-3. **Run smoke tests** — validate the platform end to end.
+   Add `--vision-model` to override the default vision model and `--with-gpu` when running on CUDA-enabled hosts.
+
+3. **Launch the stack**
    ```bash
-   pytest tests/e2e -q
-   npm --prefix frontend run test -- --run
+   docker compose --project-directory infra --env-file infra/profiles/community.env \
+     --env-file infra/profiles/.runtime-provider.env up -d
    ```
+
 4. **Access services**
-   - API: http://localhost:8000
-   - Neo4j Browser: http://localhost:7474
-   - Qdrant Console: http://localhost:6333/dashboard
-   - Grafana (enterprise profile): http://localhost:3000
+   - Web UI / API: <http://localhost:8000>
+   - Neo4j Browser: <http://localhost:7474>
+   - Qdrant Console: <http://localhost:6333/dashboard>
+   - Grafana (enterprise profile): <http://localhost:3000>
+
+5. **Run validations**
+   ```bash
+   python -m pytest backend/tests -q
+   npm --prefix frontend run lint
+   npm --prefix frontend run test -- --run
+   pytest tests/e2e -q           # optional full-stack smoke tests
+   ```
+
+## Windows One-Click Installer
+For Windows operators that prefer a turnkey experience, the repository ships with a
+PowerShell-based installer capable of provisioning the full stack (backend API,
+frontend UI, and supporting services) in a single execution.
+
+1. Launch an elevated PowerShell session and allow the script to run:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   powershell -File .\infra\windows\scripts\install.ps1 -RepoUrl "https://github.com/NinthOctopusMitten/NinthOctopusMitten.git"
+   ```
+   The script installs required tooling via `winget` (Git, Python 3.11, Node.js), clones the
+   repository into `%LOCALAPPDATA%\CoCounselNexus`, installs backend/frontend dependencies, and
+   drops desktop shortcuts for launching or uninstalling the stack.
+
+2. (Optional) Customise the destination, branch, or repository fork:
+   ```powershell
+   powershell -File .\infra\windows\scripts\install.ps1 -InstallDir "D:\Apps\CoCounsel" -Branch "develop" -RepoUrl "https://github.com/<fork>/NinthOctopusMitten.git"
+   ```
+
+3. (Optional) Package the installer into a distributable `.exe` on Windows:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   powershell -File .\infra\windows\package.ps1 -Output "CoCounselNexusInstaller.exe"
+   ```
+   The helper script bundles `scripts/install.ps1` using PS2EXE and embeds optional branding
+   assets located in `infra/windows/assets/`.
+
+Post-installation, the desktop shortcut launches `Start-CoCounsel.ps1`, which starts the backend
+(`uvicorn app.main:app --port 8000`), boots the Vite frontend on port 5173, and opens the default
+browser to the running experience.
+
+## Configuring Providers & Credentials
+### Backend environment
+The API container honours the following environment variables (automatically populated by `bootstrap_full_stack.sh` and the Compose/Helm overlays):
+
+| Setting | Description | Default |
+| --- | --- | --- |
+| `MODEL_PROVIDERS_PRIMARY` | Primary provider ID (`gemini`, `openai`, `huggingface`, `ollama`, etc.) | `gemini` |
+| `MODEL_PROVIDERS_SECONDARY` | Optional fallback provider | `openai` |
+| `DEFAULT_CHAT_MODEL` | Default chat/completions model ID | `gemini-2.5-flash` |
+| `DEFAULT_EMBEDDING_MODEL` | Default embedding model ID | `text-embedding-004` |
+| `DEFAULT_VISION_MODEL` | Default vision model ID | `gemini-2.5-flash` |
+
+These values can be customised in:
+
+- `infra/docker-compose.yml` via the environment block, or
+- Helm overrides (`infra/helm/full-stack/values.yaml`), or
+- `./scripts/bootstrap_full_stack.sh` flags (`--provider`, `--secondary-provider`, `--model`, `--embedding-model`, `--vision-model`).
+
+### Settings API & panel
+- `GET /settings` / `PUT /settings` surface encrypted state for providers, credentials, research tools, and appearance. Requests require the `settings:read` or `settings:write` scope and the `PlatformEngineer` role.
+- `GET /settings/models` exposes the curated model catalog (provider IDs, capabilities, display names, context windows, availability).
+- The frontend’s **Settings** button (⚙) opens a four-tab panel powered by `SettingsContext`, allowing non-technical operators to select providers/models, upload API keys, manage CourtListener/research tokens, and toggle theme preferences. Changes persist to the encrypted backend store and immediately update the chat/query runtime.
 
 ## Deployment Matrix
-A detailed capability comparison between community and enterprise tiers lives in [`docs/roadmaps/2025-11-23_deployment_matrix.md`](docs/roadmaps/2025-11-23_deployment_matrix.md). The table below highlights key differences:
+A detailed comparison of community vs. pro vs. enterprise capabilities—covering observability, backups, RBAC, and GPU profiles—is maintained in [`docs/roadmaps/2025-11-23_deployment_matrix.md`](docs/roadmaps/2025-11-23_deployment_matrix.md). Highlights:
 
 | Capability | Community | Enterprise |
 | --- | --- | --- |
-| Core API + services | Docker Compose, single instance | Helm chart with horizontal scaling |
-| Audio (STT/TTS) | CPU profiles with local caches | GPU-optional deployments with node selectors |
-| Observability | Optional OTLP collector | Mandatory OTLP + Grafana dashboards |
-| Backups | Local tarball rotation via Compose + script | Terraform-provisioned S3 buckets with lifecycle policies |
-| Secrets | `.env` profiles | AWS Secrets Manager via Terraform module |
+| Runtime | Docker Compose (single node) | Helm chart with HPA |
+| Observability | Optional OTLP | Required OTLP + Grafana |
+| Backups | Local tar rotation | Terraform-managed S3 buckets |
+| Secrets | `.env` profiles | AWS Secrets Manager |
+| CI Coverage | Smoke tests | Compose + enterprise overlays |
 
-## Infrastructure Layout
-- **Docker Compose** (`infra/docker-compose.yml`)
-  - API, Neo4j, Qdrant, OTEL collector, Grafana, Whisper (STT), and Larynx (TTS) services.
-  - Model caches and storage volumes mounted under `var/` with automated backups using `ghcr.io/offen/docker-volume-backup`.
-  - Optional GPU profiles exposed via Compose `profiles` for accelerated inference.
-- **Helm Chart** (`infra/helm/full-stack`)
-  - Deploys the complete stack with RBAC, Secrets, PVCs, configurable storage classes, and CronJobs for backups.
-  - Values overlays provided for community and enterprise tiers, including GPU tolerations and telemetry settings.
-- **Terraform Module** (`infra/terraform/modules/platform`)
-  - Provisions AWS S3 buckets (documents/graphs/telemetry) with lifecycle + versioning, Secrets Manager entries, and IAM roles for Kubernetes service accounts.
-  - Example environment wiring under `infra/terraform/environments/enterprise`.
+### Docker Compose
+- `infra/docker-compose.yml` builds the backend API locally, provisions Neo4j, Qdrant, Whisper (STT), Larynx (TTS), optional OTEL collector, and Grafana.
+- Provider env overrides are injected through `infra/profiles/.runtime-provider.env` (auto-generated by the bootstrap script).
+- Storage volumes live in `var/` with automated nightly backups via `storage-backup`.
 
-## Operations Tooling
-- `scripts/bootstrap_full_stack.sh` orchestrates environment setup, Hugging Face model downloads, Docker Compose bring-up, and datastore migrations.
-- `scripts/backup_storage.sh` performs manual backups with retention aligned to Compose defaults, enabling on-demand disaster recovery validation.
-- CI workflow `.github/workflows/full_stack_e2e.yml` spins up the Compose stack, runs API smoke tests, and executes frontend Vitest suites for regression coverage.
+### Helm & Terraform
+- Helm chart (`infra/helm/full-stack`) mirrors the Compose topology with configurable PVCs, secret handling, CronJobs for backups, and optional GPU tolerations.
+- Terraform module (`infra/terraform/modules/platform`) provisions S3 buckets, IAM roles, and Secrets Manager entries for production deployments. Example environment wiring is located under `infra/terraform/environments/enterprise`.
 
-## Backup & Retention
-Storage directories reside in `var/storage/{documents,graphs,telemetry}`. Nightly backups are executed by the Compose `storage-backup` service and can be triggered manually:
-```bash
-./scripts/backup_storage.sh --retention-days 7
-```
-Backups are written to `var/backups/` with timestamped archives and pruned according to the configured retention policy.
+## Archived Reference Assets
+Legacy vendor experiments and snapshots now reside under [`archive/2025-10-30_reference-assets/`](archive/2025-10-30_reference-assets/). These files are retained for historical context; new work should reference the production backend/frontend code paths.
 
 ## Contributing
-1. Run `./scripts/bootstrap_backend.sh` to prepare the Python environment when extending backend services.
-2. Ensure linting and tests pass (`ruff`, `mypy`, `pytest`, `npm run test`).
-3. Append an entry to the stewardship log in `AGENTS.md` summarizing your changes, validations, and rubric outcomes.
+1. Bootstrap the backend (`./scripts/bootstrap_backend.sh`) to install Python dependencies (`qdrant-client`, `neo4j`, etc.).
+2. Run linting/tests (`ruff`, `mypy`, `python -m pytest backend/tests -q`, `npm --prefix frontend run lint`, `npm --prefix frontend run test -- --run`).
+3. Document substantive changes in `AGENTS.md`, including validation evidence and rubric outcomes.
+4. For provider catalog edits, update both `backend/app/providers/catalog.py` and the generated `backend/app/providers/catalog.json`.
 
-For roadmap visibility across active initiatives, consult the documents in [`docs/roadmaps/`](docs/roadmaps/).
+Please follow the project governance docs (`docs/DRIFT_GUARDRAILS.md`, `docs/MODEL_PROVIDER_POLICY.md`) when introducing new providers, credentials, or infrastructure profiles.

@@ -3,7 +3,8 @@ from __future__ import annotations
 import base64
 import binascii
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
+from math import exp
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from opentelemetry import metrics
@@ -74,9 +75,14 @@ class TimelineService:
         from_ts: Optional[datetime] = None,
         to_ts: Optional[datetime] = None,
         entity: Optional[str] = None,
+        risk_band: Optional[str] = None,
+        motion_due_before: Optional[datetime] = None,
+        motion_due_after: Optional[datetime] = None,
     ) -> TimelineQueryResult:
         from_ts = self._ensure_naive_timestamp(from_ts, "from_ts")
         to_ts = self._ensure_naive_timestamp(to_ts, "to_ts")
+        motion_due_before = self._ensure_naive_timestamp(motion_due_before, "motion_due_before")
+        motion_due_after = self._ensure_naive_timestamp(motion_due_after, "motion_due_after")
         bounded_limit = self._bounded_limit(limit)
         if from_ts and to_ts and from_ts > to_ts:
             raise WorkflowAbort(
@@ -100,6 +106,14 @@ class TimelineService:
         events = self._filter_by_time(events, from_ts, to_ts)
         if entity:
             events = self._filter_by_entity(events, entity)
+        if risk_band:
+            events = self._filter_by_risk_band(events, risk_band)
+        if motion_due_before or motion_due_after:
+            events = self._filter_by_motion_deadline(
+                events,
+                due_before=motion_due_before,
+                due_after=motion_due_after,
+            )
         if cursor:
             cursor_ts, cursor_id = self._decode_cursor(cursor)
             events = [event for event in events if self._after_cursor(event, cursor_ts, cursor_id)]
@@ -111,9 +125,11 @@ class TimelineService:
         attributes = {
             "entity_filter": bool(entity),
             "range_filter": bool(from_ts or to_ts),
+            "risk_filter": bool(risk_band),
+            "deadline_filter": bool(motion_due_before or motion_due_after),
         }
         _timeline_query_counter.add(1, attributes=attributes)
-        if attributes["entity_filter"] or attributes["range_filter"]:
+        if any(attributes.values()):
             _timeline_filter_counter.add(1, attributes=attributes)
         if stats.highlights:
             _timeline_enrichment_counter.add(
@@ -267,10 +283,22 @@ class TimelineService:
             highlight_count += len(highlights)
             relation_count += len(relations)
             confidence = self._compute_confidence(len(highlights), len(relations))
+            (
+                risk_score,
+                risk_band,
+                outcome_probabilities,
+                recommended_actions,
+                motion_deadline,
+            ) = self._forecast_risk(event, highlights, relations)
             if (
                 event.entity_highlights != highlights
                 or event.relation_tags != relations
                 or (event.confidence or 0.0) != (confidence or 0.0)
+                or (event.risk_score or 0.0) != (risk_score or 0.0)
+                or (event.risk_band or "") != (risk_band or "")
+                or event.outcome_probabilities != outcome_probabilities
+                or event.recommended_actions != recommended_actions
+                or self._deadline_changed(event.motion_deadline, motion_deadline)
             ):
                 mutated = True
                 enriched.append(
@@ -279,6 +307,11 @@ class TimelineService:
                         entity_highlights=highlights,
                         relation_tags=relations,
                         confidence=confidence,
+                        risk_score=risk_score,
+                        risk_band=risk_band,
+                        outcome_probabilities=outcome_probabilities,
+                        recommended_actions=recommended_actions,
+                        motion_deadline=motion_deadline,
                     )
                 )
             else:
@@ -363,6 +396,153 @@ class TimelineService:
         base += min(entities * 0.08, 0.25)
         base += min(relations * 0.05, 0.2)
         return round(min(base, 0.99), 2)
+
+    @staticmethod
+    def _deadline_changed(left: Optional[datetime], right: Optional[datetime]) -> bool:
+        if left is None and right is None:
+            return False
+        if left is None or right is None:
+            return True
+        return left != right
+
+    def _filter_by_risk_band(
+        self, events: Iterable[TimelineEvent], risk_band: str
+    ) -> List[TimelineEvent]:
+        normalized = risk_band.lower()
+        if normalized not in {"low", "medium", "high"}:
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.TIMELINE,
+                    code="TIMELINE_RISK_BAND_INVALID",
+                    message="Unsupported risk band",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=False,
+                    context={"risk_band": risk_band},
+                ),
+                status_code=400,
+            )
+        return [event for event in events if (event.risk_band or "").lower() == normalized]
+
+    @staticmethod
+    def _filter_by_motion_deadline(
+        events: Iterable[TimelineEvent],
+        *,
+        due_before: Optional[datetime],
+        due_after: Optional[datetime],
+    ) -> List[TimelineEvent]:
+        filtered: List[TimelineEvent] = []
+        for event in events:
+            if not event.motion_deadline:
+                continue
+            if due_before and event.motion_deadline >= due_before:
+                continue
+            if due_after and event.motion_deadline <= due_after:
+                continue
+            filtered.append(event)
+        return filtered
+
+    def _forecast_risk(
+        self,
+        event: TimelineEvent,
+        highlights: List[Dict[str, str]],
+        relations: List[Dict[str, str]],
+    ) -> Tuple[
+        Optional[float],
+        Optional[str],
+        List[Dict[str, object]],
+        List[str],
+        Optional[datetime],
+    ]:
+        text = f"{event.title} {event.summary}".lower()
+        severity_feature = 1.0 if any(
+            token in text
+            for token in (
+                "investigation",
+                "fraud",
+                "penalty",
+                "violation",
+                "sanction",
+                "breach",
+            )
+        )
+        motion_feature = 1.0 if "motion" in text else 0.0
+        deadline_feature = 1.0 if any(token in text for token in ("deadline", "due", "hearing")) else 0.0
+        highlight_feature = min(len(highlights) / 5.0, 1.0)
+        relation_feature = min(len(relations) / 5.0, 1.0)
+        citation_feature = min(len(event.citations) / 5.0, 1.0)
+        now = datetime.utcnow()
+        recency_days = max((now - event.ts).days, 0)
+        recency_feature = 1.0 - min(recency_days / 365.0, 1.0)
+
+        logit = (
+            -1.0
+            + 1.6 * severity_feature
+            + 1.2 * motion_feature
+            + 0.9 * deadline_feature
+            + 0.7 * highlight_feature
+            + 0.5 * relation_feature
+            + 0.45 * citation_feature
+            + 0.8 * recency_feature
+        )
+        risk_score = round(1.0 / (1.0 + exp(-logit)), 2)
+        if risk_score < 0.0:
+            risk_score = 0.0
+        if risk_score > 1.0:
+            risk_score = 1.0
+        if risk_score < 0.33:
+            risk_band = "low"
+        elif risk_score < 0.66:
+            risk_band = "medium"
+        else:
+            risk_band = "high"
+
+        adverse_raw = 0.4 + risk_score
+        favorable_raw = 0.3 + (1.0 - risk_score)
+        settlement_raw = 0.2 + (1.0 - abs(0.5 - risk_score))
+        total = adverse_raw + favorable_raw + settlement_raw
+        outcome_probabilities = [
+            {
+                "label": "Adverse outcome",
+                "probability": round(adverse_raw / total, 2),
+            },
+            {
+                "label": "Favorable outcome",
+                "probability": round(favorable_raw / total, 2),
+            },
+            {
+                "label": "Settlement",
+                "probability": round(settlement_raw / total, 2),
+            },
+        ]
+
+        recommended_actions: List[str] = []
+        if risk_band == "high":
+            recommended_actions.append("Escalate to lead counsel for immediate review.")
+            recommended_actions.append("Prepare contingency brief addressing adverse arguments.")
+        elif risk_band == "medium":
+            recommended_actions.append("Schedule strategy check-in with litigation team.")
+        else:
+            recommended_actions.append("Monitor for new evidence and maintain current course.")
+
+        motion_deadline: Optional[datetime] = None
+        if motion_feature:
+            base_days = 21
+            if "summary judgment" in text or "dismiss" in text:
+                base_days = 28
+            if "emergency" in text or "expedited" in text:
+                base_days = 7
+            if "hearing" in text or "oral argument" in text:
+                base_days = min(base_days, 14)
+            motion_deadline = event.ts + timedelta(days=base_days)
+
+        if motion_deadline:
+            days_remaining = (motion_deadline - now).days
+            if days_remaining <= 10:
+                recommended_actions.append(
+                    "Prioritize filings before motion deadline."
+                )
+
+        return risk_score, risk_band, outcome_probabilities, recommended_actions, motion_deadline
 
 
 def get_timeline_service() -> TimelineService:
