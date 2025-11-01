@@ -38,6 +38,80 @@ export interface ChatMessage {
   streaming?: boolean;
   error?: string;
   mode?: 'precision' | 'recall';
+  llmProvider?: string;
+  llmModel?: string;
+}
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+
+export interface ProviderModelInfo {
+  id: string;
+  display_name: string;
+  modalities: string[];
+  capabilities: string[];
+  context_window: number;
+  availability: string;
+}
+
+export interface ProviderCatalogEntry {
+  id: string;
+  display_name: string;
+  capabilities: string[];
+  models: ProviderModelInfo[];
+}
+
+export interface ProviderSettingsSnapshot {
+  primary: string;
+  secondary: string | null;
+  defaults: Record<string, string>;
+  api_base_urls: Record<string, string>;
+  local_runtime_paths: Record<string, string>;
+  available: ProviderCatalogEntry[];
+}
+
+export interface CredentialStatus {
+  provider_id: string;
+  has_api_key: boolean;
+}
+
+export interface CredentialsSnapshot {
+  providers: CredentialStatus[];
+  services: Record<string, boolean>;
+}
+
+export interface AppearanceSettingsSnapshot {
+  theme: ThemePreference;
+}
+
+export interface SettingsSnapshot {
+  providers: ProviderSettingsSnapshot;
+  credentials: CredentialsSnapshot;
+  appearance: AppearanceSettingsSnapshot;
+  updated_at?: string | null;
+}
+
+export interface ProviderSettingsUpdatePayload {
+  primary?: string | null;
+  secondary?: string | null;
+  defaults?: Record<string, string | null>;
+  api_base_urls?: Record<string, string | null>;
+  local_runtime_paths?: Record<string, string | null>;
+}
+
+export interface CredentialSettingsUpdatePayload {
+  provider_api_keys?: Record<string, string | null>;
+  courtlistener_token?: string | null;
+  research_browser_api_key?: string | null;
+}
+
+export interface AppearanceSettingsUpdatePayload {
+  theme?: ThemePreference;
+}
+
+export interface SettingsUpdatePayload {
+  providers?: ProviderSettingsUpdatePayload;
+  credentials?: CredentialSettingsUpdatePayload;
+  appearance?: AppearanceSettingsUpdatePayload;
 }
 
 export interface OutcomeProbability {
@@ -83,6 +157,12 @@ export interface QueryResponse {
     page_size: number;
     total_items: number;
     has_next: boolean;
+    mode: string;
+    reranker: string;
+    llm_provider: string;
+    llm_model: string;
+    embedding_provider: string;
+    embedding_model: string;
   };
 }
 

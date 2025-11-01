@@ -20,6 +20,7 @@ class WorkflowComponent(str, Enum):
     MEMORY = "memory"
     TELEMETRY = "telemetry"
     AUDIT = "audit"
+    SECURITY = "security"
     SCENARIO = "scenario"
     TTS = "tts"
 
