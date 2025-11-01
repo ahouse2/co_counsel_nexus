@@ -13,9 +13,10 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
-    Request,
     Response,
     UploadFile,
+    WebSocket,
+    Request,
     status,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -135,8 +136,40 @@ settings = get_settings()
 setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.add_middleware(MTLSMiddleware, config=create_mtls_config())
-app.add_route("/graphql", graphql_app)
-app.add_websocket_route("/graphql", graphql_app)
+
+
+@app.api_route("/graphql", methods=["GET", "POST"])
+async def graphql_http(
+    request: Request,
+    principal: Principal = Depends(authorize_timeline),
+) -> Response:
+    request.state.principal = principal
+    record_billing_event(
+        principal,
+        BillingEventType.TIMELINE,
+        attributes={
+            "endpoint": "/graphql",
+            "method": request.method,
+        },
+    )
+    return await graphql_app.handle_request(request)
+
+
+@app.websocket("/graphql")
+async def graphql_websocket(
+    websocket: WebSocket,
+    principal: Principal = Depends(authorize_timeline),
+) -> None:
+    websocket.state.principal = principal
+    record_billing_event(
+        principal,
+        BillingEventType.TIMELINE,
+        attributes={
+            "endpoint": "/graphql",
+            "method": "WEBSOCKET",
+        },
+    )
+    await graphql_app.handle_websocket(websocket)
 
 
 def _raise_workflow_exception(exc: WorkflowException) -> None:

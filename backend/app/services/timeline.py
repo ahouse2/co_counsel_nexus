@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import exp
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -464,14 +464,19 @@ class TimelineService:
                 "sanction",
                 "breach",
             )
-        )
+        ) else 0.0
         motion_feature = 1.0 if "motion" in text else 0.0
         deadline_feature = 1.0 if any(token in text for token in ("deadline", "due", "hearing")) else 0.0
         highlight_feature = min(len(highlights) / 5.0, 1.0)
         relation_feature = min(len(relations) / 5.0, 1.0)
         citation_feature = min(len(event.citations) / 5.0, 1.0)
-        now = datetime.utcnow()
-        recency_days = max((now - event.ts).days, 0)
+        now = datetime.now(timezone.utc)
+        event_ts = event.ts
+        if event_ts.tzinfo is None:
+            event_ts = event_ts.replace(tzinfo=timezone.utc)
+        else:
+            event_ts = event_ts.astimezone(timezone.utc)
+        recency_days = max((now - event_ts).days, 0)
         recency_feature = 1.0 - min(recency_days / 365.0, 1.0)
 
         logit = (
