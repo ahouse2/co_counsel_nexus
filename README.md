@@ -45,6 +45,37 @@ NinthOctopusMitten delivers an end-to-end litigation co-counsel experience that 
    pytest tests/e2e -q           # optional full-stack smoke tests
    ```
 
+## Windows One-Click Installer
+For Windows operators that prefer a turnkey experience, the repository ships with a
+PowerShell-based installer capable of provisioning the full stack (backend API,
+frontend UI, and supporting services) in a single execution.
+
+1. Launch an elevated PowerShell session and allow the script to run:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   powershell -File .\infra\windows\scripts\install.ps1 -RepoUrl "https://github.com/NinthOctopusMitten/NinthOctopusMitten.git"
+   ```
+   The script installs required tooling via `winget` (Git, Python 3.11, Node.js), clones the
+   repository into `%LOCALAPPDATA%\CoCounselNexus`, installs backend/frontend dependencies, and
+   drops desktop shortcuts for launching or uninstalling the stack.
+
+2. (Optional) Customise the destination, branch, or repository fork:
+   ```powershell
+   powershell -File .\infra\windows\scripts\install.ps1 -InstallDir "D:\Apps\CoCounsel" -Branch "develop" -RepoUrl "https://github.com/<fork>/NinthOctopusMitten.git"
+   ```
+
+3. (Optional) Package the installer into a distributable `.exe` on Windows:
+   ```powershell
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   powershell -File .\infra\windows\package.ps1 -Output "CoCounselNexusInstaller.exe"
+   ```
+   The helper script bundles `scripts/install.ps1` using PS2EXE and embeds optional branding
+   assets located in `infra/windows/assets/`.
+
+Post-installation, the desktop shortcut launches `Start-CoCounsel.ps1`, which starts the backend
+(`uvicorn app.main:app --port 8000`), boots the Vite frontend on port 5173, and opens the default
+browser to the running experience.
+
 ## Configuring Providers & Credentials
 ### Backend environment
 The API container honours the following environment variables (automatically populated by `bootstrap_full_stack.sh` and the Compose/Helm overlays):
