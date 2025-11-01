@@ -29,21 +29,53 @@ function Resolve-InstallDirectory {
     }
 
     try {
-        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
-        try { Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue } catch { }
-        [System.Windows.Forms.Application]::EnableVisualStyles()
+        $state = [hashtable]::Synchronized(@{
+            DefaultPath = $normalizedDefault
+            Result = $null
+            SelectedPath = $null
+            Error = $null
+        })
 
-        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-        $dialog.Description = "Select the folder where Co-Counsel Nexus should be installed."
-        $dialog.SelectedPath = $normalizedDefault
-        $dialog.ShowNewFolderButton = $true
+        $threadScript = {
+            param($threadState)
 
-        $result = $dialog.ShowDialog()
-        if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $dialog.SelectedPath) {
-            return $dialog.SelectedPath
+            try {
+                Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                try { Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue } catch { }
+                [System.Windows.Forms.Application]::EnableVisualStyles()
+
+                $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+                try {
+                    $dialog.Description = "Select the folder where Co-Counsel Nexus should be installed."
+                    $dialog.SelectedPath = $threadState.DefaultPath
+                    $dialog.ShowNewFolderButton = $true
+
+                    $threadState.Result = $dialog.ShowDialog()
+                    $threadState.SelectedPath = $dialog.SelectedPath
+                }
+                finally {
+                    $dialog.Dispose()
+                }
+            }
+            catch {
+                $threadState.Error = $_.Exception
+            }
         }
 
-        if ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
+        $thread = [System.Threading.Thread]::new([System.Threading.ParameterizedThreadStart]$threadScript)
+        $thread.SetApartmentState([System.Threading.ApartmentState]::STA)
+        $thread.Start($state)
+        $thread.Join()
+
+        if ($state.Error) {
+            throw $state.Error
+        }
+
+        if ($state.Result -eq [System.Windows.Forms.DialogResult]::OK -and $state.SelectedPath) {
+            return $state.SelectedPath
+        }
+
+        if ($state.Result -eq [System.Windows.Forms.DialogResult]::Cancel) {
             throw [System.OperationCanceledException]::new("Installation cancelled by user.")
         }
     }
