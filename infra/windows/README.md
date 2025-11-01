@@ -7,7 +7,8 @@ creates a desktop shortcut that launches the experience.
 ## Contents
 
 - `scripts/install.ps1` — idempotent bootstrapper that installs dependencies, clones the
-  repository, builds the backend/frontend, and writes launch/uninstall helpers.
+  repository, builds the backend/frontend, writes launch/uninstall helpers, and
+  can optionally auto-launch the experience once installation completes.
 - `package.ps1` — helper that packages the installer script into a standalone `.exe`
   using the [`PS2EXE`](https://github.com/MScholtes/PS2EXE) tool.
 - `assets/` — optional icons for the packaged installer (create `cocounsel.ico` to
@@ -23,23 +24,26 @@ powershell -File .\infra\windows\scripts\install.ps1 -RepoUrl "https://github.co
 Key behaviors:
 
 1. Ensures `git`, `python` (3.11), and `npm` are present. Missing tools are installed via `winget`.
-2. Prompts for an installation directory (defaulting to `%LOCALAPPDATA%\CoCounselNexus`) when run interactively.
+2. Uses `%LOCALAPPDATA%\CoCounselNexus` as the default installation directory. Pass
+   `-Interactive` to surface a folder picker for advanced scenarios.
 3. Creates a Python virtual environment and installs backend requirements via `uv`.
 4. Installs and builds the Vite/React frontend.
 5. Generates a `Start-CoCounsel.ps1` launcher that opens the backend API, frontend UI,
    and browser tab automatically.
 6. Places a desktop shortcut and an `Uninstall-CoCounsel.ps1` helper alongside the
    installation.
+7. Writes a timestamped log under `%LOCALAPPDATA%\CoCounselNexus\logs\install.log`
+   and shows a completion dialog when run from the packaged installer.
 
 Override parameters as needed:
 
 ```powershell
-powershell -File .\infra\windows\scripts\install.ps1 -InstallDir "D:\Apps\CoCounsel" -RepoUrl "https://github.com/example/NinthOctopusMitten.git" -Branch "develop"
+powershell -File .\infra\windows\scripts\install.ps1 -InstallDir "D:\Apps\CoCounsel" -RepoUrl "https://github.com/example/NinthOctopusMitten.git" -Branch "develop" -LaunchOnComplete
 ```
 
-When packaged as a `.exe`, double-clicking the installer surfaces the same directory picker,
-allowing the end user to choose any writable destination. Advanced users can still pass
-`-InstallDir` and the other parameters from an elevated PowerShell prompt by invoking the
+When packaged as a `.exe`, double-clicking the installer uses the default location silently and
+surfaces a completion toast. Advanced users can still pass `-InstallDir`, `-Interactive`,
+`-LaunchOnComplete`, and the other parameters from an elevated PowerShell prompt by invoking the
 generated executable with standard command-line arguments.
 
 ## Building a Single-File `.exe`
