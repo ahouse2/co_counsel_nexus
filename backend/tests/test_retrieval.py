@@ -123,13 +123,17 @@ def test_build_trace_includes_graph_payload(retrieval_service: retrieval_module.
         payload={"doc_id": "doc-trace", "text": "context"},
         version=1,
     )
-    trace, relation_statements = retrieval_service._build_trace([point], ["entity-graph"])
+    trace, relation_statements, doc_scope, privilege_decisions = retrieval_service._build_trace(
+        [point], ["entity-graph"]
+    )
     assert relation_statements
     graph_payload = trace.graph
     assert graph_payload["nodes"]
     assert graph_payload["edges"]
     assert graph_payload["events"]
     assert graph_payload["communities"]
+    assert doc_scope
+    assert privilege_decisions == {}
 
 
 def test_build_citations_includes_page_context(
