@@ -122,6 +122,7 @@ from .services.timeline import TimelineService, get_timeline_service
 from .graphql import graphql_app
 from .services.tts import TextToSpeechService, get_tts_service
 from .services.voice import VoiceService, VoiceServiceError, VoiceSessionOutcome, get_voice_service
+from .services.voice.session import VoiceSession
 from .security.authz import Principal
 from .security.dependencies import (
     authorize_agents_read,
@@ -370,11 +371,60 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _normalise_persona_directive(session: VoiceSession) -> Dict[str, object]:
+    directive = dict(session.persona_directive or {})
+    persona_id = str(directive.get("persona_id") or session.persona_id)
+    tone = str(directive.get("tone") or "balanced")
+    language = str(directive.get("language") or "en")
+    glossary = directive.get("glossary")
+    if not isinstance(glossary, dict):
+        glossary = {}
+    pace = directive.get("pace")
+    try:
+        pace_value = float(pace) if pace is not None else float(session.pace or 1.0)
+    except (TypeError, ValueError):  # pragma: no cover - defensive for corrupt payloads
+        pace_value = float(session.pace or 1.0)
+    rationale = directive.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        rationale = "Legacy session missing persona directive metadata."
+    speaker_id = directive.get("speaker_id")
+    speaker_id_value = str(speaker_id) if speaker_id is not None else None
+    return {
+        "persona_id": persona_id,
+        "speaker_id": speaker_id_value,
+        "tone": tone,
+        "language": language,
+        "pace": pace_value,
+        "glossary": glossary,
+        "rationale": rationale,
+    }
+
+
+def _normalise_translation(session: VoiceSession) -> Dict[str, object]:
+    translation = dict(session.translation or {})
+    source_language = str(translation.get("source_language") or "en")
+    target_language = str(translation.get("target_language") or source_language)
+    translated_text_raw = translation.get("translated_text") or session.transcript
+    translated_text = str(translated_text_raw or "")
+    bilingual_text_raw = translation.get("bilingual_text") or translated_text
+    bilingual_text = str(bilingual_text_raw or translated_text)
+    glossary = translation.get("glossary")
+    if not isinstance(glossary, dict):
+        glossary = {}
+    return {
+        "source_language": source_language,
+        "target_language": target_language,
+        "translated_text": translated_text,
+        "bilingual_text": bilingual_text,
+        "glossary": glossary,
+    }
+
+
 def _build_voice_session_response(
     session_outcome,
     request: Request,
 ) -> VoiceSessionCreateResponse:
-    session = session_outcome.session
+    session: VoiceSession = session_outcome.session
     sentiment = session_outcome.sentiment
     segments = [
         {
@@ -386,6 +436,8 @@ def _build_voice_session_response(
         for segment in session.segments
     ]
     audio_url = request.url_for("stream_voice_response", session_id=session.session_id)
+    persona_directive = _normalise_persona_directive(session)
+    translation = _normalise_translation(session)
     return VoiceSessionCreateResponse(
         session_id=session.session_id,
         thread_id=session.thread_id,
@@ -397,10 +449,10 @@ def _build_voice_session_response(
             "score": sentiment.score,
             "pace": session.pace,
         },
-        persona_directive=session.persona_directive,
+        persona_directive=persona_directive,
         sentiment_arc=[dict(point) for point in session.sentiment_arc],
         persona_shifts=[dict(shift) for shift in session.persona_shifts],
-        translation=session.translation,
+        translation=translation,
         segments=segments,
         created_at=session.created_at,
         updated_at=session.updated_at,
