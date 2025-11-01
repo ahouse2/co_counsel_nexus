@@ -139,8 +139,24 @@ app.add_middleware(MTLSMiddleware, config=create_mtls_config())
 
 
 @app.options("/graphql", include_in_schema=False)
-async def graphql_http_options() -> Response:
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+async def graphql_http_options(request: Request) -> Response:
+    """Handle GraphQL CORS preflight with explicit allow headers."""
+
+    origin = request.headers.get("origin") or "*"
+    requested_headers = request.headers.get("access-control-request-headers")
+
+    headers = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "OPTIONS, GET, POST",
+        "Access-Control-Allow-Headers": requested_headers or "Authorization, Content-Type",
+        "Access-Control-Max-Age": "86400",
+    }
+
+    # Only advertise credential support when responding to a specific origin.
+    if origin != "*":
+        headers["Access-Control-Allow-Credentials"] = "true"
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers=headers)
 
 
 @app.api_route("/graphql", methods=["GET", "POST"])
