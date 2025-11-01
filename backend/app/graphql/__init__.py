@@ -153,4 +153,9 @@ def resolve_timeline_events(*_, **kwargs):
 schema = make_executable_schema(type_defs, query)
 
 
-graphql_app = GraphQL(schema, context_value=lambda request: {"request": request})
+def _graphql_context(request: Any) -> Dict[str, Any]:
+    principal = getattr(request.state, "principal", None)
+    return {"request": request, "principal": principal}
+
+
+graphql_app = GraphQL(schema, context_value=_graphql_context)
