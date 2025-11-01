@@ -121,10 +121,15 @@ export function useVoiceSession(): VoiceSessionController {
   useEffect(() => () => teardownAudio(), [teardownAudio]);
 
   const sentimentHint = useMemo(() => {
-    const target = detail?.sentiment ?? session?.sentiment;
-    if (!target) return undefined;
-    const label = target.label.charAt(0).toUpperCase() + target.label.slice(1);
-    return `${label} sentiment • pace ${target.pace.toFixed(2)}x`;
+    const sentiment = detail?.sentiment ?? session?.sentiment;
+    if (!sentiment) return undefined;
+    const directive = detail?.persona_directive ?? session?.persona_directive;
+    const translation = detail?.translation ?? session?.translation;
+    const label = sentiment.label.charAt(0).toUpperCase() + sentiment.label.slice(1);
+    const pace = directive?.pace ?? sentiment.pace;
+    const tonePart = directive ? ` • tone ${directive.tone}` : '';
+    const languagePart = translation ? ` • ${translation.target_language.toUpperCase()} mode` : '';
+    return `${label} sentiment • pace ${pace.toFixed(2)}x${tonePart}${languagePart}`;
   }, [detail, session]);
 
   return {

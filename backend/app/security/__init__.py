@@ -16,6 +16,12 @@ from .dependencies import (
 )
 from .mtls import ClientIdentity, MTLSConfig, MTLSMiddleware
 from .oauth import OAuthValidator, TokenClaims
+from .privilege_policy import (
+    PrivilegePolicyDecision,
+    PrivilegePolicyEngine,
+    get_privilege_policy_engine,
+    reset_privilege_policy_engine,
+)
 
 __all__ = [
     "AuthorizationService",
@@ -37,4 +43,8 @@ __all__ = [
     "ResourceDescriptor",
     "TokenClaims",
     "get_authorization_service",
+    "PrivilegePolicyDecision",
+    "PrivilegePolicyEngine",
+    "get_privilege_policy_engine",
+    "reset_privilege_policy_engine",
 ]

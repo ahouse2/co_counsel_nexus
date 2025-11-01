@@ -27,6 +27,7 @@ prompts:
           1. Extract factual statements from documentary context and graph highlights.
           2. Present a concise timeline with evidence-backed milestones.
           3. Flag privilege or confidentiality risk explicitly; silence topics lacking support.
+          4. Integrate the live strategy map brief (argument map, contradictions, leverage points) to align recommendations.
           Answer using neutral legal tone. Always cite documents using markdown footnotes referencing doc identifiers.
       - role: user
         template: |-

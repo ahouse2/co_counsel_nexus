@@ -89,7 +89,6 @@ class StrategyTool(AgentTool):
             directives["dfir"] = True
         if any(keyword in question_lower for keyword in ["ledger", "financial", "transaction", "accounting", "audit"]):
             directives["financial"] = True
-        context.memory.update("plan", plan)
         if directives:
             context.memory.update("directives", directives)
             directive_list = context.telemetry.setdefault("directives", [])
@@ -99,6 +98,7 @@ class StrategyTool(AgentTool):
         )
         graph_section: Dict[str, Any] | None = None
         graph_documents = 0
+        strategy_brief_payload: Dict[str, Any] | None = None
         if self.graph_agent is not None:
             try:
                 insight = self.graph_agent.ensure_insight(context)
@@ -119,14 +119,27 @@ class StrategyTool(AgentTool):
                     "insight": insight.to_payload(),
                 }
                 plan.setdefault("insights", {})["graph"] = graph_section["insight"]
+            graph_service = getattr(self.graph_agent, "graph_service", None)
+            if graph_service is not None:
+                try:
+                    brief = graph_service.synthesize_strategy_brief(unique_keywords)
+                except Exception:
+                    strategy_brief_payload = None
+                else:
+                    strategy_brief_payload = brief.to_dict()
+                    plan["strategy_brief"] = strategy_brief_payload
         if graph_section:
             plan["graph"] = graph_section
+        context.memory.update("plan", plan)
         completed = _utcnow()
         metrics = {
             "step_count": len(steps),
             "keyword_count": len(unique_keywords),
             "graph_documents": graph_documents,
         }
+        if strategy_brief_payload:
+            metrics["strategy_arguments"] = len(strategy_brief_payload.get("argument_map", []))
+            metrics["strategy_contradictions"] = len(strategy_brief_payload.get("contradictions", []))
         turn = AgentTurn(
             role="strategy",
             action="draft_plan",
@@ -153,6 +166,14 @@ class StrategyTool(AgentTool):
             return (
                 f"Planner drafted {len(steps)} steps prioritising {focus_text} (graph insight unavailable)."
             )
+        strategy_brief = payload.get("strategy_brief") or {}
+        if strategy_brief:
+            argument_count = len(strategy_brief.get("argument_map", []))
+            contradiction_count = len(strategy_brief.get("contradictions", []))
+            return (
+                f"Planner drafted {len(steps)} steps prioritising {focus_text} and updated the strategy map "
+                f"({argument_count} arguments, {contradiction_count} contradictions)."
+            )
         return f"Planner drafted {len(steps)} steps prioritising {focus_text}."
 
     def annotate(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +183,8 @@ class StrategyTool(AgentTool):
             "step_count": len(payload.get("steps", [])),
             "graph_status": graph_section.get("status", "unknown"),
             "graph_documents": graph_section.get("documents", 0),
+            "strategy_arguments": len((payload.get("strategy_brief") or {}).get("argument_map", [])),
+            "strategy_contradictions": len((payload.get("strategy_brief") or {}).get("contradictions", [])),
         }
 
 
