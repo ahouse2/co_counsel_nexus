@@ -152,6 +152,11 @@ async def graphql_http_options(request: Request) -> Response:
         "Access-Control-Max-Age": "86400",
     }
 
+    vary_headers = ["Origin"]
+    if requested_headers:
+        vary_headers.append("Access-Control-Request-Headers")
+    headers["Vary"] = ", ".join(vary_headers)
+
     # Only advertise credential support when responding to a specific origin.
     if origin != "*":
         headers["Access-Control-Allow-Credentials"] = "true"
