@@ -251,7 +251,7 @@ def _coalesce_tokens(
     label = " ".join(token for _, _, token in tokens)
     label = label.strip()
     if len(label) <= 1:
-        return
+        return []
     entity_type = infer_entity_type(label)
     start = tokens[0][0] + offset
     end = tokens[-1][1] + offset
