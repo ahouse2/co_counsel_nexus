@@ -144,18 +144,19 @@ async def graphql_http_options(request: Request) -> Response:
 
     origin = request.headers.get("origin") or "*"
     requested_headers = request.headers.get("access-control-request-headers")
+    allow_headers = requested_headers or "Authorization, Content-Type"
 
-    headers = {
+    headers: dict[str, str] = {
         "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "OPTIONS, GET, POST",
-        "Access-Control-Allow-Headers": requested_headers or "Authorization, Content-Type",
+        "Access-Control-Allow-Headers": allow_headers,
         "Access-Control-Max-Age": "86400",
     }
 
-    vary_headers = ["Origin"]
+    vary_headers: list[str] = ["Origin"]
     if requested_headers:
         vary_headers.append("Access-Control-Request-Headers")
-    headers["Vary"] = ", ".join(vary_headers)
+    headers["Vary"] = ", ".join(dict.fromkeys(vary_headers))
 
     # Only advertise credential support when responding to a specific origin.
     if origin != "*":
