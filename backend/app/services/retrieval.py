@@ -11,12 +11,26 @@ from typing import Any, Dict, Iterator, List, Set, Tuple
 try:  # pragma: no cover - optional dependency for vector retrieval
     from qdrant_client.http import models as qmodels
 except ModuleNotFoundError:  # pragma: no cover - fallback for test environments
-    class _StubScoredPoint(dict):
+    class _StubScoredPoint:
         """Minimal stand-in for qdrant_client.http.models.ScoredPoint."""
 
-        id: str  # type: ignore[assignment]
-        payload: dict
-        score: float
+        def __init__(
+            self,
+            *,
+            id: str | int,
+            payload: Dict[str, Any] | None = None,
+            score: float | None = None,
+            **kwargs: Any,
+        ) -> None:
+            # Mirror the real dataclass API by accepting keyword arguments and exposing
+            # attributes for downstream access. Only the fields relied upon in the
+            # optional dependency path are materialised; any additional keyword
+            # arguments are attached directly so call sites can read them.
+            self.id = id
+            self.payload = dict(payload or {})
+            self.score = score
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
     class _StubModels:  # pragma: no cover - type stub only
         ScoredPoint = _StubScoredPoint
