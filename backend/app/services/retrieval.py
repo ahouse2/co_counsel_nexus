@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -923,8 +924,10 @@ class RetrievalService:
         reconciled: List[qmodels.ScoredPoint] = []
         for point in points:
             payload = dict(point.payload or {})
-            payload.setdefault("fusion_score", float(point.score))
-            payload.setdefault("confidence", float(point.score))
+            raw_score = self._safe_float(point.score) or 0.0
+            normalised_score = self._normalise_external_score(raw_score)
+            payload.setdefault("fusion_score", normalised_score)
+            payload.setdefault("confidence", normalised_score)
             payload["external_case_law"] = True
             linked = self._link_internal_case_law(payload, inventory)
             if linked:
@@ -937,12 +940,22 @@ class RetrievalService:
             reconciled.append(
                 qmodels.ScoredPoint(
                     id=point.id,
-                    score=float(point.score),
+                    score=normalised_score,
                     payload=payload,
                     version=point.version,
                 )
             )
         return reconciled
+
+    def _normalise_external_score(self, score: float) -> float:
+        if not math.isfinite(score) or score <= 0.0:
+            return 0.0
+        rrf_constant = getattr(self.query_engine, "rrf_constant", 60.0)
+        # External adapters emit scores as 1 / (rank + 1) where rank is zero-based.
+        # Translate to the HybridQueryEngine scale of 1 / (rrf_constant + rank_one_based)
+        # so the fused scores align with internal RRF weighting.
+        estimated_rank = max(0.0, (1.0 / score) - 1.0)
+        return 1.0 / (rrf_constant + estimated_rank + 1.0)
 
     def _link_internal_case_law(
         self,
