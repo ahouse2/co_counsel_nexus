@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -13,12 +14,26 @@ from urllib.parse import urljoin
 try:  # pragma: no cover - optional dependency for vector retrieval
     from qdrant_client.http import models as qmodels
 except ModuleNotFoundError:  # pragma: no cover - fallback for test environments
-    class _StubScoredPoint(dict):
+    class _StubScoredPoint:
         """Minimal stand-in for qdrant_client.http.models.ScoredPoint."""
 
-        id: str  # type: ignore[assignment]
-        payload: dict
-        score: float
+        def __init__(
+            self,
+            *,
+            id: str | int,
+            payload: Dict[str, Any] | None = None,
+            score: float | None = None,
+            **kwargs: Any,
+        ) -> None:
+            # Mirror the real dataclass API by accepting keyword arguments and exposing
+            # attributes for downstream access. Only the fields relied upon in the
+            # optional dependency path are materialised; any additional keyword
+            # arguments are attached directly so call sites can read them.
+            self.id = id
+            self.payload = dict(payload or {})
+            self.score = score
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
     class _StubModels:  # pragma: no cover - type stub only
         ScoredPoint = _StubScoredPoint
@@ -29,9 +44,16 @@ import httpx
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
+from .. import ProviderCapability, get_provider_registry
 from ..config import get_settings
+from ..providers.registry import ProviderCapabilityError
 from backend.ingestion.llama_index_factory import create_embedding_model, configure_global_settings
 from backend.ingestion.settings import build_runtime_config
+from ..security.privilege_policy import (
+    PrivilegePolicyDecision,
+    PrivilegePolicyEngine,
+    get_privilege_policy_engine,
+)
 from ..storage.document_store import DocumentStore
 from ..storage.timeline_store import TimelineStore
 from ..utils.triples import extract_entities, normalise_entity_id
@@ -372,6 +394,7 @@ class Trace:
     graph: Dict[str, List[Dict[str, object]]]
     forensics: List[Dict[str, object]]
     privilege: Dict[str, object] | None = None
+    policy: Dict[str, object] | None = None
 
     def to_dict(self) -> Dict[str, object]:
         payload = {
@@ -381,6 +404,8 @@ class Trace:
         }
         if self.privilege is not None:
             payload["privilege"] = self.privilege
+        if self.policy is not None:
+            payload["policy"] = self.policy
         return payload
 
 
@@ -392,6 +417,10 @@ class QueryMeta:
     has_next: bool
     mode: RetrievalMode
     reranker: str
+    llm_provider: str
+    llm_model: str
+    embedding_provider: str
+    embedding_model: str
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -401,6 +430,10 @@ class QueryMeta:
             "has_next": self.has_next,
             "mode": self.mode.value,
             "reranker": self.reranker,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model": self.embedding_model,
         }
 
 
@@ -411,14 +444,19 @@ class QueryResult:
     trace: Trace
     meta: QueryMeta
     has_evidence: bool
+    policy: Dict[str, object] | None = None
 
     def to_dict(self) -> Dict[str, object]:
-        return {
+        payload = {
             "answer": self.answer,
             "citations": [citation.to_dict() for citation in self.citations],
             "traces": self.trace.to_dict(),
             "meta": self.meta.to_dict(),
         }
+        if self.policy is not None:
+            payload["policy"] = self.policy
+        payload["has_evidence"] = self.has_evidence
+        return payload
 
 
 class RetrievalService:
@@ -429,13 +467,29 @@ class RetrievalService:
         document_store: DocumentStore | None = None,
         forensics_service: ForensicsService | None = None,
         privilege_classifier: PrivilegeClassifierService | None = None,
+        privilege_policy_engine: PrivilegePolicyEngine | None = None,
     ) -> None:
         self.settings = get_settings()
+        self.provider_registry = get_provider_registry()
+        self._chat_resolution = self.provider_registry.resolve(ProviderCapability.CHAT)
+        try:
+            self._embedding_resolution = self.provider_registry.resolve(ProviderCapability.EMBEDDINGS)
+        except ProviderCapabilityError:
+            self._embedding_resolution = None
+        self.llm_provider_id = self._chat_resolution.provider.descriptor.provider_id
+        self.llm_model_id = self._chat_resolution.model.model_id
+        if self._embedding_resolution is not None:
+            self.embedding_provider_id = self._embedding_resolution.provider.descriptor.provider_id
+            self.embedding_model_id = self._embedding_resolution.model.model_id
+        else:
+            self.embedding_provider_id = "unknown"
+            self.embedding_model_id = self.settings.default_embedding_model
         self.vector_service = vector_service or get_vector_service()
         self.graph_service = graph_service or get_graph_service()
         self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
         self.forensics_service = forensics_service or get_forensics_service()
         self.privilege_classifier = privilege_classifier or get_privilege_classifier_service()
+        self.privilege_policy_engine = privilege_policy_engine or get_privilege_policy_engine()
         self.runtime_config = build_runtime_config(self.settings)
         configure_global_settings(self.runtime_config)
         self.embedding_model = create_embedding_model(self.runtime_config.embedding)
@@ -597,6 +651,10 @@ class RetrievalService:
                     has_next=False,
                     mode=mode,
                     reranker=bundle.reranker,
+                    llm_provider=self.llm_provider_id,
+                    llm_model=self.llm_model_id,
+                    embedding_provider=self.embedding_provider_id,
+                    embedding_model=self.embedding_model_id,
                 )
                 answer = "No supporting evidence found for the supplied query."
                 return QueryResult(
@@ -616,7 +674,9 @@ class RetrievalService:
             entity_ids = self._augment_entity_ids(question, vector_entities)
             with _tracer.start_as_current_span("retrieval.trace_build") as trace_span:
                 trace_span.set_attribute("retrieval.trace.entity_ids", len(entity_ids))
-                trace_full, trace_relations = self._build_trace(filtered_results, entity_ids)
+                trace_full, trace_relations, doc_scope, privilege_decisions = self._build_trace(
+                    filtered_results, entity_ids
+                )
                 trace_span.set_attribute("retrieval.trace.nodes", len(trace_full.graph.get("nodes", [])))
                 trace_span.set_attribute("retrieval.trace.edges", len(trace_full.graph.get("edges", [])))
             relation_statements = self._merge_relation_statements(trace_relations, bundle.relation_statements)
@@ -630,6 +690,28 @@ class RetrievalService:
                 doc_id = payload.get("doc_id")
                 if doc_id is not None:
                     doc_ids_page.add(str(doc_id))
+
+            span_context = span.get_span_context()
+            correlation_id = None
+            if span_context is not None and span_context.trace_id != 0:
+                correlation_id = f"{span_context.trace_id:032x}"
+            policy_decision = self.privilege_policy_engine.enforce(
+                privilege_decisions.values(),
+                query=question,
+                context={
+                    "page": page,
+                    "page_size": page_size,
+                    "doc_scope": sorted(doc_scope),
+                    "filters": {key: value for key, value in filters.items() if value},
+                },
+                correlation_id=correlation_id,
+            )
+            policy_payload = policy_decision.to_dict()
+            span.set_attribute("retrieval.policy.status", policy_decision.status)
+            span.set_attribute("retrieval.policy.flagged", len(policy_decision.flagged_documents))
+            span.set_attribute("retrieval.policy.blocked", policy_decision.blocked)
+            metric_attrs["policy_status"] = policy_decision.status
+            metric_attrs["policy_flagged"] = len(policy_decision.flagged_documents)
 
             vector_trace_page = trace_full.vector[start:end] if end > start else []
             forensics_trace_page = [
@@ -671,12 +753,25 @@ class RetrievalService:
             }
             privilege_page = self._page_privilege_trace(privilege_full, doc_ids_page)
 
+            trace_full.graph["events"] = self._timeline_events_for_docs(
+                doc_scope,
+                privilege_decisions,
+                policy_decision,
+            )
+
             trace_page = Trace(
                 vector=vector_trace_page,
                 graph={"nodes": graph_nodes_page, "edges": graph_edges_page},
                 forensics=forensics_trace_page,
                 privilege=privilege_page,
+                policy=policy_payload,
             )
+            trace_page.graph["events"] = self._timeline_events_for_docs(
+                doc_ids_page or doc_scope,
+                privilege_decisions,
+                policy_decision,
+            )
+            trace_full.policy = policy_payload
             privilege_label = privilege_page.get("aggregate", {}).get("label", "unknown")
             privilege_flagged = privilege_page.get("aggregate", {}).get("flagged", [])
             span.set_attribute("retrieval.privilege.label", privilege_label)
@@ -711,6 +806,10 @@ class RetrievalService:
                 has_next=has_next,
                 mode=mode,
                 reranker=bundle.reranker,
+                llm_provider=self.llm_provider_id,
+                llm_model=self.llm_model_id,
+                embedding_provider=self.embedding_provider_id,
+                embedding_model=self.embedding_model_id,
             )
 
             has_evidence = True
@@ -730,6 +829,7 @@ class RetrievalService:
                 trace=trace_page,
                 meta=meta,
                 has_evidence=True,
+                policy=policy_payload,
             )
 
     def _build_citations(self, results: List[qmodels.ScoredPoint]) -> List[Citation]:
@@ -838,8 +938,11 @@ class RetrievalService:
         reconciled: List[qmodels.ScoredPoint] = []
         for point in points:
             payload = dict(point.payload or {})
-            payload.setdefault("fusion_score", float(point.score))
-            payload.setdefault("confidence", float(point.score))
+            raw_score = float(point.score or 0.0)
+            normalised_score = self._normalise_external_score(raw_score)
+            payload.setdefault("external_raw_score", raw_score)
+            payload["fusion_score"] = normalised_score
+            payload["confidence"] = normalised_score
             payload["external_case_law"] = True
             linked = self._link_internal_case_law(payload, inventory)
             if linked:
@@ -852,12 +955,22 @@ class RetrievalService:
             reconciled.append(
                 qmodels.ScoredPoint(
                     id=point.id,
-                    score=float(point.score),
+                    score=normalised_score,
                     payload=payload,
                     version=point.version,
                 )
             )
         return reconciled
+
+    def _normalise_external_score(self, score: float) -> float:
+        if not math.isfinite(score) or score <= 0.0:
+            return 0.0
+        rrf_constant = getattr(self.query_engine, "rrf_constant", 60.0)
+        # External adapters emit scores as 1 / (rank + 1) where rank is zero-based.
+        # Translate to the HybridQueryEngine scale of 1 / (rrf_constant + rank_one_based)
+        # so the fused scores align with internal RRF weighting.
+        estimated_rank = max(0.0, (1.0 / score) - 1.0)
+        return 1.0 / (rrf_constant + estimated_rank + 1.0)
 
     def _link_internal_case_law(
         self,
@@ -928,6 +1041,35 @@ class RetrievalService:
             bundle.fusion_scores.setdefault(key, float(point.score))
         return bundle
 
+    def _normalise_external_score(self, score: float) -> float:
+        """Map external adapter scores onto the reciprocal-rank fusion scale."""
+
+        try:
+            score_value = float(score)
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            return 0.0
+        if score_value <= 0.0:
+            return 0.0
+
+        rrf_constant = self._safe_float(getattr(self.query_engine, "rrf_constant", None)) or 60.0
+        if rrf_constant <= 0.0:  # pragma: no cover - configuration guard
+            rrf_constant = 60.0
+
+        max_rrf_score = 1.0 / rrf_constant
+        if score_value <= max_rrf_score + 1e-9:
+            # Score already on (or below) the fusion scale; no adjustment needed.
+            return score_value
+
+        try:
+            estimated_rank = (1.0 / score_value) - 1.0
+        except ZeroDivisionError:  # pragma: no cover - defensive guard
+            estimated_rank = 0.0
+        if estimated_rank < 0.0:
+            estimated_rank = 0.0
+
+        normalised = 1.0 / (rrf_constant + estimated_rank)
+        return normalised
+
     def _standardise_external_point(self, point: qmodels.ScoredPoint) -> qmodels.ScoredPoint:
         payload = dict(point.payload or {})
         payload.setdefault("fusion_score", float(point.score))
@@ -968,6 +1110,7 @@ class RetrievalService:
             "linked_doc_summary",
             "linked_doc_citations",
             "citations",
+            "external_raw_score",
         ):
             value = other.get(key)
             if value and not payload.get(key):
@@ -1243,7 +1386,7 @@ class RetrievalService:
 
     def _build_trace(
         self, results: List[qmodels.ScoredPoint], entity_ids: List[str]
-    ) -> Tuple[Trace, List[Tuple[str, str | None]]]:
+    ) -> Tuple[Trace, List[Tuple[str, str | None]], Set[str], Dict[str, PrivilegeDecision]]:
         vector_trace = [self._vector_trace_entry(point) for point in results]
         forensics_trace = self._build_forensics_trace(results)
         subgraph: GraphSubgraph = self.graph_service.subgraph(entity_ids)
@@ -1275,15 +1418,15 @@ class RetrievalService:
             community.to_dict()
             for community in self.graph_service.communities_for_nodes(node_map.keys())
         ]
-        graph_trace["events"] = self._timeline_events_for_docs(doc_scope)
-        privilege_trace = self._build_privilege_trace(results)
+        graph_trace.setdefault("events", [])
+        privilege_trace, privilege_decisions = self._build_privilege_trace(results)
         trace = Trace(
             vector=vector_trace,
             graph=graph_trace,
             forensics=forensics_trace,
             privilege=privilege_trace,
         )
-        return trace, relation_statements
+        return trace, relation_statements, doc_scope, privilege_decisions
 
     def _vector_trace_entry(self, point: qmodels.ScoredPoint) -> Dict[str, object]:
         payload = point.payload or {}
@@ -1330,8 +1473,11 @@ class RetrievalService:
             merged.append(key)
         return merged
 
-    def _build_privilege_trace(self, results: List[qmodels.ScoredPoint]) -> Dict[str, object]:
+    def _build_privilege_trace(
+        self, results: List[qmodels.ScoredPoint]
+    ) -> Tuple[Dict[str, object], Dict[str, PrivilegeDecision]]:
         decisions: List[PrivilegeDecision] = []
+        decision_map: Dict[str, PrivilegeDecision] = {}
         for point in results:
             payload = point.payload or {}
             doc_id = payload.get("doc_id")
@@ -1341,7 +1487,11 @@ class RetrievalService:
             metadata = self._augment_privilege_metadata(payload, str(doc_id))
             decision = self.privilege_classifier.classify(str(doc_id), str(text or ""), metadata)
             decisions.append(decision)
-        return self.privilege_classifier.format_trace(decisions)
+            key = str(doc_id)
+            existing = decision_map.get(key)
+            if existing is None or decision.score >= existing.score:
+                decision_map[key] = decision
+        return self.privilege_classifier.format_trace(decisions), decision_map
 
     def _page_privilege_trace(
         self, privilege_trace: Dict[str, object], doc_ids: Set[str]
@@ -1361,6 +1511,8 @@ class RetrievalService:
                 score=float(item.get("score", 0.0)),
                 explanation=str(item.get("explanation", "")),
                 source=str(item.get("source", "classifier")),
+                signals=dict(item.get("signals", {})),
+                context=dict(item.get("context", {})),
             )
             for item in filtered_payload
         ]
@@ -1411,26 +1563,48 @@ class RetrievalService:
             )
         return entries
 
-    def _timeline_events_for_docs(self, doc_ids: Set[str]) -> List[Dict[str, object]]:
+    def _timeline_events_for_docs(
+        self,
+        doc_ids: Set[str],
+        privilege_decisions: Dict[str, PrivilegeDecision] | None = None,
+        policy: PrivilegePolicyDecision | None = None,
+    ) -> List[Dict[str, object]]:
         if not doc_ids:
             return []
         events = self.timeline_store.read_all()
         payload: List[Dict[str, object]] = []
+        privilege_decisions = privilege_decisions or {}
+        flagged_docs = {
+            doc_id
+            for doc_id, decision in privilege_decisions.items()
+            if decision.label == "privileged"
+        }
         for event in events:
             if not any(citation in doc_ids for citation in event.citations):
                 continue
-            payload.append(
-                {
-                    "id": event.id,
-                    "ts": event.ts.isoformat(),
-                    "title": event.title,
-                    "summary": event.summary,
-                    "citations": list(event.citations),
-                    "entity_highlights": list(event.entity_highlights),
-                    "relation_tags": list(event.relation_tags),
-                    "confidence": event.confidence,
+            entry: Dict[str, object] = {
+                "id": event.id,
+                "ts": event.ts.isoformat(),
+                "title": event.title,
+                "summary": event.summary,
+                "citations": list(event.citations),
+                "entity_highlights": list(event.entity_highlights),
+                "relation_tags": list(event.relation_tags),
+                "confidence": event.confidence,
+            }
+            privileged_citations = sorted(doc for doc in event.citations if doc in flagged_docs)
+            if privileged_citations:
+                entry["policy"] = {
+                    "status": policy.status if policy else "review",
+                    "flagged_documents": privileged_citations,
+                    "max_privilege_score": round(
+                        max(privilege_decisions[doc].score for doc in privileged_citations),
+                        4,
+                    ),
+                    "actions": list(policy.actions) if policy else ["hold_for_review"],
+                    "requires_review": True,
                 }
-            )
+            payload.append(entry)
         return payload
 
     def _apply_filters(
@@ -1642,6 +1816,8 @@ class RetrievalService:
                 "traces": result.trace.to_dict(),
                 "meta": result.meta.to_dict(),
             }
+            if result.policy is not None:
+                final_event["policy"] = result.policy
             yield json.dumps(final_event)
             _retrieval_stream_chunks_counter.add(emitted, attributes=attributes)
 

@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
-import importlib
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import sys
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import jwt
 import pytest
@@ -17,10 +15,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from PIL import Image, ImageDraw
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from fastapi.testclient import TestClient  # noqa: E402
 

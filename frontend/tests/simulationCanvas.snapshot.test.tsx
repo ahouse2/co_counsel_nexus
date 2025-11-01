@@ -65,6 +65,19 @@ const scenario: ScenarioDefinition = {
       speaker: 'counsel',
     },
   ],
+  director: {
+    version: '1.0',
+    beats: {
+      'beat-1': {
+        beat_id: 'beat-1',
+        emotional_tone: 'assertive',
+        counter_argument: 'Reinforce {issue}.',
+        lighting: { preset: 'assertive', palette: ['#fef08a', '#c2410c'], intensity: 1, focus: 1.3, ambient: 0.5 },
+        motion: { direction: 'forward', intensity: 0.8, tempo: 0.9 },
+        persona: { expression: 'assertive', vocal_register: 'steady', confidence: 0.85 },
+      },
+    },
+  },
 };
 
 const transcript: ScenarioRunTurn[] = [
@@ -77,6 +90,7 @@ const transcript: ScenarioRunTurn[] = [
     stage_direction: 'Steps forward to the podium.',
     emphasis: 'assertive',
     duration_ms: 3200,
+    director: scenario.director.beats['beat-1'],
   },
 ];
 
