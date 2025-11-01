@@ -1,5 +1,6 @@
 boto3==1.35.20
 autogen==0.10.0
+ariadne==0.23.0
 Office365-REST-Python-Client==2.5.12
 chromadb==0.5.3
 cryptography==43.0.1
@@ -7,6 +8,7 @@ coverage==7.6.4
 email-validator==2.2.0
 extract-msg==0.44.0
 fastapi==0.115.0
+python-multipart==0.0.9
 faster-whisper==1.0.1
 httpx==0.27.2
 jsonschema==4.23.0
@@ -14,6 +16,7 @@ llama-hub==0.0.45
 llama-index==0.11.14
 mail-parser==4.1.4
 msal==1.29.0
+PyJWT==2.9.0
 neo4j==5.23.1
 numpy==1.26.4
 opencv-python==4.10.0.84
@@ -31,7 +34,6 @@ pydantic-settings==2.5.2
 pypdf==4.3.1
 python-docx==1.1.0
 pytesseract==0.3.10
-PyJWT==2.9.0
 PyYAML==6.0.2
 qdrant-client==1.9.1
 scikit-learn==1.5.2

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, ConfigDict
 
 
 class IngestionSource(BaseModel):
@@ -83,12 +83,25 @@ class IngestionStatusResponse(BaseModel):
     status_details: IngestionStatusDetailsModel
 
 
+class CitationEntityModel(BaseModel):
+    id: str
+    label: str
+    type: str
+
+
 class CitationModel(BaseModel):
     docId: str
     span: str
     uri: Optional[HttpUrl | str] = None
     pageLabel: Optional[str] = None
     chunkIndex: Optional[int] = Field(default=None, ge=0)
+    pageNumber: Optional[int] = Field(default=None, ge=1)
+    title: Optional[str] = None
+    sourceType: Optional[str] = None
+    retrievers: List[str] = Field(default_factory=list)
+    fusionScore: Optional[float] = None
+    confidence: Optional[float] = None
+    entities: List[CitationEntityModel] = Field(default_factory=list)
 
 
 class TraceModel(BaseModel):
@@ -114,6 +127,11 @@ class QueryResponse(BaseModel):
     meta: QueryPaginationModel
 
 
+class OutcomeProbabilityModel(BaseModel):
+    label: str
+    probability: float
+
+
 class TimelineEventModel(BaseModel):
     id: str
     ts: datetime
@@ -123,6 +141,11 @@ class TimelineEventModel(BaseModel):
     entity_highlights: List[dict] = Field(default_factory=list)
     relation_tags: List[dict] = Field(default_factory=list)
     confidence: float | None = None
+    risk_score: float | None = None
+    risk_band: str | None = None
+    outcome_probabilities: List[OutcomeProbabilityModel] = Field(default_factory=list)
+    recommended_actions: List[str] = Field(default_factory=list)
+    motion_deadline: Optional[datetime] = None
 
 
 class TimelineResponse(BaseModel):
@@ -147,6 +170,47 @@ class GraphEdgeModel(BaseModel):
     target: str
     type: str
     properties: dict
+
+
+class GraphArgumentLinkModel(BaseModel):
+    node: GraphNodeModel
+    relation: str
+    stance: Literal["support", "contradiction", "neutral"]
+    documents: List[str] = Field(default_factory=list)
+    weight: Optional[float] = None
+
+
+class GraphArgumentEntryModel(BaseModel):
+    node: GraphNodeModel
+    supporting: List[GraphArgumentLinkModel] = Field(default_factory=list)
+    opposing: List[GraphArgumentLinkModel] = Field(default_factory=list)
+    neutral: List[GraphArgumentLinkModel] = Field(default_factory=list)
+    documents: List[str] = Field(default_factory=list)
+
+
+class GraphContradictionModel(BaseModel):
+    source: GraphNodeModel
+    target: GraphNodeModel
+    relation: str
+    documents: List[str] = Field(default_factory=list)
+    weight: Optional[float] = None
+
+
+class GraphLeveragePointModel(BaseModel):
+    node: GraphNodeModel
+    influence: float
+    connections: int
+    documents: List[str] = Field(default_factory=list)
+    reason: str
+
+
+class GraphStrategyBriefModel(BaseModel):
+    generated_at: datetime
+    summary: str
+    focus_nodes: List[GraphNodeModel] = Field(default_factory=list)
+    argument_map: List[GraphArgumentEntryModel] = Field(default_factory=list)
+    contradictions: List[GraphContradictionModel] = Field(default_factory=list)
+    leverage_points: List[GraphLeveragePointModel] = Field(default_factory=list)
 
 
 class GraphNeighborResponse(BaseModel):
@@ -354,6 +418,7 @@ class KnowledgeLessonDetailResponse(BaseModel):
     sections: List[KnowledgeLessonSectionModel]
     progress: KnowledgeProgressModel
     bookmarked: bool
+    strategy_brief: Optional[GraphStrategyBriefModel] = None
 
 
 class KnowledgeSearchFiltersModel(BaseModel):
@@ -464,6 +529,8 @@ class DevAgentProposalModel(BaseModel):
     validation: Dict[str, Any]
     approvals: List[Dict[str, Any]] = Field(default_factory=list)
     rationale: List[str] = Field(default_factory=list)
+    validated_at: datetime | None = None
+    governance: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DevAgentTaskModel(BaseModel):
@@ -481,8 +548,22 @@ class DevAgentTaskModel(BaseModel):
     proposals: List[DevAgentProposalModel] = Field(default_factory=list)
 
 
+class DevAgentMetricsModel(BaseModel):
+    generated_at: datetime
+    total_tasks: int
+    triaged_tasks: int
+    rollout_pending: int
+    validated_proposals: int
+    quality_gate_pass_rate: float
+    velocity_per_day: float
+    active_rollouts: int
+    ci_workflows: List[str]
+    feature_toggles: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class DevAgentProposalListResponse(BaseModel):
     backlog: List[DevAgentTaskModel]
+    metrics: DevAgentMetricsModel
 
 
 class DevAgentApplyRequest(BaseModel):
@@ -493,6 +574,7 @@ class DevAgentApplyResponse(BaseModel):
     proposal: DevAgentProposalModel
     task: DevAgentTaskModel
     execution: SandboxExecutionModel
+    metrics: DevAgentMetricsModel
 
 
 class ScenarioParticipantModel(BaseModel):
@@ -523,6 +605,40 @@ class ScenarioEvidenceSpecModel(BaseModel):
     document_id: Optional[str] = None
 
 
+class ScenarioDirectorMotionModel(BaseModel):
+    direction: Literal["none", "left", "right", "forward", "back"]
+    intensity: float
+    tempo: float
+
+
+class ScenarioDirectorLightingModel(BaseModel):
+    preset: str
+    palette: List[str]
+    intensity: float
+    focus: float
+    ambient: float
+
+
+class ScenarioDirectorPersonaModel(BaseModel):
+    expression: str
+    vocal_register: str
+    confidence: float
+
+
+class ScenarioDirectorBeatModel(BaseModel):
+    beat_id: str
+    emotional_tone: str
+    counter_argument: Optional[str] = None
+    lighting: ScenarioDirectorLightingModel
+    motion: ScenarioDirectorMotionModel
+    persona: ScenarioDirectorPersonaModel
+
+
+class ScenarioDirectorManifestModel(BaseModel):
+    version: str
+    beats: Dict[str, ScenarioDirectorBeatModel]
+
+
 class ScenarioBeatSpecModel(BaseModel):
     id: str
     kind: Literal["scripted", "dynamic"]
@@ -546,6 +662,7 @@ class ScenarioDefinitionModel(BaseModel):
     variables: Dict[str, ScenarioVariableModel]
     evidence: List[ScenarioEvidenceSpecModel]
     beats: List[ScenarioBeatSpecModel]
+    director: ScenarioDirectorManifestModel
 
 
 class ScenarioMetadataModel(BaseModel):
@@ -575,6 +692,7 @@ class ScenarioRunRequestModel(BaseModel):
     variables: Dict[str, str] = Field(default_factory=dict)
     evidence: Dict[str, ScenarioEvidenceBindingModel] = Field(default_factory=dict)
     enable_tts: bool = False
+    director_overrides: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 class ScenarioRunAudioModel(BaseModel):
@@ -596,6 +714,7 @@ class ScenarioRunTurnModel(BaseModel):
     duration_ms: Optional[float]
     thread_id: Optional[str]
     audio: Optional[ScenarioRunAudioModel] = None
+    director: Optional[ScenarioDirectorBeatModel] = None
 
 
 class ScenarioRunResponseModel(BaseModel):
@@ -636,6 +755,39 @@ class VoiceSegmentModel(BaseModel):
     confidence: float
 
 
+class VoicePersonaDirectiveModel(BaseModel):
+    persona_id: str
+    speaker_id: str | None = None
+    tone: str
+    language: str
+    pace: float = Field(gt=0.0, le=2.5)
+    glossary: Dict[str, str] = Field(default_factory=dict)
+    rationale: str
+
+
+class VoiceSentimentArcPointModel(BaseModel):
+    offset: float = Field(ge=0.0)
+    score: float = Field(ge=0.0, le=1.0)
+    label: Literal["positive", "negative", "neutral"]
+
+
+class VoicePersonaShiftModel(BaseModel):
+    at: float = Field(ge=0.0)
+    persona_id: str
+    tone: str
+    language: str
+    pace: float = Field(gt=0.0, le=2.5)
+    trigger: str
+
+
+class VoiceTranslationModel(BaseModel):
+    source_language: str
+    target_language: str
+    translated_text: str
+    bilingual_text: str
+    glossary: Dict[str, str] = Field(default_factory=dict)
+
+
 class VoiceSessionModel(BaseModel):
     session_id: str
     thread_id: str
@@ -643,6 +795,10 @@ class VoiceSessionModel(BaseModel):
     persona_id: str
     transcript: str
     sentiment: VoiceSentimentModel
+    persona_directive: VoicePersonaDirectiveModel
+    sentiment_arc: List[VoiceSentimentArcPointModel]
+    persona_shifts: List[VoicePersonaShiftModel]
+    translation: VoiceTranslationModel
     segments: List[VoiceSegmentModel]
     created_at: datetime
     updated_at: datetime
@@ -659,4 +815,86 @@ class VoiceSessionDetailResponse(VoiceSessionModel):
 
 class VoicePersonaListResponse(BaseModel):
     personas: List[VoicePersonaModel]
+
+
+class ProviderModelInfoModel(BaseModel):
+    model_id: str
+    display_name: str
+    context_window: int
+    modalities: List[str]
+    capabilities: List[str]
+    availability: str
+
+
+class ProviderCatalogEntryModel(BaseModel):
+    provider_id: str
+    display_name: str
+    capabilities: List[str]
+    models: List[ProviderModelInfoModel]
+
+
+class ModelCatalogResponse(BaseModel):
+    providers: List[ProviderCatalogEntryModel]
+
+
+class ProviderSettingsSnapshotModel(BaseModel):
+    primary: str
+    secondary: Optional[str]
+    defaults: Dict[str, str]
+    api_base_urls: Dict[str, str]
+    local_runtime_paths: Dict[str, str]
+    available: List[ProviderCatalogEntryModel]
+
+
+class CredentialStatusModel(BaseModel):
+    provider_id: str
+    has_api_key: bool
+
+
+class CredentialsSnapshotModel(BaseModel):
+    providers: List[CredentialStatusModel]
+    services: Dict[str, bool]
+
+
+class AppearanceSettingsSnapshotModel(BaseModel):
+    theme: Literal["system", "light", "dark"]
+
+
+class SettingsResponse(BaseModel):
+    providers: ProviderSettingsSnapshotModel
+    credentials: CredentialsSnapshotModel
+    appearance: AppearanceSettingsSnapshotModel
+    updated_at: Optional[datetime]
+
+
+class ProviderSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    primary: Optional[str] = None
+    secondary: Optional[str] = None
+    defaults: Optional[Dict[str, str]] = None
+    api_base_urls: Optional[Dict[str, str]] = None
+    local_runtime_paths: Optional[Dict[str, str]] = None
+
+
+class CredentialSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_api_keys: Optional[Dict[str, Optional[str]]] = None
+    courtlistener_token: Optional[str] = None
+    research_browser_api_key: Optional[str] = None
+
+
+class AppearanceSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    theme: Optional[Literal["system", "light", "dark"]] = None
+
+
+class SettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    providers: Optional[ProviderSettingsUpdate] = None
+    credentials: Optional[CredentialSettingsUpdate] = None
+    appearance: Optional[AppearanceSettingsUpdate] = None
 

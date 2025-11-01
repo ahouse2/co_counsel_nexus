@@ -1,0 +1,18 @@
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 12345,
+      "case_name": "Miranda v. Arizona",
+      "absolute_url": "/opinion/12345/miranda-v-arizona/",
+      "plain_text": "The judgment of the Supreme Court of Arizona is reversed and the petition was denied.",
+      "docket_number": "759",
+      "date_filed": "1966-06-13",
+      "citations": [
+        {"type": "official", "cite": "384 U.S. 436"}
+      ]
+    }
+  ]
+}

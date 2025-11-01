@@ -17,6 +17,13 @@ class TimelineEvent:
     entity_highlights: List[Dict[str, str]] = field(default_factory=list, compare=False)
     relation_tags: List[Dict[str, str]] = field(default_factory=list, compare=False)
     confidence: float | None = field(default=None, compare=False)
+    risk_score: float | None = field(default=None, compare=False)
+    risk_band: str | None = field(default=None, compare=False)
+    outcome_probabilities: List[Dict[str, object]] = field(
+        default_factory=list, compare=False
+    )
+    recommended_actions: List[str] = field(default_factory=list, compare=False)
+    motion_deadline: datetime | None = field(default=None, compare=False)
 
     def to_record(self) -> Dict[str, object]:
         return {
@@ -28,6 +35,13 @@ class TimelineEvent:
             "entity_highlights": list(self.entity_highlights),
             "relation_tags": list(self.relation_tags),
             "confidence": self.confidence,
+            "risk_score": self.risk_score,
+            "risk_band": self.risk_band,
+            "outcome_probabilities": list(self.outcome_probabilities),
+            "recommended_actions": list(self.recommended_actions),
+            "motion_deadline": self.motion_deadline.isoformat()
+            if self.motion_deadline
+            else None,
         }
 
     @classmethod
@@ -41,6 +55,15 @@ class TimelineEvent:
             entity_highlights=list(record.get("entity_highlights", [])),
             relation_tags=list(record.get("relation_tags", [])),
             confidence=float(record["confidence"]) if record.get("confidence") is not None else None,
+            risk_score=float(record["risk_score"])
+            if record.get("risk_score") is not None
+            else None,
+            risk_band=str(record["risk_band"]) if record.get("risk_band") else None,
+            outcome_probabilities=list(record.get("outcome_probabilities", [])),
+            recommended_actions=list(record.get("recommended_actions", [])),
+            motion_deadline=datetime.fromisoformat(str(record["motion_deadline"]))
+            if record.get("motion_deadline")
+            else None,
         )
 
 

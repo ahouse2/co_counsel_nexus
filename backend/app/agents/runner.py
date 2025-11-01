@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Tuple
 from uuid import uuid4
-
-from autogen import ConversableAgent, GroupChat
 
 from ..services.errors import (
     WorkflowAbort,
@@ -29,7 +27,6 @@ from .tools import (
 )
 from .types import AgentThread, AgentTurn
 
-
 ComponentExecutor = Callable[
     [
         WorkflowComponent,
@@ -46,398 +43,317 @@ def _utcnow() -> datetime:
 
 
 @dataclass(slots=True)
-class PlannerAgent(ConversableAgent):
-    def __init__(self) -> None:
-        super().__init__(
-            name="Planner",
-            llm_config=None,
-            system_message=(
-                "Microsoft Agents planner responsible for translating the case brief into"
-                " a structured execution plan and tracking revisions."
-            ),
-            description="Planner agent seeded from Microsoft Agents SDK",
-        )
+class SessionNode:
+    definition: AgentDefinition
+    next_roles: List[str]
 
 
 @dataclass(slots=True)
-class WorkerAgent(ConversableAgent):
-    def __init__(self) -> None:
-        super().__init__(
-            name="Worker",
-            llm_config=None,
-            system_message=(
-                "Execution specialist coordinating retrieval, forensics and evidence synthesis"
-                " on behalf of the planner."
-            ),
-            description="Worker agent orchestrating tool delegation",
-        )
+class SessionGraph:
+    """Directed conversation graph for Microsoft Agents sessions."""
+
+    nodes: Dict[str, SessionNode]
+    entry_role: str
+    order: List[str]
+
+    @classmethod
+    def from_definitions(cls, definitions: Iterable[AgentDefinition]) -> "SessionGraph":
+        definitions_list = list(definitions)
+        if not definitions_list:
+            raise ValueError("Agent graph requires at least one definition")
+        name_to_role = {definition.name: definition.role for definition in definitions_list}
+        nodes: Dict[str, SessionNode] = {}
+        adjacency: Dict[str, List[str]] = {}
+        for definition in definitions_list:
+            downstream: List[str] = []
+            for delegate in definition.delegates:
+                role = name_to_role.get(delegate, delegate.lower())
+                downstream.append(role)
+            adjacency[definition.role] = downstream
+            nodes[definition.role] = SessionNode(definition=definition, next_roles=downstream)
+        entry = definitions_list[0].role
+        order: List[str] = []
+        visited = set()
+        queue: List[str] = [entry]
+        while queue:
+            role = queue.pop(0)
+            if role in visited:
+                continue
+            visited.add(role)
+            order.append(role)
+            queue.extend(adjacency.get(role, []))
+        return cls(nodes=nodes, entry_role=entry, order=order)
 
 
 @dataclass(slots=True)
-class CriticAgent(ConversableAgent):
-    def __init__(self) -> None:
-        super().__init__(
-            name="Critic",
-            llm_config=None,
-            system_message=(
-                "Quality critic validating worker output, triggering re-plans and ensuring"
-                " QA rubric coverage."
-            ),
-            description="Critic agent evaluating intermediate outputs",
-        )
+class MicrosoftAgentsSession:
+    """Session runner that executes the Microsoft Agents SDK graph."""
 
+    graph: SessionGraph
+    memory: CaseThreadMemory
+    telemetry: Dict[str, object]
+    component_executor: ComponentExecutor
+    actor: Dict[str, object]
+    autonomy_policy: Dict[str, bool]
+    max_turns: int
+    policy_state: Dict[str, Any] | None = None
 
-@dataclass(slots=True)
-class AdaptiveAgentsOrchestrator:
-    """Adaptive Microsoft Agents orchestrator backed by the official SDK."""
-
-    strategy_tool: StrategyTool
-    ingestion_tool: IngestionTool
-    research_tool: ResearchTool
-    forensics_tool: ForensicsTool
-    qa_tool: QATool
-    memory_store: AgentMemoryStore
-    max_rounds: int = 12
-    tools: Dict[str, AgentTool] = field(init=False)
-    graph: List[AgentDefinition] = field(init=False)
-    planner: PlannerAgent = field(init=False)
-    worker: WorkerAgent = field(init=False)
-    critic: CriticAgent = field(init=False)
-    component_roles: Dict[WorkflowComponent, str] = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.tools = {
-            "strategy": self.strategy_tool,
-            "ingestion": self.ingestion_tool,
-            "research": self.research_tool,
-            "cocounsel": self.forensics_tool,
-            "qa": self.qa_tool,
-        }
-        self.graph = build_agent_graph(self.tools)
-        self.planner = PlannerAgent()
-        self.worker = WorkerAgent()
-        self.critic = CriticAgent()
-        self.component_roles = {
-            WorkflowComponent.STRATEGY: "strategy",
-            WorkflowComponent.INGESTION: "ingestion",
-            WorkflowComponent.RETRIEVAL: "research",
-            WorkflowComponent.FORENSICS: "cocounsel",
-            WorkflowComponent.QA: "qa",
-        }
-
-    def run(
-        self,
-        *,
-        case_id: str,
-        question: str,
-        top_k: int,
-        actor: Dict[str, object],
-        component_executor: ComponentExecutor,
-        thread_id: str | None = None,
-        thread: AgentThread | None = None,
-        telemetry: Dict[str, object] | None = None,
-        autonomy_level: str = "balanced",
-        max_turns: int | None = None,
-    ) -> AgentThread:
-        if thread is None:
-            thread = AgentThread(
-                thread_id=thread_id or str(uuid4()),
-                case_id=case_id,
-                question=question,
-                created_at=_utcnow(),
-                updated_at=_utcnow(),
-            )
-        else:
-            thread.thread_id = thread_id or thread.thread_id
-            thread.case_id = case_id
-            thread.question = question
-            thread.updated_at = _utcnow()
-        memory = CaseThreadMemory(thread, self.memory_store)
-        telemetry = telemetry or {}
-        telemetry.setdefault("turn_roles", [])
-        telemetry.setdefault("durations_ms", [])
-        telemetry.setdefault("retries", {})
-        telemetry.setdefault("backoff_ms", {})
-        telemetry.setdefault("notes", [])
-        telemetry.setdefault("status", "pending")
-        telemetry.setdefault("hand_offs", [])
-        telemetry.setdefault("delegations", [])
-        telemetry.setdefault("branching", [])
-        telemetry.setdefault("plan_revisions", 0)
-        telemetry.setdefault("conversation_id", thread.thread_id)
-        context = AgentContext(
-            case_id=case_id,
-            question=question,
-            top_k=top_k,
-            actor=actor,
-            memory=memory,
-            telemetry=telemetry,
-        )
-
-        planner, worker, critic = self.planner, self.worker, self.critic
-        max_rounds = max_turns or self.max_rounds
-        group_chat = GroupChat(
-            agents=[planner, worker, critic],
-            messages=[],
-            speaker_selection_method="manual",
-            max_round=max_rounds,
-        )
-        self._append_message(
-            group_chat,
+    def execute(self, context: AgentContext, thread: AgentThread) -> AgentThread:
+        # Seed the conversation transcript with the user brief.
+        self.memory.append_conversation(
             {
                 "role": "user",
-                "name": actor.get("name", "Principal"),
-                "content": question,
-            },
-            memory,
+                "name": self.actor.get("name", "Principal"),
+                "content": context.question,
+            }
         )
+        self.memory.persist()
+        self.telemetry.setdefault("conversation_id", thread.thread_id)
+        self.telemetry.setdefault("delegations", [])
+        self.telemetry.setdefault("branching", [])
+        self.telemetry.setdefault("plan_revisions", 0)
+        self.telemetry.setdefault("hand_offs", [])
+        self.telemetry.setdefault("notes", [])
+        if self.policy_state:
+            self.telemetry.setdefault("policy", {}).update(self.policy_state)
 
+        turns_budget = max(1, self.max_turns)
         plan_revision = 0
-        worker_tasks: List[str] = ["ingestion", "research", "cocounsel"]
-        autonomy = self._autonomy_policy(autonomy_level)
-        self._run_planner(plan_revision, context, component_executor, planner, group_chat, memory, telemetry, thread)
+        executed_roles: List[str] = []
+        revision_limit = max(1, self.max_turns // max(1, len(self.graph.order)))
 
-        run_budget = max_rounds - 1
-        while worker_tasks and run_budget > 0:
-            run_budget -= 1
-            task = worker_tasks.pop(0)
-            invocation = self._invoke_tool(
-                self.tools[task],
+        queue: List[Dict[str, object]] = [
+            {"role": role, "revision": None, "reason": None}
+            for role in self.graph.order
+        ]
+        if self.policy_state:
+            elevated = [
+                str(role)
+                for role in self.policy_state.get("elevated_roles", [])
+                if any(item["role"] == role for item in queue)
+            ]
+            for role in reversed(elevated):
+                for index, item in enumerate(queue):
+                    if item["role"] == role:
+                        queue.insert(0, queue.pop(index))
+                        break
+
+        while queue and turns_budget > 0:
+            item = queue.pop(0)
+            role = str(item["role"])
+            revision = item.get("revision")
+            reason = item.get("reason")
+            node = self.graph.nodes[role]
+
+            turns_budget -= 1
+            invocation = self._invoke(
+                node,
                 context,
-                component_executor,
-                worker,
-                group_chat,
-                memory,
-                telemetry,
                 thread,
+                revision=revision if isinstance(revision, int) else None,
+                revision_reason=str(reason) if reason else None,
             )
+            executed_roles.append(role)
+
             if invocation.metadata:
-                telemetry["delegations"].append(
+                self.telemetry["delegations"].append(
                     {
-                        "from": worker.name,
-                        "role": invocation.turn.role,
+                        "from": node.definition.name,
+                        "role": node.definition.role,
                         "metadata": invocation.metadata,
                     }
                 )
-            if invocation.metadata.get("status") == "failed":
-                telemetry["branching"].append(
-                    {
-                        "reason": invocation.metadata.get("error_code", "unknown"),
-                        "stage": task,
-                        "policy": autonomy_level,
-                    }
-                )
-                if task != "ingestion" and autonomy["allow_replan"]:
-                    plan_revision += 1
-                    telemetry["plan_revisions"] = plan_revision
-                    self._append_message(
-                        group_chat,
+
+            if role == "strategy":
+                context.memory.plan.update(invocation.payload)
+            elif role == "research":
+                metadata = invocation.metadata or {}
+                citations = int(metadata.get("citations", 0))
+                status = metadata.get("status")
+                if status == "failed":
+                    policy = context.telemetry.get("autonomy_level", "balanced")
+                    reason_code = metadata.get("error_code", "retrieval_failure")
+                    self.telemetry["branching"].append(
                         {
-                            "role": "assistant",
-                            "name": critic.name,
-                            "content": (
-                                "Critic observed a failure in the worker pipeline and is requesting"
-                                " a plan refresh before continuing."
-                            ),
-                        },
-                        memory,
-                    )
-                    self._run_planner(
-                        plan_revision,
-                        context,
-                        component_executor,
-                        planner,
-                        group_chat,
-                        memory,
-                        telemetry,
-                        thread,
-                        revision_reason=invocation.metadata.get("error_code", "unknown"),
-                    )
-                    worker_tasks = ["research", "cocounsel"]
-                    continue
-                if not autonomy["allow_partial"]:
-                    error_obj = invocation.metadata.get("error")
-                    if isinstance(error_obj, WorkflowError):
-                        raise WorkflowAbort(error_obj)
-                    raise WorkflowAbort(
-                        WorkflowError(
-                            component=self.tools[task].component,
-                            code=f"{self.tools[task].component.value.upper()}_FAILED",
-                            message=f"{self.tools[task].name} failed and autonomy policy forbids partial progression.",
-                        )
-                    )
-                telemetry["status"] = "degraded"
-                thread.status = "degraded"
-                continue
-            if task == "research":
-                citations = invocation.metadata.get("citations", 0)
-                if citations == 0 and autonomy["allow_replan"]:
-                    plan_revision += 1
-                    telemetry["plan_revisions"] = plan_revision
-                    telemetry["branching"].append(
-                        {
-                            "reason": "missing_citations",
-                            "stage": "research",
-                            "policy": autonomy_level,
+                            "reason": reason_code,
+                            "stage": role,
+                            "policy": policy,
+                            "status": "partial"
+                            if self.autonomy_policy.get("allow_partial", False)
+                            else "aborted",
                         }
                     )
-                    self._append_message(
-                        group_chat,
+                    note = (
+                        "Research turn encountered "
+                        f"{reason_code.replace('_', ' ').title()}. Planner triggered revision run."
+                    )
+                    if (
+                        self.autonomy_policy.get("allow_replan", True)
+                        and plan_revision < revision_limit
+                        and turns_budget > 0
+                    ):
+                        plan_revision += 1
+                        self.telemetry["plan_revisions"] = plan_revision
+                        context.memory.append_note(note)
+                        self.telemetry["notes"].append(note)
+                        queue.insert(0, {"role": "research", "revision": None, "reason": None})
+                        queue.insert(
+                            0,
+                            {
+                                "role": "strategy",
+                                "revision": plan_revision,
+                                "reason": reason_code,
+                            },
+                        )
+                        continue
+                    degraded_note = (
+                        "Research agent emitted partial findings after failure; proceeding with remaining agents."
+                    )
+                    context.memory.append_note(degraded_note)
+                    self.telemetry["notes"].append(degraded_note)
+                elif (
+                    citations == 0
+                    and self.autonomy_policy.get("allow_replan", True)
+                    and plan_revision < revision_limit
+                    and turns_budget > 0
+                ):
+                    plan_revision += 1
+                    self.telemetry["plan_revisions"] = plan_revision
+                    self.telemetry["branching"].append(
                         {
-                            "role": "assistant",
-                            "name": critic.name,
-                            "content": (
-                                "Critic flagged retrieval with zero citations and requested a refined"
-                                " focus from the planner."
-                            ),
+                            "reason": metadata.get("error_code", "missing_citations"),
+                            "stage": role,
+                            "policy": context.telemetry.get("autonomy_level", "balanced"),
+                        }
+                    )
+                    note = "Research turn returned zero citations. Planner triggered revision run."
+                    context.memory.append_note(note)
+                    self.telemetry["notes"].append(note)
+                    # Insert a planner revision followed by another research turn.
+                    queue.insert(
+                        0,
+                        {
+                            "role": "research",
+                            "revision": None,
+                            "reason": None,
                         },
-                        memory,
                     )
-                    context.memory.append_note("Critic requested planner revision due to zero citations.")
-                    self._run_planner(
-                        plan_revision,
-                        context,
-                        component_executor,
-                        planner,
-                        group_chat,
-                        memory,
-                        telemetry,
-                        thread,
-                        revision_reason="missing_citations",
+                    queue.insert(
+                        0,
+                        {
+                            "role": "strategy",
+                            "revision": plan_revision,
+                            "reason": "missing_citations",
+                        },
                     )
-                    worker_tasks = ["research", "cocounsel"]
-            if task == "research":
-                retrieval = invocation.payload
-                thread.final_answer = str(retrieval.get("answer", ""))
-                thread.citations = list(retrieval.get("citations", []))
+                    continue
+                thread.final_answer = str(invocation.payload.get("answer", thread.final_answer))
+                thread.citations = list(invocation.payload.get("citations", thread.citations))
+            elif role == "cocounsel":
+                context.memory.update("artifacts", invocation.payload)
+            elif role == "qa":
+                qa_payload = invocation.payload
+                if qa_payload.get("scores"):
+                    thread.qa_scores = {str(k): float(v) for k, v in qa_payload["scores"].items()}
+                if qa_payload.get("notes"):
+                    thread.qa_notes = list(qa_payload.get("notes", []))
+                if qa_payload.get("gating", {}).get("requires_privilege_review"):
+                    thread.status = "needs_privilege_review"
+                    self.telemetry["status"] = "needs_privilege_review"
+                average = invocation.metadata.get("qa_average") if invocation.metadata else None
+                if average is not None:
+                    self.telemetry["qa_average"] = average
 
-        self._append_message(
-            group_chat,
-            {
-                "role": "assistant",
-                "name": critic.name,
-                "content": "Critic reviewing aggregated evidence and triggering QA rubric run.",
-            },
-            memory,
-        )
-        qa_invocation = self._invoke_tool(
-            self.qa_tool,
-            context,
-            component_executor,
-            critic,
-            group_chat,
-            memory,
-            telemetry,
-            thread,
-        )
-        qa_payload = qa_invocation.payload
-        if qa_invocation.metadata.get("qa_average") is not None:
-            telemetry["qa_average"] = qa_invocation.metadata["qa_average"]
-        if qa_payload.get("scores"):
-            thread.qa_scores = {str(k): float(v) for k, v in qa_payload["scores"].items()}
-        if qa_payload.get("notes"):
-            thread.qa_notes = list(qa_payload.get("notes", []))
-        if qa_payload.get("gating", {}).get("requires_privilege_review"):
-            telemetry["status"] = "needs_privilege_review"
-            thread.status = "needs_privilege_review"
-        else:
-            telemetry.setdefault("status", "succeeded")
-            thread.status = telemetry["status"]
-
-        telemetry["sequence_valid"] = True
-        telemetry["total_duration_ms"] = round(sum(telemetry.get("durations_ms", [])), 2)
-        thread.telemetry = telemetry
-        memory.persist()
+        if not thread.status or thread.status == "pending":
+            if thread.errors:
+                thread.status = "degraded"
+            else:
+                thread.status = "succeeded"
+        self.telemetry["status"] = thread.status
+        self.telemetry["sequence_valid"] = True
+        self.telemetry["turn_roles"] = executed_roles
+        durations = [round(turn.duration_ms(), 2) for turn in thread.turns]
+        self.telemetry["durations_ms"] = durations
+        self.telemetry["total_duration_ms"] = round(sum(durations), 2)
+        thread.telemetry = dict(self.telemetry)
+        thread.memory = self.memory.snapshot()
         thread.updated_at = _utcnow()
         return thread
 
-    def _run_planner(
+    def _invoke(
         self,
-        revision: int,
+        node: SessionNode,
         context: AgentContext,
-        executor: ComponentExecutor,
-        planner: PlannerAgent,
-        chat: GroupChat,
-        memory: CaseThreadMemory,
-        telemetry: Dict[str, object],
         thread: AgentThread,
         *,
+        revision: int | None,
         revision_reason: str | None = None,
-    ) -> None:
-        invocation = self._invoke_tool(
-            self.strategy_tool,
-            context,
-            executor,
-            planner,
-            chat,
-            memory,
-            telemetry,
-            thread,
-        )
-        if revision:
-            invocation.turn.annotations.setdefault("plan_revision", revision)
-            invocation.turn.annotations.setdefault("revision_reason", revision_reason)
-            telemetry.setdefault("notes", []).append(
-                f"Plan revision {revision} triggered due to {revision_reason or 'worker request'}."
-            )
-        memory.state.setdefault("plan", {}).update(invocation.payload)
-
-    def _invoke_tool(
-        self,
-        tool: AgentTool,
-        context: AgentContext,
-        executor: ComponentExecutor,
-        agent: ConversableAgent,
-        chat: GroupChat,
-        memory: CaseThreadMemory,
-        telemetry: Dict[str, object],
-        thread: AgentThread,
     ) -> ToolInvocation:
         invocation: ToolInvocation | None = None
+        partial_invocation: ToolInvocation | None = None
 
         def operation() -> Tuple[AgentTurn, Dict[str, object]]:
             nonlocal invocation
-            invocation = tool.invoke(context)
-            return invocation.turn, invocation.payload
+            invocation = node.definition.tool.invoke(context)
+            turn = invocation.turn
+            if revision:
+                turn.annotations.setdefault("plan_revision", revision)
+                if revision_reason:
+                    turn.annotations.setdefault("revision_reason", revision_reason)
+            return turn, invocation.payload
 
+        allow_partial = (
+            self.autonomy_policy.get("allow_partial", False)
+            and node.definition.role in {"research", "cocounsel"}
+        )
+
+        def partial_factory(error: WorkflowError) -> Tuple[AgentTurn, Dict[str, object]]:
+            nonlocal partial_invocation
+            partial_invocation = self._handle_failure(node.definition.tool, context, thread, error)
+            return partial_invocation.turn, partial_invocation.payload
+
+        abort_exc: WorkflowAbort | None = None
         try:
-            executor(tool.component, operation, False, None)
-        except WorkflowAbort:
-            raise
+            turn, _ = self.component_executor(
+                node.definition.tool.component,
+                operation,
+                allow_partial,
+                partial_factory if allow_partial else None,
+            )
+        except WorkflowAbort as exc:
+            abort_exc = exc
+            invocation = self._handle_failure(node.definition.tool, context, thread, exc.error)
         except WorkflowException as exc:
-            invocation = self._handle_failure(tool, context, exc.error)
+            invocation = self._handle_failure(node.definition.tool, context, thread, exc.error)
         if invocation is None:
-            raise RuntimeError("Tool invocation did not produce a result")
-        self._register_turn(thread, invocation.turn, telemetry)
-        self._append_message(
-            chat,
+            invocation = partial_invocation
+        if invocation is None:
+            raise RuntimeError(f"Tool invocation for role '{node.definition.role}' did not produce a result")
+        invocation.turn.annotations.setdefault("tool_name", node.definition.tool.name)
+        self._register_turn(thread, invocation.turn)
+        self.memory.append_conversation(
             {
-                "role": "assistant",
-                "name": agent.name,
+                "role": "agent",
+                "name": node.definition.name,
                 "content": invocation.message,
                 "metadata": invocation.metadata,
-            },
-            memory,
+            }
         )
-        context.memory.mark_updated()
+        context.telemetry.setdefault("notes", [])
+        self.memory.mark_updated()
+        if abort_exc is not None:
+            raise abort_exc
         return invocation
 
-    def _register_turn(
-        self,
-        thread: AgentThread,
-        turn: AgentTurn,
-        telemetry: Dict[str, object],
-    ) -> None:
+    def _register_turn(self, thread: AgentThread, turn: AgentTurn) -> None:
         thread.turns.append(turn)
-        telemetry["turn_roles"].append(turn.role)
-        telemetry["durations_ms"].append(round(turn.duration_ms(), 2))
         if len(thread.turns) > 1:
             previous = thread.turns[-2]
-            telemetry["hand_offs"].append(
+            self.telemetry.setdefault("hand_offs", []).append(
                 {
                     "from": previous.role,
                     "to": turn.role,
-                    "via": turn.action,
+                    "via": turn.annotations.get("tool_name", turn.action),
                 }
             )
 
@@ -445,11 +361,12 @@ class AdaptiveAgentsOrchestrator:
         self,
         tool: AgentTool,
         context: AgentContext,
+        thread: AgentThread,
         error: WorkflowError,
     ) -> ToolInvocation:
         started = _utcnow()
         completed = _utcnow()
-        role = self.component_roles.get(tool.component, tool.component.value)
+        role = tool.component.value
         payload = {
             "status": "failed",
             "error": error.to_dict(),
@@ -466,9 +383,12 @@ class AdaptiveAgentsOrchestrator:
                 "status": "failed",
                 "error_code": error.code,
                 "retryable": error.retryable,
+                "tool_name": tool.name,
             },
         )
         context.telemetry.setdefault("errors", []).append(error.to_dict())
+        if error not in thread.errors:
+            thread.errors.append(error)
         context.memory.record_turn(turn.to_dict())
         return ToolInvocation(
             turn=turn,
@@ -478,18 +398,121 @@ class AdaptiveAgentsOrchestrator:
                 "status": "failed",
                 "error_code": error.code,
                 "retryable": error.retryable,
-                "error": error,
+                "error": error.to_dict(),
             },
         )
 
-    def _append_message(
+
+@dataclass(slots=True)
+class MicrosoftAgentsOrchestrator:
+    """Adaptive orchestrator implemented with the Microsoft Agents SDK graph."""
+
+    strategy_tool: StrategyTool
+    ingestion_tool: IngestionTool
+    research_tool: ResearchTool
+    forensics_tool: ForensicsTool
+    qa_tool: QATool
+    memory_store: AgentMemoryStore
+    qa_agent: QAAgent | None = None
+    max_rounds: int = 12
+    tools: Dict[str, AgentTool] = field(init=False)
+    graph: SessionGraph = field(init=False)
+    base_definitions: List[AgentDefinition] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.tools = {
+            "strategy": self.strategy_tool,
+            "ingestion": self.ingestion_tool,
+            "research": self.research_tool,
+            "cocounsel": self.forensics_tool,
+            "qa": self.qa_tool,
+        }
+        self.base_definitions = build_agent_graph(self.tools)
+        self.graph = SessionGraph.from_definitions(self.base_definitions)
+
+    def run(
         self,
-        chat: GroupChat,
-        message: Dict[str, object],
-        memory: CaseThreadMemory,
-    ) -> None:
-        chat.messages.append(message)
-        memory.append_conversation(message)
+        *,
+        case_id: str,
+        question: str,
+        top_k: int,
+        actor: Dict[str, object],
+        component_executor: ComponentExecutor,
+        thread_id: str | None = None,
+        thread: AgentThread | None = None,
+        telemetry: Dict[str, object] | None = None,
+        autonomy_level: str = "balanced",
+        max_turns: int | None = None,
+        policy_state: Dict[str, Any] | None = None,
+    ) -> AgentThread:
+        if thread is None:
+            thread = AgentThread(
+                thread_id=thread_id or str(uuid4()),
+                case_id=case_id,
+                question=question,
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+        else:
+            thread.thread_id = thread_id or thread.thread_id
+            thread.case_id = case_id
+            thread.question = question
+            thread.updated_at = _utcnow()
+        memory = CaseThreadMemory(thread, self.memory_store, state=dict(thread.memory))
+        telemetry = telemetry or {}
+        telemetry.setdefault("autonomy_level", autonomy_level)
+        if policy_state:
+            telemetry.setdefault("policy", {}).update(policy_state)
+        session_graph = self._build_session_graph(policy_state)
+        self.graph = session_graph
+        context = AgentContext(
+            case_id=case_id,
+            question=question,
+            top_k=top_k,
+            actor=actor,
+            memory=memory,
+            telemetry=telemetry,
+        )
+        session = MicrosoftAgentsSession(
+            graph=session_graph,
+            memory=memory,
+            telemetry=telemetry,
+            component_executor=component_executor,
+            actor=actor,
+            autonomy_policy=self._autonomy_policy(autonomy_level),
+            max_turns=max_turns or self.max_rounds,
+            policy_state=policy_state,
+        )
+        return session.execute(context, thread)
+
+    def _build_session_graph(self, policy_state: Dict[str, Any] | None) -> SessionGraph:
+        if not policy_state or not policy_state.get("enabled", True):
+            return SessionGraph.from_definitions(self.base_definitions)
+        suppressed = {str(role) for role in policy_state.get("suppressed_roles", [])}
+        overrides = {
+            str(source): [str(target) for target in targets]
+            for source, targets in policy_state.get("graph_overrides", {}).items()
+        }
+        definitions = [
+            definition
+            for definition in self.base_definitions
+            if definition.role not in suppressed
+        ]
+        adjusted: List[AgentDefinition] = []
+        for definition in definitions:
+            delegates = list(definition.delegates)
+            if definition.role in overrides:
+                delegates = overrides[definition.role]
+            else:
+                delegates = [
+                    delegate
+                    for delegate in delegates
+                    if delegate.lower() not in suppressed
+                ]
+            adjusted.append(replace(definition, delegates=delegates))
+        if not adjusted:
+            adjusted = list(self.base_definitions)
+        return SessionGraph.from_definitions(adjusted)
 
     @staticmethod
     def _autonomy_policy(level: str) -> Dict[str, bool]:
@@ -508,13 +531,13 @@ def get_orchestrator(
     qa_agent: QAAgent,
     memory_store: AgentMemoryStore,
     graph_agent: "GraphManagerAgent",
-) -> AdaptiveAgentsOrchestrator:
+) -> MicrosoftAgentsOrchestrator:
     strategy_tool = StrategyTool(graph_agent)
     ingestion_tool = IngestionTool(document_store)
     research_tool = ResearchTool(retrieval_service, graph_agent)
     forensics_tool = ForensicsTool(document_store, forensics_service)
     qa_tool = QATool(qa_agent)
-    return AdaptiveAgentsOrchestrator(
+    return MicrosoftAgentsOrchestrator(
         strategy_tool=strategy_tool,
         ingestion_tool=ingestion_tool,
         research_tool=research_tool,

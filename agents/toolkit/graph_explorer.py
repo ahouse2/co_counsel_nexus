@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterable
 
-from backend.app.services.graph import GraphService, get_graph_service
+from backend.app.services.graph import GraphService, GraphTextToCypherResult, get_graph_service
 
 
 def run_cypher(query: str, parameters: Dict[str, object] | None = None) -> Dict[str, object]:
@@ -30,6 +30,13 @@ def community_overview(node_ids: Iterable[str] | None = None) -> Dict[str, objec
     service = _service()
     summary = service.compute_community_summary(set(node_ids or []))
     return summary.to_dict()
+
+
+def text_to_cypher(question: str, schema: str | None = None) -> Dict[str, object]:
+    """Generate Cypher for a natural language question when supported by the backend."""
+    service = _service()
+    result: GraphTextToCypherResult = service.text_to_cypher(question, schema=schema)
+    return result.to_dict()
 
 
 def _service() -> GraphService:

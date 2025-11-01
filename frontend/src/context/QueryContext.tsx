@@ -12,7 +12,8 @@ import { v4 as uuid } from 'uuid';
 import { buildStreamUrl, fetchTimeline, postQuery } from '@/utils/apiClient';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { loadChatHistory, loadTimeline, saveChatHistory, saveTimeline } from '@/utils/cache';
-import { ChatMessage, Citation, TimelineEvent, TimelineResponse } from '@/types';
+import { ChatMessage, Citation, QueryResponse, TimelineEvent, TimelineResponse } from '@/types';
+import { useSettingsContext } from '@/context/SettingsContext';
 
 type QueryContextValue = {
   messages: ChatMessage[];
@@ -30,8 +31,16 @@ type QueryContextValue = {
   refreshTimelineOnDemand: () => Promise<void>;
   timelineEntityFilter: string | null;
   setTimelineEntityFilter: (entity: string | null) => void;
+  timelineRiskBand: 'low' | 'medium' | 'high' | null;
+  setTimelineRiskBand: (band: 'low' | 'medium' | 'high' | null) => void;
+  timelineDeadline: string | null;
+  setTimelineDeadline: (isoDate: string | null) => void;
   retrievalMode: 'precision' | 'recall';
   setRetrievalMode: (mode: 'precision' | 'recall') => void;
+  llmProviderId?: string;
+  llmModelId?: string;
+  embeddingProviderId?: string;
+  embeddingModelId?: string;
 };
 
 const QueryContext = createContext<QueryContextValue | undefined>(undefined);
@@ -44,6 +53,8 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [timelineMeta, setTimelineMeta] = useState<TimelineResponse['meta'] | null>(initialMeta);
   const [timelineEntityFilter, setTimelineEntityFilter] = useState<string | null>(null);
+  const [timelineRiskBand, setTimelineRiskBand] = useState<'low' | 'medium' | 'high' | null>(null);
+  const [timelineDeadline, setTimelineDeadline] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -51,6 +62,11 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
   const [retrievalMode, setRetrievalMode] = useState<'precision' | 'recall'>('precision');
   const currentStreamId = useRef<string | null>(null);
   const pendingPromptRef = useRef<string | null>(null);
+  const { resolvedModels } = useSettingsContext();
+  const llmProviderId = resolvedModels.chat?.providerId;
+  const llmModelId = resolvedModels.chat?.model.id;
+  const embeddingProviderId = resolvedModels.embeddings?.providerId;
+  const embeddingModelId = resolvedModels.embeddings?.model.id;
 
   useEffect(() => {
     loadChatHistory().then((history) => {
@@ -79,17 +95,26 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
 
   const handleCompletion = useCallback(
     (assistantId: string, response?: StreamPayloadLike) => {
+      const responseMeta = response?.meta;
       setMessages((prev) => {
-        const updated = prev.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                streaming: false,
-                citations: response?.citations ?? message.citations,
-                content: response?.answer ?? message.content,
-              }
-            : message
-        );
+        const updated = prev.map((message) => {
+          if (message.id !== assistantId) {
+            return message;
+          }
+          const nextMode =
+            responseMeta?.mode === 'precision' || responseMeta?.mode === 'recall'
+              ? responseMeta.mode
+              : message.mode;
+          return {
+            ...message,
+            streaming: false,
+            citations: response?.citations ?? message.citations,
+            content: response?.answer ?? message.content,
+            mode: nextMode ?? message.mode,
+            llmProvider: responseMeta?.llm_provider ?? message.llmProvider,
+            llmModel: responseMeta?.llm_model ?? message.llmModel,
+          };
+        });
         void saveChatHistory(updated);
         return updated;
       });
@@ -104,7 +129,17 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
     messagesRef.current = messages;
   }, [messages]);
 
-  const streamUrl = useMemo(() => buildStreamUrl({ mode: retrievalMode }), [retrievalMode]);
+  const streamUrl = useMemo(
+    () =>
+      buildStreamUrl({
+        mode: retrievalMode,
+        provider: llmProviderId,
+        model: llmModelId,
+        embeddingProvider: embeddingProviderId,
+        embeddingModel: embeddingModelId,
+      }),
+    [retrievalMode, llmProviderId, llmModelId, embeddingProviderId, embeddingModelId]
+  );
 
   const { start: startStream, stop: stopStream } = useWebSocket({
     url: streamUrl,
@@ -121,9 +156,15 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       const assistantId = currentStreamId.current;
       if (!assistantId) return;
       stopStream();
+      const finalPayload = payload as unknown as {
+        answer?: string;
+        citations?: Citation[];
+        meta?: QueryResponse['meta'];
+      };
       const responsePayload: StreamPayloadLike = {
-        answer: payload?.token ? payload.token : undefined,
-        citations: (payload as unknown as { citations?: Citation[] })?.citations,
+        answer: finalPayload?.answer,
+        citations: finalPayload?.citations,
+        meta: finalPayload?.meta,
       };
       handleCompletion(assistantId, responsePayload);
       void refreshTimelineOnDemand();
@@ -155,7 +196,12 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
   const refreshTimelineOnDemand = useCallback(async () => {
     setTimelineLoading(true);
     try {
-      const response = await fetchTimeline({ entity: timelineEntityFilter ?? undefined, limit: 20 });
+      const response = await fetchTimeline({
+        entity: timelineEntityFilter ?? undefined,
+        limit: 20,
+        risk_band: timelineRiskBand ?? undefined,
+        motion_due_before: timelineDeadline ?? undefined,
+      });
       persistTimeline(response.events);
       setTimelineMeta(response.meta);
       setTimelineLoading(false);
@@ -163,12 +209,19 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       console.warn('Timeline refresh failed', timelineError);
       setTimelineLoading(false);
     }
-  }, [persistTimeline, timelineEntityFilter]);
+  }, [persistTimeline, timelineEntityFilter, timelineRiskBand, timelineDeadline]);
 
   const completeViaHttp = useCallback(
     async (assistantId: string, prompt: string) => {
       try {
-        const response = await postQuery({ q: prompt, mode: retrievalMode });
+        const response = await postQuery({
+          q: prompt,
+          mode: retrievalMode,
+          provider: llmProviderId,
+          model: llmModelId,
+          embeddingProvider: embeddingProviderId,
+          embeddingModel: embeddingModelId,
+        });
         setMessages((prev) => {
           const updated = prev.map((message) =>
             message.id === assistantId
@@ -178,6 +231,12 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
                   error: undefined,
                   content: response.answer,
                   citations: response.citations,
+                  mode:
+                    response.meta.mode === 'precision' || response.meta.mode === 'recall'
+                      ? response.meta.mode
+                      : message.mode,
+                  llmProvider: response.meta.llm_provider ?? message.llmProvider,
+                  llmModel: response.meta.llm_model ?? message.llmModel,
                 }
               : message
           );
@@ -201,7 +260,14 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         setLoading(false);
       }
     },
-    [refreshTimelineOnDemand, retrievalMode]
+    [
+      refreshTimelineOnDemand,
+      retrievalMode,
+      llmProviderId,
+      llmModelId,
+      embeddingProviderId,
+      embeddingModelId,
+    ]
   );
 
   const sendMessage = useCallback(
@@ -227,6 +293,8 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         createdAt: timestamp,
         streaming: true,
         mode: retrievalMode,
+        llmProvider: llmProviderId ?? undefined,
+        llmModel: llmModelId ?? undefined,
       };
       currentStreamId.current = assistantId;
       pendingPromptRef.current = prompt;
@@ -235,6 +303,10 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         startStream({
           q: prompt,
           mode: retrievalMode,
+          provider: llmProviderId,
+          model: llmModelId,
+          embedding_provider: embeddingProviderId,
+          embedding_model: embeddingModelId,
           history: messagesRef.current.map((message) => ({ role: message.role, content: message.content })),
         });
       } catch (errorStream) {
@@ -250,7 +322,16 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
         await completeViaHttp(assistantId, prompt);
       }
     },
-    [completeViaHttp, persistChat, retrievalMode, startStream]
+    [
+      completeViaHttp,
+      persistChat,
+      retrievalMode,
+      startStream,
+      llmProviderId,
+      llmModelId,
+      embeddingProviderId,
+      embeddingModelId,
+    ]
   );
 
   const retryLast = useCallback(async () => {
@@ -264,11 +345,13 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
     if (!timelineMeta?.has_more) return;
     setTimelineLoading(true);
     try {
-      const response = await fetchTimeline({
-        cursor: timelineMeta.cursor ?? undefined,
-        entity: timelineEntityFilter ?? undefined,
-        limit: timelineMeta.limit ?? 20,
-      });
+        const response = await fetchTimeline({
+          cursor: timelineMeta.cursor ?? undefined,
+          entity: timelineEntityFilter ?? undefined,
+          limit: timelineMeta.limit ?? 20,
+          risk_band: timelineRiskBand ?? undefined,
+          motion_due_before: timelineDeadline ?? undefined,
+        });
       const merged = [...timelineEvents, ...response.events];
       persistTimeline(merged);
       setTimelineMeta(response.meta);
@@ -277,7 +360,14 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       console.warn('Timeline pagination failed', errorTimeline);
       setTimelineLoading(false);
     }
-  }, [persistTimeline, timelineEntityFilter, timelineEvents, timelineMeta]);
+  }, [
+    persistTimeline,
+    timelineEntityFilter,
+    timelineEvents,
+    timelineMeta,
+    timelineRiskBand,
+    timelineDeadline,
+  ]);
 
   const value = useMemo<QueryContextValue>(
     () => ({
@@ -296,8 +386,16 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       refreshTimelineOnDemand,
       timelineEntityFilter,
       setTimelineEntityFilter,
+      timelineRiskBand,
+      setTimelineRiskBand,
+      timelineDeadline,
+      setTimelineDeadline,
       retrievalMode,
       setRetrievalMode,
+      llmProviderId,
+      llmModelId,
+      embeddingProviderId,
+      embeddingModelId,
     }),
     [
       messages,
@@ -313,8 +411,14 @@ export function QueryProvider({ children }: { children: ReactNode }): JSX.Elemen
       loadMoreTimeline,
       refreshTimelineOnDemand,
       timelineEntityFilter,
+      timelineRiskBand,
+      timelineDeadline,
       retrievalMode,
       setRetrievalMode,
+      llmProviderId,
+      llmModelId,
+      embeddingProviderId,
+      embeddingModelId,
     ]
   );
 
@@ -332,4 +436,5 @@ export function useQueryContext(): QueryContextValue {
 type StreamPayloadLike = {
   answer?: string;
   citations?: Citation[];
+  meta?: QueryResponse['meta'];
 };

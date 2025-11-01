@@ -82,6 +82,19 @@ const definition: ScenarioDefinition = {
       duration_ms: 50,
     },
   ],
+  director: {
+    version: '1.0',
+    beats: {
+      'beat-1': {
+        beat_id: 'beat-1',
+        emotional_tone: 'assertive',
+        counter_argument: 'Reinforce {issue}.',
+        lighting: { preset: 'assertive', palette: ['#fef08a', '#c2410c'], intensity: 1, focus: 1.2, ambient: 0.6 },
+        motion: { direction: 'forward', intensity: 0.7, tempo: 0.9 },
+        persona: { expression: 'assertive', vocal_register: 'steady', confidence: 0.85 },
+      },
+    },
+  },
 };
 
 const run: ScenarioRunResponse = {
@@ -103,6 +116,7 @@ const run: ScenarioRunResponse = {
         cache_hit: false,
         sha256: 'audio-hash',
       },
+      director: definition.director.beats['beat-1'],
     },
   ],
   telemetry: { turns: 1 },
@@ -154,6 +168,7 @@ describe('SimulationWorkbench', () => {
     fireEvent.change(select, { target: { value: 'opening-arguments' } });
 
     await waitFor(() => expect(screen.getByText('Simulate a patent case.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Beat authoring')).toBeInTheDocument());
 
     const caseId = screen.getByPlaceholderText('Enter case identifier');
     fireEvent.change(caseId, { target: { value: 'CASE-77' } });

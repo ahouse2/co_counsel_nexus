@@ -5,6 +5,12 @@ export interface Citation {
   span: string;
   uri?: string | null;
   title?: string;
+  pageLabel?: string;
+  chunkIndex?: number;
+  pageNumber?: number;
+  sourceType?: string | null;
+  retrievers?: string[];
+  fusionScore?: number | null;
   confidence?: number | null;
   entities?: EntityHighlight[];
 }
@@ -20,6 +26,7 @@ export interface RelationTag {
   target: string;
   type: string;
   label: string;
+  doc?: string | null;
 }
 
 export interface ChatMessage {
@@ -31,6 +38,85 @@ export interface ChatMessage {
   streaming?: boolean;
   error?: string;
   mode?: 'precision' | 'recall';
+  llmProvider?: string;
+  llmModel?: string;
+}
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+
+export interface ProviderModelInfo {
+  id: string;
+  display_name: string;
+  modalities: string[];
+  capabilities: string[];
+  context_window: number;
+  availability: string;
+}
+
+export interface ProviderCatalogEntry {
+  id: string;
+  display_name: string;
+  capabilities: string[];
+  models: ProviderModelInfo[];
+}
+
+export interface ProviderSettingsSnapshot {
+  primary: string;
+  secondary: string | null;
+  defaults: Record<string, string>;
+  api_base_urls: Record<string, string>;
+  local_runtime_paths: Record<string, string>;
+  available: ProviderCatalogEntry[];
+}
+
+export interface CredentialStatus {
+  provider_id: string;
+  has_api_key: boolean;
+}
+
+export interface CredentialsSnapshot {
+  providers: CredentialStatus[];
+  services: Record<string, boolean>;
+}
+
+export interface AppearanceSettingsSnapshot {
+  theme: ThemePreference;
+}
+
+export interface SettingsSnapshot {
+  providers: ProviderSettingsSnapshot;
+  credentials: CredentialsSnapshot;
+  appearance: AppearanceSettingsSnapshot;
+  updated_at?: string | null;
+}
+
+export interface ProviderSettingsUpdatePayload {
+  primary?: string | null;
+  secondary?: string | null;
+  defaults?: Record<string, string | null>;
+  api_base_urls?: Record<string, string | null>;
+  local_runtime_paths?: Record<string, string | null>;
+}
+
+export interface CredentialSettingsUpdatePayload {
+  provider_api_keys?: Record<string, string | null>;
+  courtlistener_token?: string | null;
+  research_browser_api_key?: string | null;
+}
+
+export interface AppearanceSettingsUpdatePayload {
+  theme?: ThemePreference;
+}
+
+export interface SettingsUpdatePayload {
+  providers?: ProviderSettingsUpdatePayload;
+  credentials?: CredentialSettingsUpdatePayload;
+  appearance?: AppearanceSettingsUpdatePayload;
+}
+
+export interface OutcomeProbability {
+  label: string;
+  probability: number;
 }
 
 export interface TimelineEvent {
@@ -42,6 +128,11 @@ export interface TimelineEvent {
   entity_highlights: EntityHighlight[];
   relation_tags: RelationTag[];
   confidence?: number | null;
+  risk_score?: number | null;
+  risk_band?: 'low' | 'medium' | 'high' | null;
+  outcome_probabilities: OutcomeProbability[];
+  recommended_actions: string[];
+  motion_deadline?: string | null;
 }
 
 export interface TimelineResponse {
@@ -66,6 +157,12 @@ export interface QueryResponse {
     page_size: number;
     total_items: number;
     has_next: boolean;
+    mode: string;
+    reranker: string;
+    llm_provider: string;
+    llm_model: string;
+    embedding_provider: string;
+    embedding_model: string;
   };
 }
 
@@ -182,6 +279,42 @@ export interface ScenarioBeatSpec {
   top_k?: number | null;
 }
 
+export type ScenarioDirectorMotionDirection = 'none' | 'left' | 'right' | 'forward' | 'back';
+
+export interface ScenarioDirectorMotion {
+  direction: ScenarioDirectorMotionDirection;
+  intensity: number;
+  tempo: number;
+}
+
+export interface ScenarioDirectorLighting {
+  preset: string;
+  palette: string[];
+  intensity: number;
+  focus: number;
+  ambient: number;
+}
+
+export interface ScenarioDirectorPersona {
+  expression: string;
+  vocal_register: string;
+  confidence: number;
+}
+
+export interface ScenarioDirectorBeat {
+  beat_id: string;
+  emotional_tone: string;
+  counter_argument?: string | null;
+  lighting: ScenarioDirectorLighting;
+  motion: ScenarioDirectorMotion;
+  persona: ScenarioDirectorPersona;
+}
+
+export interface ScenarioDirectorManifest {
+  version: string;
+  beats: Record<string, ScenarioDirectorBeat>;
+}
+
 export interface ScenarioDefinition {
   scenario_id: string;
   title: string;
@@ -193,6 +326,7 @@ export interface ScenarioDefinition {
   variables: Record<string, ScenarioVariable>;
   evidence: ScenarioEvidenceSpec[];
   beats: ScenarioBeatSpec[];
+  director: ScenarioDirectorManifest;
 }
 
 export interface ScenarioMetadata {
@@ -234,6 +368,7 @@ export interface ScenarioRunTurn {
   duration_ms?: number | null;
   thread_id?: string | null;
   audio?: ScenarioRunAudio | null;
+  director?: ScenarioDirectorBeat;
 }
 
 export interface ScenarioRunResponse {
@@ -250,6 +385,15 @@ export interface ScenarioRunRequestPayload {
   variables: Record<string, string>;
   evidence: Record<string, ScenarioEvidenceBinding>;
   enable_tts: boolean;
+  director_overrides?: Record<string, ScenarioDirectorBeatOverride>;
+}
+
+export interface ScenarioDirectorBeatOverride {
+  emotional_tone?: string;
+  counter_argument?: string | null;
+  lighting?: Partial<ScenarioDirectorLighting>;
+  motion?: Partial<ScenarioDirectorMotion>;
+  persona?: Partial<ScenarioDirectorPersona>;
 }
 
 export interface TextToSpeechResponsePayload {
@@ -264,6 +408,53 @@ export interface KnowledgeMedia {
   title: string;
   url: string;
   provider?: string | null;
+}
+
+export interface GraphNodeSummary {
+  id: string;
+  type: string;
+  properties: Record<string, unknown>;
+}
+
+export interface GraphArgumentLink {
+  node: GraphNodeSummary;
+  relation: string;
+  stance: 'support' | 'contradiction' | 'neutral';
+  documents: string[];
+  weight?: number | null;
+}
+
+export interface GraphArgumentEntry {
+  node: GraphNodeSummary;
+  supporting: GraphArgumentLink[];
+  opposing: GraphArgumentLink[];
+  neutral: GraphArgumentLink[];
+  documents: string[];
+}
+
+export interface GraphContradictionEntry {
+  source: GraphNodeSummary;
+  target: GraphNodeSummary;
+  relation: string;
+  documents: string[];
+  weight?: number | null;
+}
+
+export interface GraphLeveragePoint {
+  node: GraphNodeSummary;
+  influence: number;
+  connections: number;
+  documents: string[];
+  reason: string;
+}
+
+export interface GraphStrategyBrief {
+  generated_at: string;
+  summary: string;
+  focus_nodes: GraphNodeSummary[];
+  argument_map: GraphArgumentEntry[];
+  contradictions: GraphContradictionEntry[];
+  leverage_points: GraphLeveragePoint[];
 }
 
 export interface KnowledgeProgress {
@@ -295,6 +486,7 @@ export interface KnowledgeLessonSummary {
 
 export interface KnowledgeLessonDetail extends KnowledgeLessonSummary {
   sections: KnowledgeLessonSection[];
+  strategy_brief?: GraphStrategyBrief | null;
 }
 
 export interface KnowledgeLessonListResponse {
@@ -354,6 +546,39 @@ export interface VoiceSegment {
   confidence: number;
 }
 
+export interface VoicePersonaDirective {
+  persona_id: string;
+  speaker_id?: string | null;
+  tone: string;
+  language: string;
+  pace: number;
+  glossary: Record<string, string>;
+  rationale: string;
+}
+
+export interface VoiceSentimentArcPoint {
+  offset: number;
+  score: number;
+  label: 'positive' | 'negative' | 'neutral';
+}
+
+export interface VoicePersonaShift {
+  at: number;
+  persona_id: string;
+  tone: string;
+  language: string;
+  pace: number;
+  trigger: string;
+}
+
+export interface VoiceTranslation {
+  source_language: string;
+  target_language: string;
+  translated_text: string;
+  bilingual_text: string;
+  glossary: Record<string, string>;
+}
+
 export interface VoiceSession {
   session_id: string;
   thread_id: string;
@@ -361,6 +586,10 @@ export interface VoiceSession {
   persona_id: string;
   transcript: string;
   sentiment: VoiceSentiment;
+  persona_directive: VoicePersonaDirective;
+  sentiment_arc: VoiceSentimentArcPoint[];
+  persona_shifts: VoicePersonaShift[];
+  translation: VoiceTranslation;
   segments: VoiceSegment[];
   created_at: string;
   updated_at: string;
@@ -370,4 +599,93 @@ export interface VoiceSession {
 export interface VoiceSessionResponse extends VoiceSession {
   assistant_text: string;
   audio_url: string;
+}
+
+export interface SandboxCommandResult {
+  command: string[];
+  return_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+}
+
+export interface SandboxExecution {
+  success: boolean;
+  workspace_id: string;
+  commands: SandboxCommandResult[];
+}
+
+export interface DevAgentApprovalRecord {
+  actor: {
+    client_id?: string;
+    subject?: string;
+    roles?: string[];
+    [key: string]: unknown;
+  };
+  timestamp: string;
+  outcome: string;
+  [key: string]: unknown;
+}
+
+export interface DevAgentProposal {
+  proposal_id: string;
+  task_id: string;
+  feature_request_id: string;
+  title: string;
+  summary: string;
+  diff: string;
+  status: string;
+  created_at: string;
+  created_by: Record<string, unknown>;
+  validation: Record<string, unknown> | SandboxExecution;
+  approvals: DevAgentApprovalRecord[];
+  rationale: string[];
+  validated_at: string | null;
+  governance: Record<string, unknown>;
+}
+
+export interface DevAgentTask {
+  task_id: string;
+  feature_request_id: string;
+  title: string;
+  description: string;
+  priority: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  planner_notes: string[];
+  risk_score: number | null;
+  metadata: Record<string, unknown>;
+  proposals: DevAgentProposal[];
+}
+
+export interface DevAgentFeatureToggle {
+  stage?: string;
+  toggle: string;
+  status: string;
+}
+
+export interface DevAgentMetrics {
+  generated_at: string;
+  total_tasks: number;
+  triaged_tasks: number;
+  rollout_pending: number;
+  validated_proposals: number;
+  quality_gate_pass_rate: number;
+  velocity_per_day: number;
+  active_rollouts: number;
+  ci_workflows: string[];
+  feature_toggles: DevAgentFeatureToggle[];
+}
+
+export interface DevAgentProposalListResponse {
+  backlog: DevAgentTask[];
+  metrics: DevAgentMetrics;
+}
+
+export interface DevAgentApplyResponse {
+  proposal: DevAgentProposal;
+  task: DevAgentTask;
+  execution: SandboxExecution;
+  metrics: DevAgentMetrics;
 }

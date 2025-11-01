@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 
-from ..agents import AdaptiveAgentsOrchestrator, get_orchestrator
+from ..agents import MicrosoftAgentsOrchestrator, get_orchestrator
 from ..agents.graph_manager import GraphManagerAgent
 from ..agents.qa import QAAgent
 from ..agents.types import AgentThread, AgentTurn
@@ -62,6 +64,204 @@ _agents_failure_counter = _meter.create_counter(
     unit="1",
     description="Agent runs ending in failure",
 )
+
+_agents_policy_decisions_counter = _meter.create_counter(
+    "agents_policy_decisions_total",
+    unit="1",
+    description="Adaptive policy decisions evaluated for agent runs",
+)
+_agents_policy_reward_histogram = _meter.create_histogram(
+    "agents_policy_reward",
+    unit="1",
+    description="Reward adjustments applied to agent trust scores",
+)
+
+_COMPONENT_TO_ROLE = {
+    WorkflowComponent.STRATEGY: "strategy",
+    WorkflowComponent.INGESTION: "ingestion",
+    WorkflowComponent.RETRIEVAL: "research",
+    WorkflowComponent.GRAPH: "cocounsel",
+    WorkflowComponent.FORENSICS: "cocounsel",
+    WorkflowComponent.QA: "qa",
+}
+
+
+@dataclass(slots=True)
+class PolicyDecision:
+    enabled: bool
+    trust_snapshot: Dict[str, float]
+    suppressed_roles: List[str]
+    elevated_roles: List[str]
+    graph_overrides: Dict[str, List[str]]
+    exploration: bool
+    seed: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "trust": dict(self.trust_snapshot),
+            "suppressed_roles": list(self.suppressed_roles),
+            "elevated_roles": list(self.elevated_roles),
+            "graph_overrides": {k: list(v) for k, v in self.graph_overrides.items()},
+            "exploration": self.exploration,
+            "seed": self.seed,
+        }
+
+
+class AdaptivePolicyEngine:
+    """Observes telemetry and produces delegate graph policy decisions."""
+
+    def __init__(
+        self,
+        settings: Any,
+        *,
+        rng: Optional[random.Random] = None,
+    ) -> None:
+        self.enabled = bool(getattr(settings, "agents_policy_enabled", False))
+        self.initial_trust = float(getattr(settings, "agents_policy_initial_trust", 0.5))
+        self.trust_threshold = float(getattr(settings, "agents_policy_trust_threshold", 0.2))
+        self.decay = float(getattr(settings, "agents_policy_decay", 0.0))
+        self.success_reward = float(getattr(settings, "agents_policy_success_reward", 0.1))
+        self.failure_penalty = float(getattr(settings, "agents_policy_failure_penalty", 0.4))
+        self.exploration_probability = float(
+            getattr(settings, "agents_policy_exploration_probability", 0.0)
+        )
+        self.roles = tuple(
+            str(role) for role in getattr(settings, "agents_policy_observable_roles", ())
+        ) or ("strategy", "ingestion", "research", "cocounsel", "qa")
+        self.suppressible_roles = {
+            str(role)
+            for role in getattr(settings, "agents_policy_suppressible_roles", ())
+        }
+        self._seed: Optional[int] = getattr(settings, "agents_policy_seed", None)
+        self._rng = rng or random.Random(self._seed)
+        self._scores: Dict[str, float] = {
+            role: self.initial_trust for role in self.roles
+        }
+        self.last_decision: Optional[PolicyDecision] = None
+        self.last_observation: Dict[str, Any] | None = None
+
+    def state(self) -> Dict[str, float]:
+        return dict(self._scores)
+
+    def plan_run(
+        self,
+        case_id: str,
+        question: str,
+        telemetry: Dict[str, Any],
+    ) -> PolicyDecision:
+        if not self.enabled:
+            decision = PolicyDecision(
+                enabled=False,
+                trust_snapshot=self.state(),
+                suppressed_roles=[],
+                elevated_roles=[],
+                graph_overrides={},
+                exploration=False,
+                seed=self._seed,
+            )
+            telemetry.setdefault("policy", decision.to_dict())
+            self.last_decision = decision
+            return decision
+
+        trust_snapshot = self.state()
+        suppressed_roles = [
+            role
+            for role in self.suppressible_roles
+            if trust_snapshot.get(role, self.initial_trust) < self.trust_threshold
+        ]
+        exploration = False
+        elevated_roles: List[str] = []
+        if self.exploration_probability > 0 and self._rng.random() < self.exploration_probability:
+            exploration = True
+            eligible = [role for role in self.roles if role not in suppressed_roles]
+            if eligible:
+                choice = self._rng.choice(eligible)
+                elevated_roles.append(choice)
+                if choice in suppressed_roles:
+                    suppressed_roles.remove(choice)
+
+        graph_overrides: Dict[str, List[str]] = {}
+        if "cocounsel" in suppressed_roles:
+            graph_overrides["research"] = ["qa"]
+        if "ingestion" in suppressed_roles:
+            graph_overrides.setdefault("strategy", ["research"])
+
+        decision = PolicyDecision(
+            enabled=True,
+            trust_snapshot=trust_snapshot,
+            suppressed_roles=suppressed_roles,
+            elevated_roles=elevated_roles,
+            graph_overrides=graph_overrides,
+            exploration=exploration,
+            seed=self._seed,
+        )
+        telemetry.setdefault("policy", {}).update(decision.to_dict())
+        _agents_policy_decisions_counter.add(
+            1,
+            attributes={
+                "suppressed_count": len(suppressed_roles),
+                "exploration": exploration,
+            },
+        )
+        self.last_decision = decision
+        return decision
+
+    def observe_run(self, thread: AgentThread) -> Dict[str, Any]:
+        if not self.enabled:
+            snapshot = {role: self.initial_trust for role in self.roles}
+            self.last_observation = {"trust": snapshot, "rewards": {}}
+            return self.last_observation
+
+        rewards: Dict[str, float] = {}
+        failures = {
+            _COMPONENT_TO_ROLE.get(error.component)
+            for error in thread.errors
+            if _COMPONENT_TO_ROLE.get(error.component)
+        }
+        seen: set[str] = set()
+        for turn in thread.turns:
+            role = turn.role
+            if role not in self.roles or role in seen:
+                continue
+            seen.add(role)
+            outcome = "failed" if role in failures or turn.annotations.get("status") == "failed" else "success"
+            reward = self.success_reward if outcome == "success" else -self.failure_penalty
+            current = self._scores.get(role, self.initial_trust)
+            updated = max(0.0, (1.0 - self.decay) * current + reward)
+            self._scores[role] = updated
+            rewards[role] = reward
+            _agents_policy_reward_histogram.record(
+                reward,
+                attributes={"role": role, "outcome": outcome},
+            )
+
+        snapshot = self.state()
+        observation = {"trust": snapshot, "rewards": rewards}
+        self.last_observation = observation
+        return observation
+
+    def observe_failure(self, thread: AgentThread, error: WorkflowError) -> Dict[str, Any]:
+        if not self.enabled:
+            snapshot = {role: self.initial_trust for role in self.roles}
+            self.last_observation = {"trust": snapshot, "rewards": {}}
+            return self.last_observation
+        role = _COMPONENT_TO_ROLE.get(error.component)
+        rewards: Dict[str, float] = {}
+        if role:
+            current = self._scores.get(role, self.initial_trust)
+            reward = -self.failure_penalty
+            updated = max(0.0, (1.0 - self.decay) * current + reward)
+            self._scores[role] = updated
+            rewards[role] = reward
+            _agents_policy_reward_histogram.record(
+                reward,
+                attributes={"role": role, "outcome": "failed"},
+            )
+        snapshot = self.state()
+        observation = {"trust": snapshot, "rewards": rewards, "last_failure": error.code}
+        self.last_observation = observation
+        return observation
 
 
 def _now() -> datetime:
@@ -134,10 +334,11 @@ class AgentsService:
         memory_store: AgentMemoryStore | None = None,
         document_store: DocumentStore | None = None,
         qa_agent: QAAgent | None = None,
-        orchestrator: AdaptiveAgentsOrchestrator | None = None,
+        orchestrator: MicrosoftAgentsOrchestrator | None = None,
         graph_service: GraphService | None = None,
         timeline_store: TimelineStore | None = None,
         graph_agent: GraphManagerAgent | None = None,
+        policy_engine: AdaptivePolicyEngine | None = None,
     ) -> None:
         self.settings = get_settings()
         self.retrieval_service = retrieval_service or get_retrieval_service()
@@ -159,6 +360,7 @@ class AgentsService:
             self.memory_store,
             self.graph_agent,
         )
+        self.policy_engine = policy_engine or AdaptivePolicyEngine(self.settings)
         self.audit = get_audit_trail()
         self.retry_attempts = max(1, self.settings.agent_retry_attempts)
         self.retry_backoff_ms = max(0, self.settings.agent_retry_backoff_ms)
@@ -201,6 +403,8 @@ class AgentsService:
             telemetry_context["autonomy_level"] = autonomy_level
         else:
             telemetry_context["autonomy_level"] = self.default_autonomy_level
+        policy_decision: PolicyDecision | None = None
+        policy_decision = self.policy_engine.plan_run(case_id, question, telemetry_context)
         self._audit_agents_event(
             action="agents.thread.created",
             outcome="accepted",
@@ -247,6 +451,7 @@ class AgentsService:
                     telemetry=telemetry_context,
                     autonomy_level=telemetry_context["autonomy_level"],
                     max_turns=max_turns or self.default_max_turns,
+                    policy_state=policy_decision.to_dict() if policy_decision else None,
                 )
                 if result_thread.status in {"", "pending"}:
                     if result_thread.errors:
@@ -258,8 +463,14 @@ class AgentsService:
                     notes = result_thread.telemetry.setdefault("notes", [])
                     notes.append("Recovered from intermediate agent failures during execution.")
                 result_thread.updated_at = _now()
+                policy_updates = self.policy_engine.observe_run(result_thread)
+                policy_payload = telemetry_context.setdefault("policy", {})
+                self._merge_policy_updates(policy_payload, policy_decision.to_dict() if policy_decision else {})
+                self._merge_policy_updates(policy_payload, policy_updates)
+                self._merge_policy_updates(result_thread.telemetry.setdefault("policy", {}), policy_payload)
                 duration_ms = (time.perf_counter() - run_started) * 1000.0
                 attributes = {"status": result_thread.status}
+                attributes.update(self._policy_metric_attributes(policy_decision))
                 _agents_run_duration.record(duration_ms, attributes=attributes)
                 _agents_runs_counter.add(1, attributes=attributes)
                 _agents_turn_counter.add(len(result_thread.turns), attributes=attributes)
@@ -288,10 +499,13 @@ class AgentsService:
             except WorkflowException as exc:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, description=str(exc.error.message)))
-                _agents_runs_counter.add(
-                    1,
-                    attributes={"status": "failed", "component": exc.error.component.value},
-                )
+                policy_updates = self.policy_engine.observe_failure(thread, exc.error)
+                policy_payload = telemetry_context.setdefault("policy", {})
+                self._merge_policy_updates(policy_payload, policy_decision.to_dict() if policy_decision else {})
+                self._merge_policy_updates(policy_payload, policy_updates)
+                attributes = {"status": "failed", "component": exc.error.component.value}
+                attributes.update(self._policy_metric_attributes(policy_decision))
+                _agents_runs_counter.add(1, attributes=attributes)
                 _agents_failure_counter.add(1, attributes={"component": exc.error.component.value})
                 self._handle_failure(thread, actor, telemetry_context, exc.error)
                 raise
@@ -299,12 +513,18 @@ class AgentsService:
                 span.record_exception(exc)
                 span.set_status(Status(StatusCode.ERROR, description=str(exc)))
                 component = WorkflowComponent.ORCHESTRATOR
-                _agents_runs_counter.add(1, attributes={"status": "failed", "component": component.value})
+                attributes = {"status": "failed", "component": component.value}
+                attributes.update(self._policy_metric_attributes(policy_decision))
+                _agents_runs_counter.add(1, attributes=attributes)
                 _agents_failure_counter.add(1, attributes={"component": component.value})
                 error = self._classify_exception(component, exc, 1)
                 if error not in thread.errors:
                     thread.errors.append(error)
                 telemetry_context.setdefault("errors", []).append(error.to_dict())
+                policy_updates = self.policy_engine.observe_failure(thread, error)
+                policy_payload = telemetry_context.setdefault("policy", {})
+                self._merge_policy_updates(policy_payload, policy_decision.to_dict() if policy_decision else {})
+                self._merge_policy_updates(policy_payload, policy_updates)
                 self._handle_failure(thread, actor, telemetry_context, error)
                 raise WorkflowAbort(error, status_code=http_status_for_error(error)) from exc
 
@@ -327,6 +547,14 @@ class AgentsService:
             "sequence_valid": False,
             "hand_offs": [],
             "autonomy_level": self.default_autonomy_level,
+            "policy": {
+                "enabled": self.policy_engine.enabled,
+                "trust": self.policy_engine.state() if self.policy_engine.enabled else {},
+                "suppressed_roles": [],
+                "elevated_roles": [],
+                "graph_overrides": {},
+                "exploration": False,
+            },
         }
 
     def _normalise_thread_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -338,7 +566,30 @@ class AgentsService:
         telemetry.setdefault("errors", [])
         telemetry.setdefault("retries", {})
         telemetry.setdefault("backoff_ms", {})
+        telemetry.setdefault("policy", {"enabled": self.policy_engine.enabled})
         return payload
+
+    def _policy_metric_attributes(self, decision: PolicyDecision | None) -> Dict[str, Any]:
+        if decision is None or not decision.enabled:
+            return {"policy_enabled": False}
+        suppressed = ",".join(sorted(decision.suppressed_roles)) if decision.suppressed_roles else "none"
+        return {
+            "policy_enabled": True,
+            "policy_suppressed": suppressed,
+            "policy_exploration": decision.exploration,
+        }
+
+    @staticmethod
+    def _merge_policy_updates(target: Dict[str, Any], updates: Dict[str, Any] | None) -> None:
+        if not updates:
+            return
+        rewards = updates.get("rewards")
+        if isinstance(rewards, dict):
+            target.setdefault("rewards", {}).update(rewards)
+        for key, value in updates.items():
+            if key == "rewards":
+                continue
+            target[key] = value
 
     def _run_with_resilience(
         self,

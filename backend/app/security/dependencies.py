@@ -392,6 +392,22 @@ authorize_knowledge_write = _dependency(
     allowed_roles=["ResearchAnalyst", "CaseCoordinator"],
 )
 
+authorize_settings_read = _dependency(
+    resource_name="settings.read",
+    action="settings:read",
+    audience=settings.security_audience_settings,
+    required_scopes=["settings:read"],
+    allowed_roles=["PlatformEngineer"],
+)
+
+authorize_settings_write = _dependency(
+    resource_name="settings.write",
+    action="settings:write",
+    audience=settings.security_audience_settings,
+    required_scopes=["settings:write"],
+    allowed_roles=["PlatformEngineer"],
+)
+
 
 def reset_security_caches() -> None:
     _get_oauth_validator.cache_clear()

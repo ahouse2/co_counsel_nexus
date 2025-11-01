@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -29,6 +29,8 @@ class ProposalApplicationResult:
     proposal: PatchProposalRecord
     task: ImprovementTaskRecord
     execution: SandboxExecutionResult
+    regression_gate: Dict[str, Any]
+    rollout_plan: Dict[str, Any] | None
 
 
 class DevAgentService:
@@ -105,8 +107,15 @@ class DevAgentService:
     def apply_proposal(self, proposal_id: str, principal: Principal) -> ProposalApplicationResult:
         task, proposal = self._locate_proposal(proposal_id)
         execution = self.agent.validate_proposal(proposal)
-        proposal.validation = execution.to_json()
+        regression_gate = self._build_regression_gate(execution)
+        validated_at = _utcnow() if execution.success else None
+        validation_payload = execution.to_json()
+        validation_payload["status"] = "validated" if execution.success else "failed"
+        validation_payload["validated_at"] = validated_at.isoformat() if validated_at else None
+        validation_payload["regression_gate"] = regression_gate
+        proposal.validation = validation_payload
         proposal.status = "validated" if execution.success else "failed"
+        proposal.validated_at = validated_at
         proposal.approvals.append(
             {
                 "actor": {
@@ -118,7 +127,17 @@ class DevAgentService:
                 "outcome": proposal.status,
             }
         )
-        task.status = "approved" if execution.success else "needs_revision"
+        rollout_plan: Dict[str, Any] | None = None
+        if execution.success:
+            rollout_plan = self._schedule_rollout(task, principal, validated_at)
+            proposal.governance = {
+                "regression_gate": regression_gate,
+                "rollout": rollout_plan,
+            }
+            task.status = "rollout_pending"
+        else:
+            proposal.governance = {"regression_gate": regression_gate}
+            task.status = "needs_revision"
         self.memory_store.update_task(task)
         self._audit_application(principal, task, proposal, execution)
         if not execution.success:
@@ -127,10 +146,79 @@ class DevAgentService:
                 detail={
                     "proposal_id": proposal.proposal_id,
                     "status": proposal.status,
+                    "workspace_id": execution.workspace_id,
+                    "success": execution.success,
                     "commands": [command.to_json() for command in execution.commands],
                 },
             )
-        return ProposalApplicationResult(proposal=proposal, task=task, execution=execution)
+        return ProposalApplicationResult(
+            proposal=proposal,
+            task=task,
+            execution=execution,
+            regression_gate=regression_gate,
+            rollout_plan=rollout_plan,
+        )
+
+    def metrics(self) -> Dict[str, Any]:
+        tasks = self.list_backlog()
+        now = _utcnow()
+        proposals = [proposal for task in tasks for proposal in task.proposals]
+        validated = [proposal for proposal in proposals if proposal.status == "validated"]
+        total_runs = [
+            proposal
+            for proposal in proposals
+            if isinstance(proposal.validation, dict) and "success" in proposal.validation
+        ]
+        passed = [
+            proposal
+            for proposal in proposals
+            if isinstance(proposal.validation, dict) and bool(proposal.validation.get("success"))
+        ]
+        window_start = now - timedelta(days=7)
+        recent_validated = [
+            proposal
+            for proposal in validated
+            if proposal.validated_at and proposal.validated_at >= window_start
+        ]
+        velocity = len(recent_validated) / 7.0 if recent_validated else 0.0
+        pass_rate = (len(passed) / len(total_runs)) if total_runs else 0.0
+        rollout_candidates = 0
+        active_toggles: List[Dict[str, Any]] = []
+        for proposal in proposals:
+            governance = proposal.governance if isinstance(proposal.governance, dict) else {}
+            rollout = governance.get("rollout") if governance else None
+            if isinstance(rollout, dict):
+                stages = rollout.get("stages")
+                if isinstance(stages, list):
+                    stage_active = False
+                    for stage in stages:
+                        if not isinstance(stage, dict):
+                            continue
+                        status = str(stage.get("status", "")).lower()
+                        toggle_name = stage.get("toggle")
+                        if status not in {"complete", "completed"} and toggle_name:
+                            stage_active = True
+                            active_toggles.append(
+                                {
+                                    "stage": stage.get("name") or stage.get("stage"),
+                                    "toggle": toggle_name,
+                                    "status": status or "pending",
+                                }
+                            )
+                    if stage_active:
+                        rollout_candidates += 1
+        return {
+            "generated_at": now.isoformat(),
+            "total_tasks": len(tasks),
+            "triaged_tasks": sum(1 for task in tasks if task.status == "triaged"),
+            "rollout_pending": sum(1 for task in tasks if task.status == "rollout_pending"),
+            "validated_proposals": len(validated),
+            "quality_gate_pass_rate": round(pass_rate, 4),
+            "velocity_per_day": round(velocity, 4),
+            "active_rollouts": rollout_candidates,
+            "ci_workflows": list(self.settings.dev_agent_ci_workflows),
+            "feature_toggles": active_toggles,
+        }
 
     def _locate_proposal(self, proposal_id: str) -> Tuple[ImprovementTaskRecord, PatchProposalRecord]:
         for task in self.list_backlog():
@@ -169,6 +257,53 @@ class DevAgentService:
             },
         )
         self.audit.append(event)
+
+    def _build_regression_gate(self, execution: SandboxExecutionResult) -> Dict[str, Any]:
+        failed = [command.to_json() for command in execution.commands if command.return_code != 0]
+        status_value = "passed" if execution.success else "failed"
+        workflows = []
+        for workflow in self.settings.dev_agent_ci_workflows:
+            workflows.append(
+                {
+                    "workflow": workflow,
+                    "status": "scheduled" if execution.success else "blocked",
+                    "trigger": f"gh workflow run {workflow}",
+                }
+            )
+        return {
+            "status": status_value,
+            "failed_commands": failed,
+            "ci_workflows": workflows,
+        }
+
+    def _schedule_rollout(
+        self,
+        task: ImprovementTaskRecord,
+        principal: Principal,
+        validated_at: datetime | None,
+    ) -> Dict[str, Any]:
+        prefix = self.settings.dev_agent_feature_flag_prefix
+        stages: List[Dict[str, Any]] = []
+        for index, stage in enumerate(self.settings.dev_agent_rollout_stages):
+            toggle_name = f"{prefix}.{task.feature_request_id}.{stage}"
+            stages.append(
+                {
+                    "name": stage,
+                    "toggle": toggle_name,
+                    "status": "ready" if index == 0 else "pending",
+                    "activated_at": None,
+                }
+            )
+        return {
+            "policy_version": self.settings.dev_agent_governance_policy_version,
+            "created_at": (validated_at or _utcnow()).isoformat(),
+            "feature_request_id": task.feature_request_id,
+            "scheduled_by": {
+                "client_id": principal.client_id,
+                "subject": principal.subject,
+            },
+            "stages": stages,
+        }
 
 
 _dev_agent_service: DevAgentService | None = None

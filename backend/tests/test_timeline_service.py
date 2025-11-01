@@ -75,10 +75,15 @@ def test_timeline_service_enriches_metadata(monkeypatch: pytest.MonkeyPatch, tim
     assert result.events[0].entity_highlights
     assert result.events[0].relation_tags
     assert result.events[0].confidence is not None
+    assert result.events[0].risk_score is not None
+    assert result.events[0].outcome_probabilities
+    assert result.events[0].recommended_actions
 
     persisted = timeline_store.read_all()
     assert persisted[0].entity_highlights
     assert persisted[0].relation_tags
+    assert persisted[0].risk_score is not None
+    assert persisted[0].outcome_probabilities
 
     assert query_counter.calls
     assert enrichment_counter.calls[0][0] >= 1
