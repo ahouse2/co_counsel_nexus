@@ -4,6 +4,7 @@ import base64
 import json
 import importlib
 import os
+import types
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +22,34 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# Ensure tests can run without the optional ``oso`` dependency installed by
+# providing a local stub. The stub mirrors the tiny surface required by the
+# authorization service but is only registered for the test session so
+# production environments resolve the real package.
+try:  # pragma: no cover - exercised via import side-effects
+    importlib.import_module("oso")
+except ModuleNotFoundError:  # pragma: no cover - fallback for test envs
+    stub = types.ModuleType("oso")
+
+    class Oso:  # type: ignore[too-many-ancestors]
+        def __init__(self) -> None:
+            self._registered: list[type] = []
+            self._policies: list[str] = []
+
+        def register_class(self, cls: type) -> None:  # noqa: D401 - simple stub
+            """Record the registered class for inspection in tests."""
+            self._registered.append(cls)
+
+        def load_files(self, paths: Iterable[str]) -> None:  # noqa: D401 - stub
+            """Record the policy paths for inspection in tests."""
+            self._policies.extend(paths)
+
+        def is_allowed(self, principal: object, action: str, resource: object) -> bool:
+            raise RuntimeError("Authorization checks require the real 'oso' package in tests")
+
+    stub.Oso = Oso
+    sys.modules["oso"] = stub
 
 from fastapi.testclient import TestClient  # noqa: E402
 
