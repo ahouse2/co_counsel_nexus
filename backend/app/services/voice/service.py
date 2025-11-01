@@ -340,9 +340,17 @@ class VoiceService:
 
                 session_id = uuid4().hex
                 now = datetime.now(timezone.utc)
+                resolved_thread_id = thread_payload.get("thread_id")
+                if resolved_thread_id is None and thread_id is not None:
+                    resolved_thread_id = thread_id
+                if isinstance(resolved_thread_id, str):
+                    resolved_thread_id = resolved_thread_id.strip() or None
+                elif resolved_thread_id is not None:
+                    resolved_thread_id = str(resolved_thread_id)
+
                 session = VoiceSession(
                     session_id=session_id,
-                    thread_id=str(thread_payload.get("thread_id")),
+                    thread_id=resolved_thread_id,
                     case_id=case_id,
                     persona_id=persona_id,
                     transcript=transcript.text,
@@ -519,7 +527,11 @@ class VoiceService:
             "tone": session.persona_directive.get("tone", "balanced"),
             "language": session.translation.get("target_language", "en"),
         }
-        record = AgentThreadRecord(thread_id=session.thread_id, payload=payload)
+        target_thread_id = session.thread_id or source_thread_id
+        if not target_thread_id:
+            return
+
+        record = AgentThreadRecord(thread_id=str(target_thread_id), payload=payload)
         self.agents_service.memory_store.write(record)
 
     def _build_persona_directive(
