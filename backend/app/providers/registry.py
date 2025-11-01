@@ -4,7 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Mapping, MutableMapping, Sequence
+from typing import Dict, Mapping, MutableMapping, Sequence, Tuple, TypeVar
+
+
+_KT = TypeVar("_KT")
+_VT = TypeVar("_VT")
 
 from .catalog import MODEL_CATALOG, ModelInfo, ProviderCapability
 
@@ -279,7 +283,33 @@ class ProviderRegistry:
         return ProviderResolution(provider=adapter, model=models[0])
 
 
+def _freeze_mapping_items(mapping: Mapping[_KT, _VT]) -> Tuple[Tuple[_KT, _VT], ...]:
+    """Return a hashable, deterministically ordered view of a mapping's items."""
+
+    if not mapping:
+        return ()
+    return tuple(sorted(mapping.items(), key=lambda item: repr(item[0])))
+
+
 @lru_cache(maxsize=1)
+def _get_cached_provider_registry(
+    primary_provider: str,
+    secondary_provider: str | None,
+    api_base_urls_items: Tuple[Tuple[str, str], ...],
+    runtime_paths_items: Tuple[Tuple[str, Path], ...],
+    model_overrides_items: Tuple[Tuple[ProviderCapability, str | None], ...] | None,
+) -> ProviderRegistry:
+    return ProviderRegistry(
+        primary_provider=primary_provider,
+        secondary_provider=secondary_provider,
+        api_base_urls=dict(api_base_urls_items),
+        runtime_paths=dict(runtime_paths_items),
+        model_overrides=(
+            dict(model_overrides_items) if model_overrides_items is not None else None
+        ),
+    )
+
+
 def get_provider_registry(
     *,
     primary_provider: str,
@@ -290,19 +320,19 @@ def get_provider_registry(
 ) -> ProviderRegistry:
     """Return a cached provider registry."""
 
-    return ProviderRegistry(
-        primary_provider=primary_provider,
-        secondary_provider=secondary_provider,
-        api_base_urls=api_base_urls,
-        runtime_paths=runtime_paths,
-        model_overrides=model_overrides,
+    return _get_cached_provider_registry(
+        primary_provider,
+        secondary_provider,
+        _freeze_mapping_items(api_base_urls),
+        _freeze_mapping_items(runtime_paths),
+        _freeze_mapping_items(model_overrides) if model_overrides is not None else None,
     )
 
 
 def reset_provider_registry_cache() -> None:
     """Clear the cached provider registry factory."""
 
-    get_provider_registry.cache_clear()
+    _get_cached_provider_registry.cache_clear()
 
 
 __all__ = [
