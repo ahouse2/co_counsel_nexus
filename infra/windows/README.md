@@ -23,7 +23,7 @@ powershell -File .\infra\windows\scripts\install.ps1 -RepoUrl "https://github.co
 Key behaviors:
 
 1. Ensures `git`, `python` (3.11), and `npm` are present. Missing tools are installed via `winget`.
-2. Clones or updates the repository under `%LOCALAPPDATA%\CoCounselNexus` by default.
+2. Prompts for an installation directory (defaulting to `%LOCALAPPDATA%\CoCounselNexus`) when run interactively.
 3. Creates a Python virtual environment and installs backend requirements via `uv`.
 4. Installs and builds the Vite/React frontend.
 5. Generates a `Start-CoCounsel.ps1` launcher that opens the backend API, frontend UI,
@@ -36,6 +36,11 @@ Override parameters as needed:
 ```powershell
 powershell -File .\infra\windows\scripts\install.ps1 -InstallDir "D:\Apps\CoCounsel" -RepoUrl "https://github.com/example/NinthOctopusMitten.git" -Branch "develop"
 ```
+
+When packaged as a `.exe`, double-clicking the installer surfaces the same directory picker,
+allowing the end user to choose any writable destination. Advanced users can still pass
+`-InstallDir` and the other parameters from an elevated PowerShell prompt by invoking the
+generated executable with standard command-line arguments.
 
 ## Building a Single-File `.exe`
 

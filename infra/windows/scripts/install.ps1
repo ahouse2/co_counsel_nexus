@@ -12,6 +12,48 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-InstallDirectory {
+    param(
+        [string]$DefaultPath,
+        [bool]$ParameterProvided
+    )
+
+    $normalizedDefault = if ([string]::IsNullOrWhiteSpace($DefaultPath)) {
+        "$env:LOCALAPPDATA\CoCounselNexus"
+    } else {
+        $DefaultPath
+    }
+
+    if ($ParameterProvided -or -not [Environment]::UserInteractive) {
+        return $normalizedDefault
+    }
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        try { Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue } catch { }
+        [System.Windows.Forms.Application]::EnableVisualStyles()
+
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = "Select the folder where Co-Counsel Nexus should be installed."
+        $dialog.SelectedPath = $normalizedDefault
+        $dialog.ShowNewFolderButton = $true
+
+        $result = $dialog.ShowDialog()
+        if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $dialog.SelectedPath) {
+            return $dialog.SelectedPath
+        }
+
+        if ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
+            throw [System.OperationCanceledException]::new("Installation cancelled by user.")
+        }
+    }
+    catch {
+        Write-Verbose "Falling back to default install directory: $($_.Exception.Message)"
+    }
+
+    return $normalizedDefault
+}
+
 function Write-InstallStep {
     param(
         [string]$Message
@@ -84,6 +126,15 @@ function Invoke-Process {
 }
 
 Write-InstallStep "Preparing Co-Counsel Nexus installation..."
+
+$installDirParamProvided = $PSBoundParameters.ContainsKey('InstallDir')
+try {
+    $InstallDir = Resolve-InstallDirectory -DefaultPath $InstallDir -ParameterProvided:$installDirParamProvided
+}
+catch [System.OperationCanceledException] {
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    return
+}
 
 $requiredPackages = @(
     @{ Command = "git"; WingetId = "Git.Git"; Name = "Git" },
