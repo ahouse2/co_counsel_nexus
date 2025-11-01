@@ -331,6 +331,10 @@ def test_stream_result_generates_events(
         has_next=False,
         mode=retrieval_module.RetrievalMode.PRECISION,
         reranker="rrf",
+        llm_provider="openai",
+        llm_model="gpt-test",
+        embedding_provider="openai",
+        embedding_model="text-embedding-test",
     )
     result = retrieval_module.QueryResult(
         answer="Segmented answer",

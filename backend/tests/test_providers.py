@@ -95,3 +95,21 @@ def test_registry_ignores_missing_override_but_keeps_capability() -> None:
         for model in registry.get_adapter(resolution.provider.provider_id).list_vision_models()
     }
 
+
+def test_gemini_catalog_includes_latest_models() -> None:
+    registry = get_provider_registry()
+    gemini_adapter = registry.get_adapter("gemini")
+
+    chat_models = {model.model_id for model in gemini_adapter.list_chat_models()}
+
+    assert {"gemini-2.5-flash", "gemini-2.5-pro"}.issubset(chat_models)
+
+
+def test_openai_catalog_includes_gpt5() -> None:
+    registry = get_provider_registry()
+    openai_adapter = registry.get_adapter("openai")
+
+    chat_models = {model.model_id for model in openai_adapter.list_chat_models()}
+
+    assert "gpt-5.0" in chat_models
+

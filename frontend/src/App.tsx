@@ -4,7 +4,7 @@ import { TimelineView } from '@/components/TimelineView';
 import { KnowledgeHub } from '@/components/KnowledgeHub';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { RetrievalSettings } from '@/components/RetrievalSettings';
+import { SettingsPanel } from '@/components/SettingsPanel';
 import { DevTeamSection } from '@/components/dev-team';
 import { CinematicMetrics } from '@/components/CinematicMetrics';
 import { EvidenceUploadZone } from '@/components/EvidenceUploadZone';
@@ -95,7 +95,7 @@ function App(): JSX.Element {
           </div>
         </div>
         <div className="header-actions">
-          <RetrievalSettings />
+          <SettingsPanel />
           <ThemeToggle />
           <OfflineIndicator />
         </div>

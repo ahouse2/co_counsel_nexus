@@ -45,6 +45,11 @@ api:
   replicas: 2
   resources: {}
   env:
+    MODEL_PROVIDERS_PRIMARY: gemini
+    MODEL_PROVIDERS_SECONDARY: openai
+    DEFAULT_CHAT_MODEL: gemini-2.5-flash
+    DEFAULT_EMBEDDING_MODEL: text-embedding-004
+    DEFAULT_VISION_MODEL: gemini-2.5-flash
     TELEMETRY_ENABLED: "true"
     TELEMETRY_OTLP_ENDPOINT: ""
     TELEMETRY_OTLP_INSECURE: "true"
