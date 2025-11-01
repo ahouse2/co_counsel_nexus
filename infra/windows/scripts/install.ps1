@@ -7,15 +7,25 @@ param(
     [string]$RepoUrl = "https://github.com/NinthOctopusMitten/NinthOctopusMitten.git",
 
     [Parameter(Mandatory = $false)]
-    [string]$Branch = "main"
+    [string]$Branch = "main",
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Interactive,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$LaunchOnComplete
 )
 
 $ErrorActionPreference = "Stop"
 
+$script:InstallLogFile = $null
+$script:HostIsInteractive = [Environment]::UserInteractive
+
 function Resolve-InstallDirectory {
     param(
         [string]$DefaultPath,
-        [bool]$ParameterProvided
+        [bool]$ParameterProvided,
+        [switch]$AllowPrompt
     )
 
     $normalizedDefault = if ([string]::IsNullOrWhiteSpace($DefaultPath)) {
@@ -24,7 +34,7 @@ function Resolve-InstallDirectory {
         $DefaultPath
     }
 
-    if ($ParameterProvided -or -not [Environment]::UserInteractive) {
+    if ($ParameterProvided -or -not $AllowPrompt.IsPresent) {
         return $normalizedDefault
     }
 
@@ -88,10 +98,26 @@ function Resolve-InstallDirectory {
 
 function Write-InstallStep {
     param(
-        [string]$Message
+        [string]$Message,
+        [ValidateSet('Info','Warn','Error')]
+        [string]$Level = 'Info'
     )
     $timestamp = (Get-Date).ToString("u")
-    Write-Host "[$timestamp] $Message" -ForegroundColor Cyan
+    $line = "[$timestamp] [$Level] $Message"
+
+    $color = switch ($Level) {
+        'Warn'  { 'Yellow' }
+        'Error' { 'Red' }
+        default { 'Cyan' }
+    }
+
+    if ($script:HostIsInteractive) {
+        Write-Host $line -ForegroundColor $color
+    }
+
+    if ($script:InstallLogFile) {
+        Add-Content -Path $script:InstallLogFile -Value $line
+    }
 }
 
 function Ensure-CommandExists {
@@ -124,36 +150,61 @@ function Invoke-Process {
     param(
         [string]$FilePath,
         [string[]]$Arguments,
-        [string]$WorkingDirectory = $null
+        [string]$WorkingDirectory = $null,
+        [string]$Description = $null
     )
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = [string]::Join(' ', $Arguments)
+    $displayName = if ($Description) { $Description } else { "$FilePath $($Arguments -join ' ')" }
+    Write-InstallStep "Running $displayName"
+
+    $previousLocation = (Get-Location).Path
     if ($WorkingDirectory) {
-        $psi.WorkingDirectory = $WorkingDirectory
-    }
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $psi
-
-    $null = $process.Start()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $stderr = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
-
-    if ($process.ExitCode -ne 0) {
-        throw "Command '$FilePath $($Arguments -join ' ') ' failed with exit code $($process.ExitCode). Error: $stderr"
+        Push-Location $WorkingDirectory
     }
 
-    if ($stdout) {
-        Write-Verbose $stdout
+    try {
+        $output = & $FilePath @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+
+        if ($output) {
+            if ($script:InstallLogFile) {
+                Add-Content -Path $script:InstallLogFile -Value $output
+            }
+            Write-Verbose ($output -join [Environment]::NewLine)
+        }
+
+        if ($exitCode -ne 0) {
+            throw "Command '$FilePath' exited with code $exitCode"
+        }
     }
-    if ($stderr) {
-        Write-Verbose $stderr
+    finally {
+        if ($WorkingDirectory) {
+            Pop-Location
+        }
+        Set-Location -Path $previousLocation
+    }
+}
+
+function Show-MessageBox {
+    param(
+        [string]$Message,
+        [string]$Title,
+        [ValidateSet('Information','Error')]
+        [string]$Icon = 'Information'
+    )
+
+    if (-not [Environment]::UserInteractive) {
+        return
+    }
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+        $iconEnum = [System.Windows.Forms.MessageBoxIcon]::$Icon
+        [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, $iconEnum) | Out-Null
+    }
+    catch {
+        # Swallow errors when message box support is unavailable (e.g., server core).
     }
 }
 
@@ -161,7 +212,7 @@ Write-InstallStep "Preparing Co-Counsel Nexus installation..."
 
 $installDirParamProvided = $PSBoundParameters.ContainsKey('InstallDir')
 try {
-    $InstallDir = Resolve-InstallDirectory -DefaultPath $InstallDir -ParameterProvided:$installDirParamProvided
+    $InstallDir = Resolve-InstallDirectory -DefaultPath $InstallDir -ParameterProvided:$installDirParamProvided -AllowPrompt:$Interactive
 }
 catch [System.OperationCanceledException] {
     Write-Host $_.Exception.Message -ForegroundColor Yellow
@@ -188,45 +239,47 @@ New-Item -ItemType Directory -Path $resolvedInstallDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
 $logFile = Join-Path $logDir "install.log"
+$script:InstallLogFile = $logFile
 "Installation started at $(Get-Date -Format u)" | Out-File -FilePath $logFile -Encoding utf8
 
-if (Test-Path $repoDir) {
-    Write-InstallStep "Repository already exists. Pulling latest changes..."
-    Push-Location $repoDir
-    try {
-        Invoke-Process -FilePath "git" -Arguments @("fetch", "origin")
-        Invoke-Process -FilePath "git" -Arguments @("checkout", $Branch)
-        Invoke-Process -FilePath "git" -Arguments @("pull", "origin", $Branch)
+try {
+    if (Test-Path $repoDir) {
+        Write-InstallStep "Repository already exists. Pulling latest changes..."
+        Push-Location $repoDir
+        try {
+            Invoke-Process -FilePath "git" -Arguments @("fetch", "origin") -Description "git fetch origin"
+            Invoke-Process -FilePath "git" -Arguments @("checkout", $Branch) -Description "git checkout $Branch"
+            Invoke-Process -FilePath "git" -Arguments @("pull", "origin", $Branch) -Description "git pull origin $Branch"
+        }
+        finally {
+            Pop-Location
+        }
     }
-    finally {
-        Pop-Location
+    else {
+        Write-InstallStep "Cloning repository from $RepoUrl (branch $Branch)"
+        Invoke-Process -FilePath "git" -Arguments @("clone", "--depth", "1", "--branch", $Branch, $RepoUrl, $repoDir) -Description "git clone $RepoUrl"
     }
-}
-else {
-    Write-InstallStep "Cloning repository from $RepoUrl (branch $Branch)"
-    Invoke-Process -FilePath "git" -Arguments @("clone", "--depth", "1", "--branch", $Branch, $RepoUrl, $repoDir)
-}
 
-$pythonExe = (Get-Command python).Source
-Write-InstallStep "Bootstrapping Python virtual environment"
-Invoke-Process -FilePath $pythonExe -Arguments @("-m", "venv", $venvDir)
-$venvPython = Join-Path $venvDir "Scripts\python.exe"
+    $pythonExe = (Get-Command python).Source
+    Write-InstallStep "Bootstrapping Python virtual environment"
+    Invoke-Process -FilePath $pythonExe -Arguments @("-m", "venv", $venvDir) -Description "python -m venv"
+    $venvPython = Join-Path $venvDir "Scripts\python.exe"
 
-Write-InstallStep "Upgrading pip and installing backend dependencies"
-Invoke-Process -FilePath $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip", "wheel", "uv")
-Invoke-Process -FilePath $venvPython -Arguments @("-m", "uv", "pip", "install", "-r", "backend/requirements.txt") -WorkingDirectory $repoDir
+    Write-InstallStep "Upgrading pip and installing backend dependencies"
+    Invoke-Process -FilePath $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip", "wheel", "uv") -Description "pip install tooling"
+    Invoke-Process -FilePath $venvPython -Arguments @("-m", "uv", "pip", "install", "-r", "backend/requirements.txt") -WorkingDirectory $repoDir -Description "uv pip install -r backend/requirements.txt"
 
-$frontendDir = Join-Path $repoDir "frontend"
-Write-InstallStep "Installing frontend dependencies"
-Invoke-Process -FilePath "npm" -Arguments @("install") -WorkingDirectory $frontendDir
+    $frontendDir = Join-Path $repoDir "frontend"
+    Write-InstallStep "Installing frontend dependencies"
+    Invoke-Process -FilePath "npm" -Arguments @("install") -WorkingDirectory $frontendDir -Description "npm install"
 
-Write-InstallStep "Building frontend bundle"
-Invoke-Process -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory $frontendDir
+    Write-InstallStep "Building frontend bundle"
+    Invoke-Process -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory $frontendDir -Description "npm run build"
 
-$startScriptPath = Join-Path $resolvedInstallDir "Start-CoCounsel.ps1"
-$backendScript = "`"$venvDir\Scripts\Activate.ps1`"; Set-Location `"$repoDir\backend`"; uvicorn app.main:app --host 127.0.0.1 --port 8000"
-$frontendScript = "Set-Location `"$frontendDir`"; npm run dev -- --host 127.0.0.1 --port 5173"
-$startScript = @"
+    $startScriptPath = Join-Path $resolvedInstallDir "Start-CoCounsel.ps1"
+    $backendScript = "`"$venvDir\Scripts\Activate.ps1`"; Set-Location `"$repoDir\backend`"; uvicorn app.main:app --host 127.0.0.1 --port 8000"
+    $frontendScript = "Set-Location `"$frontendDir`"; npm run dev -- --host 127.0.0.1 --port 5173"
+    $startScript = @"
 Write-Host "Launching Co-Counsel Nexus services..." -ForegroundColor Cyan
 Start-Process -FilePath powershell.exe -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-Command',"$backendScript"
 Start-Sleep -Seconds 5
@@ -234,29 +287,43 @@ Start-Process -FilePath powershell.exe -ArgumentList '-NoExit','-ExecutionPolicy
 Start-Sleep -Seconds 10
 Start-Process "http://localhost:5173"
 "@
-$startScript | Out-File -FilePath $startScriptPath -Encoding utf8 -Force
+    $startScript | Out-File -FilePath $startScriptPath -Encoding utf8 -Force
 
-Write-InstallStep "Creating desktop shortcut"
-$shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) "Co-Counsel Nexus.lnk"
-$wsh = New-Object -ComObject WScript.Shell
-$shortcut = $wsh.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = "powershell.exe"
-$shortcut.Arguments = "-ExecutionPolicy Bypass -File `"$startScriptPath`""
-$shortcut.WorkingDirectory = $resolvedInstallDir
-$shortcut.WindowStyle = 1
-$shortcut.IconLocation = "powershell.exe,0"
-$shortcut.Description = "Launch Co-Counsel Nexus"
-$shortcut.Save()
+    Write-InstallStep "Creating desktop shortcut"
+    $shortcutPath = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) "Co-Counsel Nexus.lnk"
+    $wsh = New-Object -ComObject WScript.Shell
+    $shortcut = $wsh.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = "powershell.exe"
+    $shortcut.Arguments = "-ExecutionPolicy Bypass -File `"$startScriptPath`""
+    $shortcut.WorkingDirectory = $resolvedInstallDir
+    $shortcut.WindowStyle = 1
+    $shortcut.IconLocation = "powershell.exe,0"
+    $shortcut.Description = "Launch Co-Counsel Nexus"
+    $shortcut.Save()
 
-Write-InstallStep "Writing uninstall helper"
-$uninstallScriptPath = Join-Path $resolvedInstallDir "Uninstall-CoCounsel.ps1"
-$uninstallScript = @"
+    Write-InstallStep "Writing uninstall helper"
+    $uninstallScriptPath = Join-Path $resolvedInstallDir "Uninstall-CoCounsel.ps1"
+    $uninstallScript = @"
 Write-Host "Removing Co-Counsel Nexus installation..." -ForegroundColor Yellow
 if (Test-Path "$shortcutPath") { Remove-Item "$shortcutPath" -ErrorAction SilentlyContinue }
 if (Test-Path "$resolvedInstallDir") { Remove-Item "$resolvedInstallDir" -Recurse -Force }
 Write-Host "Co-Counsel Nexus removed."
 "@
-$uninstallScript | Out-File -FilePath $uninstallScriptPath -Encoding utf8 -Force
+    $uninstallScript | Out-File -FilePath $uninstallScriptPath -Encoding utf8 -Force
 
-"Installation completed successfully at $(Get-Date -Format u)" | Out-File -FilePath $logFile -Append -Encoding utf8
-Write-InstallStep "Installation complete. Use the desktop shortcut to launch Co-Counsel Nexus."
+    "Installation completed successfully at $(Get-Date -Format u)" | Out-File -FilePath $logFile -Append -Encoding utf8
+    Write-InstallStep "Installation complete. Use the desktop shortcut to launch Co-Counsel Nexus."
+
+    if ($LaunchOnComplete) {
+        Write-InstallStep "Launching Co-Counsel Nexus per request."
+        Start-Process -FilePath powershell.exe -ArgumentList @('-ExecutionPolicy','Bypass','-File',$startScriptPath) | Out-Null
+    }
+
+    Show-MessageBox -Message "Co-Counsel Nexus installed successfully. A desktop shortcut is now available." -Title "Co-Counsel Nexus" -Icon Information
+}
+catch {
+    $message = "Installation failed: $($_.Exception.Message). Review the log at $logFile for details."
+    Write-InstallStep $message -Level Error
+    Show-MessageBox -Message $message -Title "Co-Counsel Nexus" -Icon Error
+    throw
+}
