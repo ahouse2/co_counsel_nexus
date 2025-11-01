@@ -90,6 +90,8 @@ class PatchProposalRecord:
     validation: Dict[str, Any] = field(default_factory=dict)
     approvals: List[Dict[str, Any]] = field(default_factory=list)
     rationale: List[str] = field(default_factory=list)
+    validated_at: datetime | None = None
+    governance: Dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> Dict[str, Any]:
         return {
@@ -104,6 +106,8 @@ class PatchProposalRecord:
             "validation": dict(self.validation),
             "approvals": [dict(entry) for entry in self.approvals],
             "rationale": list(self.rationale),
+            "validated_at": _to_iso(self.validated_at) if self.validated_at else None,
+            "governance": dict(self.governance),
         }
 
     @classmethod
@@ -111,6 +115,13 @@ class PatchProposalRecord:
         created_at_raw = payload.get("created_at")
         if not isinstance(created_at_raw, str):
             raise ValueError("Proposal payload missing created_at timestamp")
+        validated_raw = payload.get("validated_at")
+        governance_payload = payload.get("governance", {})
+        governance: Dict[str, Any]
+        if isinstance(governance_payload, dict):
+            governance = dict(governance_payload)
+        else:
+            governance = {}
         return cls(
             proposal_id=str(payload.get("proposal_id")),
             task_id=str(payload.get("task_id")),
@@ -123,6 +134,8 @@ class PatchProposalRecord:
             validation=dict(payload.get("validation", {})),
             approvals=[dict(entry) for entry in payload.get("approvals", [])],
             rationale=[str(item) for item in payload.get("rationale", [])],
+            validated_at=_from_iso(validated_raw) if isinstance(validated_raw, str) else None,
+            governance=governance,
         )
 
 

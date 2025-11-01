@@ -20,6 +20,9 @@ import {
   VoiceSessionResponse,
   DevAgentApplyResponse,
   DevAgentProposalListResponse,
+  SettingsSnapshot,
+  SettingsUpdatePayload,
+  ProviderCatalogEntry,
 } from '@/types';
 
 const BASE = (() => {
@@ -68,12 +71,28 @@ type QueryPayload = {
   q: string;
   filters?: Record<string, string>;
   mode?: 'precision' | 'recall';
+  provider?: string;
+  model?: string;
+  embeddingProvider?: string;
+  embeddingModel?: string;
 };
 
 export async function postQuery(payload: QueryPayload): Promise<QueryResponse> {
   const params = new URLSearchParams();
   params.set('q', payload.q);
   params.set('mode', payload.mode ?? 'precision');
+  if (payload.provider) {
+    params.set('provider', payload.provider);
+  }
+  if (payload.model) {
+    params.set('model', payload.model);
+  }
+  if (payload.embeddingProvider) {
+    params.set('embedding_provider', payload.embeddingProvider);
+  }
+  if (payload.embeddingModel) {
+    params.set('embedding_model', payload.embeddingModel);
+  }
   if (payload.filters) {
     Object.entries(payload.filters).forEach(([key, value]) => {
       if (value) {
@@ -87,7 +106,18 @@ export async function postQuery(payload: QueryPayload): Promise<QueryResponse> {
       answer: 'No supporting evidence found for the supplied query.',
       citations: [],
       traces: { vector: [], graph: {}, forensics: [] },
-      meta: { page: 1, page_size: 10, total_items: 0, has_next: false },
+      meta: {
+        page: 1,
+        page_size: 10,
+        total_items: 0,
+        has_next: false,
+        mode: payload.mode ?? 'precision',
+        reranker: 'rrf',
+        llm_provider: payload.provider ?? 'gemini',
+        llm_model: payload.model ?? 'gemini-2.5-flash',
+        embedding_provider: payload.embeddingProvider ?? payload.provider ?? 'gemini',
+        embedding_model: payload.embeddingModel ?? 'text-embedding-004',
+      },
     };
   }
   if (!response.ok) {
@@ -117,6 +147,47 @@ export async function fetchBillingUsage(token?: string): Promise<BillingUsageRes
     throw new Error(`Failed to load billing usage (${response.status})`);
   }
   return (await response.json()) as BillingUsageResponse;
+}
+
+export async function fetchSettingsSnapshot(): Promise<SettingsSnapshot> {
+  const response = await fetch(withBase('/settings'));
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError('Settings access denied.', response.status, await readErrorDetail(response));
+  }
+  if (!response.ok) {
+    throw new HttpError('Failed to load application settings.', response.status, await readErrorDetail(response));
+  }
+  return (await response.json()) as SettingsSnapshot;
+}
+
+export async function updateSettingsSnapshot(payload: SettingsUpdatePayload): Promise<SettingsSnapshot> {
+  const response = await fetch(withBase('/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError('Settings update denied.', response.status, await readErrorDetail(response));
+  }
+  if (response.status === 422) {
+    throw new HttpError('Settings validation failed.', response.status, await readErrorDetail(response));
+  }
+  if (!response.ok) {
+    throw new HttpError('Failed to persist settings.', response.status, await readErrorDetail(response));
+  }
+  return (await response.json()) as SettingsSnapshot;
+}
+
+export async function fetchModelCatalog(): Promise<ProviderCatalogEntry[]> {
+  const response = await fetch(withBase('/settings/models'));
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError('Model catalog access denied.', response.status, await readErrorDetail(response));
+  }
+  if (!response.ok) {
+    throw new HttpError('Failed to load model catalog.', response.status, await readErrorDetail(response));
+  }
+  const payload = (await response.json()) as { providers: ProviderCatalogEntry[] };
+  return payload.providers;
 }
 
 export async function submitOnboarding(
@@ -201,12 +272,31 @@ export async function applyDevAgentProposal(proposalId: string): Promise<DevAgen
   return (await response.json()) as DevAgentApplyResponse;
 }
 
-export function buildStreamUrl(params?: { mode?: string; filters?: Record<string, string> }): string {
+export function buildStreamUrl(params?: {
+  mode?: string;
+  provider?: string;
+  model?: string;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+  filters?: Record<string, string>;
+}): string {
   const base = BASE || (typeof window !== 'undefined' ? window.location.origin : '');
   if (!base) {
     const search = new URLSearchParams();
     if (params?.mode) {
       search.set('mode', params.mode);
+    }
+    if (params?.provider) {
+      search.set('provider', params.provider);
+    }
+    if (params?.model) {
+      search.set('model', params.model);
+    }
+    if (params?.embeddingProvider) {
+      search.set('embedding_provider', params.embeddingProvider);
+    }
+    if (params?.embeddingModel) {
+      search.set('embedding_model', params.embeddingModel);
     }
     if (params?.filters) {
       Object.entries(params.filters).forEach(([key, value]) => {
@@ -223,6 +313,18 @@ export function buildStreamUrl(params?: { mode?: string; filters?: Record<string
   url.pathname = '/query/stream';
   if (params?.mode) {
     url.searchParams.set('mode', params.mode);
+  }
+  if (params?.provider) {
+    url.searchParams.set('provider', params.provider);
+  }
+  if (params?.model) {
+    url.searchParams.set('model', params.model);
+  }
+  if (params?.embeddingProvider) {
+    url.searchParams.set('embedding_provider', params.embeddingProvider);
+  }
+  if (params?.embeddingModel) {
+    url.searchParams.set('embedding_model', params.embeddingModel);
   }
   if (params?.filters) {
     Object.entries(params.filters).forEach(([key, value]) => {

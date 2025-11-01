@@ -1,8 +1,22 @@
+import os
+import random
 import time
 from typing import Callable
 
 import pytest
 import requests
+
+
+@pytest.fixture(autouse=True)
+def deterministic_seed() -> None:
+    random.seed(1337)
+    try:
+        import numpy as np  # type: ignore
+
+        np.random.seed(1337)
+    except Exception:
+        pass
+    os.environ.setdefault("PYTHONHASHSEED", "1337")
 
 
 @pytest.fixture(scope="session")

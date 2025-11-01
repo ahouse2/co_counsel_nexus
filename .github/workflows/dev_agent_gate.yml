@@ -1,0 +1,55 @@
+name: Dev Agent Regression Gate
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-gate:
+    name: Dev agent sandbox & regression tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "0.9.5"
+
+      - name: Cache dependency wheels
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.cache/pip
+          key: dev-agent-gate-${{ runner.os }}-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            dev-agent-gate-${{ runner.os }}-
+
+      - name: Bootstrap backend environment
+        run: ./scripts/bootstrap_backend.sh
+
+      - name: Verify sandbox harness
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from agents.toolkit.sandbox import SandboxExecutionHarness
+
+          harness = SandboxExecutionHarness(Path('.'))
+          print(f"Sandbox initialised at {harness.repo_root}")
+          PY
+
+      - name: Pytest dev-agent lifecycle
+        env:
+          PYTHONPATH: .
+        run: pytest agents/tests/test_dev_agent.py -q

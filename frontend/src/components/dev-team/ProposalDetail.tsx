@@ -9,6 +9,7 @@ type ProposalDetailProps = {
   onApprove?: (() => void) | null;
   validation?: ReactNode;
   approvals?: ReactNode;
+  governance?: ReactNode;
   error?: string | null;
 };
 
@@ -36,6 +37,7 @@ export function ProposalDetail({
   onApprove,
   validation,
   approvals,
+  governance,
   error,
 }: ProposalDetailProps): JSX.Element {
   if (!task || !proposal) {
@@ -126,6 +128,7 @@ export function ProposalDetail({
           <h3>Approvals</h3>
           {approvals}
         </section>
+        <section>{governance}</section>
       </div>
     </section>
   );

@@ -14,6 +14,27 @@ class Settings(BaseSettings):
     app_name: str = "Co-Counsel API"
     app_version: str = "0.1.0"
 
+    model_providers_primary: str = Field(default="gemini")
+    model_providers_secondary: str | None = Field(default="openai")
+    default_chat_model: str = Field(default="gemini-2.5-flash")
+    default_embedding_model: str = Field(default="text-embedding-004")
+    default_vision_model: str = Field(default="gemini-2.5-flash")
+    provider_api_base_urls: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "openai": "https://api.openai.com/v1",
+            "azure-openai": "https://{resource-name}.openai.azure.com",
+            "gemini": "https://generativelanguage.googleapis.com/v1beta",
+            "huggingface": "https://api-inference.huggingface.co/models",
+        }
+    )
+    provider_local_runtime_paths: Dict[str, Path] = Field(
+        default_factory=lambda: {
+            "ollama": Path("runtime/ollama"),
+            "llama.cpp": Path("runtime/llama_cpp"),
+            "gguf-local": Path("runtime/gguf"),
+        }
+    )
+
     neo4j_uri: str = Field(default="neo4j://localhost:7687")
     neo4j_user: str = Field(default="neo4j")
     neo4j_password: str = Field(default="neo4j")
@@ -55,6 +76,7 @@ class Settings(BaseSettings):
         default=("ingestion", "cocounsel")
     )
     credentials_registry_path: Path | None = Field(default=None)
+    settings_store_path: Path = Field(default=Path("storage/settings/preferences.json"))
     manifest_encryption_key_path: Path = Field(default=Path("storage/manifest.key"))
     manifest_retention_days: int = Field(default=30)
     audit_log_path: Path = Field(default=Path("storage/audit.log"))
@@ -73,6 +95,9 @@ class Settings(BaseSettings):
     knowledge_progress_path: Path = Field(default=Path("storage/knowledge/progress.json"))
 
     privilege_classifier_threshold: float = Field(default=0.68)
+    privilege_policy_review_threshold: float = Field(default=0.68)
+    privilege_policy_block_threshold: float = Field(default=0.92)
+    privilege_policy_audit_category: str = Field(default="security.privilege")
 
     security_mtls_ca_path: Path | None = Field(default=None)
     security_mtls_registry_path: Path | None = Field(default=None)
@@ -93,6 +118,7 @@ class Settings(BaseSettings):
     security_audience_billing: str = Field(default="co-counsel.billing")
     security_audience_dev_agent: str = Field(default="co-counsel.dev-agent")
     security_audience_knowledge: str = Field(default="co-counsel.knowledge")
+    security_audience_settings: str = Field(default="co-counsel.settings")
 
     dev_agent_validation_commands: tuple[tuple[str, ...], ...] = Field(
         default=(
@@ -111,6 +137,10 @@ class Settings(BaseSettings):
     )
     dev_agent_required_scopes: tuple[str, ...] = Field(default=("dev-agent:admin",))
     dev_agent_admin_roles: tuple[str, ...] = Field(default=("PlatformEngineer", "AutomationService"))
+    dev_agent_rollout_stages: tuple[str, ...] = Field(default=("canary", "pilot", "ga"))
+    dev_agent_feature_flag_prefix: str = Field(default="dev.agent")
+    dev_agent_ci_workflows: tuple[str, ...] = Field(default=("backend_ci.yml", "dev_agent_gate.yml"))
+    dev_agent_governance_policy_version: str = Field(default="2025.11")
     telemetry_enabled: bool = Field(default=False)
     telemetry_service_name: str = Field(default="cocounsel-backend")
     telemetry_environment: str = Field(default="local")
@@ -201,7 +231,11 @@ class Settings(BaseSettings):
     retrieval_graph_hop_window: int = Field(default=12)
     retrieval_cross_encoder_model: Optional[str] = Field(default=None)
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        protected_namespaces=(),
+    )
 
     def prepare_directories(self) -> None:
         self.vector_dir.mkdir(parents=True, exist_ok=True)
@@ -224,7 +258,10 @@ class Settings(BaseSettings):
         self.knowledge_content_dir.mkdir(parents=True, exist_ok=True)
         self.knowledge_progress_path.parent.mkdir(parents=True, exist_ok=True)
         self.voice_sessions_dir.mkdir(parents=True, exist_ok=True)
+        self.settings_store_path.parent.mkdir(parents=True, exist_ok=True)
         self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
+        for runtime_path in self.provider_local_runtime_paths.values():
+            runtime_path.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

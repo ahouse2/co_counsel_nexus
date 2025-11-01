@@ -40,6 +40,7 @@ from .models.api import (
     BillingUsageResponse,
     DevAgentApplyRequest,
     DevAgentApplyResponse,
+    DevAgentMetricsModel,
     DevAgentProposalListResponse,
     DevAgentProposalModel,
     DevAgentTaskModel,
@@ -64,6 +65,9 @@ from .models.api import (
     OnboardingSubmission,
     OnboardingSubmissionResponse,
     QueryResponse,
+    ModelCatalogResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
     SandboxCommandResultModel,
     SandboxExecutionModel,
     TimelineEventModel,
@@ -102,7 +106,14 @@ from .services.ingestion import (
 )
 from .services.knowledge import KnowledgeService, get_knowledge_service
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
+from .services.settings import (
+    SettingsService,
+    SettingsValidationError,
+    get_settings_service,
+)
 from .services.scenarios import (
+    ScenarioDirector,
+    ScenarioDirectorManifest,
     ScenarioEvidenceBinding,
     ScenarioRunOptions,
     get_scenario_engine,
@@ -125,12 +136,15 @@ from .security.dependencies import (
     authorize_ingest_status,
     authorize_knowledge_read,
     authorize_knowledge_write,
+    authorize_settings_read,
+    authorize_settings_write,
     authorize_query,
     authorize_timeline,
     create_mtls_config,
 )
 from .security.mtls import MTLSMiddleware
 from .storage.agent_memory_store import ImprovementTaskRecord, PatchProposalRecord
+from .storage.settings_store import SettingsStoreError
 
 settings = get_settings()
 setup_telemetry(settings)
@@ -181,6 +195,29 @@ async def graphql_http_options(request: Request) -> Response:
     response.headers["Allow"] = allow_methods
     _apply_graphql_cors_headers(request, response)
     return response
+    """Handle GraphQL CORS preflight with explicit allow headers."""
+
+    origin = request.headers.get("origin") or "*"
+    requested_headers = request.headers.get("access-control-request-headers")
+    allow_headers = requested_headers or "Authorization, Content-Type"
+
+    headers: dict[str, str] = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "OPTIONS, GET, POST",
+        "Access-Control-Allow-Headers": allow_headers,
+        "Access-Control-Max-Age": "86400",
+    }
+
+    vary_headers: list[str] = ["Origin"]
+    if requested_headers:
+        vary_headers.append("Access-Control-Request-Headers")
+    headers["Vary"] = ", ".join(dict.fromkeys(vary_headers))
+
+    # Only advertise credential support when responding to a specific origin.
+    if origin != "*":
+        headers["Access-Control-Allow-Credentials"] = "true"
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers=headers)
 
 
 @app.api_route("/graphql", methods=["GET", "POST"])
@@ -224,6 +261,42 @@ def _raise_workflow_exception(exc: WorkflowException) -> None:
     raise HTTPException(status_code=status_code, detail=exc.error.to_dict()) from exc
 
 
+@app.get("/settings", response_model=SettingsResponse)
+def read_application_settings(
+    _principal: Principal = Depends(authorize_settings_read),
+    service: SettingsService = Depends(get_settings_service),
+) -> SettingsResponse:
+    return service.snapshot()
+
+
+@app.put("/settings", response_model=SettingsResponse)
+def update_application_settings(
+    request: SettingsUpdateRequest,
+    _principal: Principal = Depends(authorize_settings_write),
+    service: SettingsService = Depends(get_settings_service),
+) -> SettingsResponse:
+    try:
+        return service.update(request)
+    except SettingsValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except SettingsStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to persist settings",
+        ) from exc
+
+
+@app.get("/settings/models", response_model=ModelCatalogResponse)
+def list_model_catalog(
+    _principal: Principal = Depends(authorize_settings_read),
+    service: SettingsService = Depends(get_settings_service),
+) -> ModelCatalogResponse:
+    return service.model_catalog()
+
+
 def _proposal_from_record(
     task: ImprovementTaskRecord,
     proposal: PatchProposalRecord,
@@ -241,6 +314,8 @@ def _proposal_from_record(
         validation=dict(proposal.validation),
         approvals=[dict(entry) for entry in proposal.approvals],
         rationale=list(proposal.rationale),
+        validated_at=proposal.validated_at,
+        governance=dict(proposal.governance),
     )
 
 
@@ -320,8 +395,12 @@ def _build_voice_session_response(
         sentiment={
             "label": sentiment.label,
             "score": sentiment.score,
-            "pace": sentiment.pace,
+            "pace": session.pace,
         },
+        persona_directive=session.persona_directive,
+        sentiment_arc=[dict(point) for point in session.sentiment_arc],
+        persona_shifts=[dict(shift) for shift in session.persona_shifts],
+        translation=session.translation,
         segments=segments,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -403,6 +482,10 @@ def get_voice_session(
             "score": session.sentiment_score,
             "pace": session.pace,
         },
+        persona_directive=session.persona_directive,
+        sentiment_arc=[dict(point) for point in session.sentiment_arc],
+        persona_shifts=[dict(shift) for shift in session.persona_shifts],
+        translation=session.translation,
         segments=session.segments,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -898,7 +981,8 @@ def scenarios_detail(
         definition = engine.get(scenario_id)
     except WorkflowException as exc:
         _raise_workflow_exception(exc)
-    return _scenario_definition_model(definition)
+    manifest = engine.director_manifest(definition)
+    return _scenario_definition_model(definition, manifest)
 
 
 @app.post("/scenarios/run", response_model=ScenarioRunResponseModel)
@@ -914,7 +998,8 @@ def scenarios_run(
     except WorkflowException as exc:
         _raise_workflow_exception(exc)
     transcript_models = [ScenarioRunTurnModel.model_validate(turn) for turn in result.get("transcript", [])]
-    definition_model = _scenario_definition_model(definition)
+    manifest = engine.director_manifest(definition)
+    definition_model = _scenario_definition_model(definition, manifest)
     telemetry = dict(result.get("telemetry", {}))
     return ScenarioRunResponseModel(
         run_id=str(result.get("run_id")),
@@ -958,7 +1043,20 @@ def dev_agent_proposals(
 ) -> DevAgentProposalListResponse:
     _ = principal
     backlog_models = [_task_from_record(task) for task in service.list_backlog()]
-    return DevAgentProposalListResponse(backlog=backlog_models)
+    metrics = service.metrics()
+    metrics_model = DevAgentMetricsModel(
+        generated_at=datetime.fromisoformat(metrics["generated_at"]),
+        total_tasks=metrics["total_tasks"],
+        triaged_tasks=metrics["triaged_tasks"],
+        rollout_pending=metrics["rollout_pending"],
+        validated_proposals=metrics["validated_proposals"],
+        quality_gate_pass_rate=metrics["quality_gate_pass_rate"],
+        velocity_per_day=metrics["velocity_per_day"],
+        active_rollouts=metrics["active_rollouts"],
+        ci_workflows=list(metrics["ci_workflows"]),
+        feature_toggles=[dict(toggle) for toggle in metrics["feature_toggles"]],
+    )
+    return DevAgentProposalListResponse(backlog=backlog_models, metrics=metrics_model)
 
 
 @app.post("/dev-agent/apply", response_model=DevAgentApplyResponse)
@@ -971,10 +1069,24 @@ def dev_agent_apply(
     task_model = _task_from_record(result.task)
     proposal_model = _proposal_from_record(result.task, result.proposal)
     execution_model = _execution_from_result(result.execution)
+    metrics = service.metrics()
+    metrics_model = DevAgentMetricsModel(
+        generated_at=datetime.fromisoformat(metrics["generated_at"]),
+        total_tasks=metrics["total_tasks"],
+        triaged_tasks=metrics["triaged_tasks"],
+        rollout_pending=metrics["rollout_pending"],
+        validated_proposals=metrics["validated_proposals"],
+        quality_gate_pass_rate=metrics["quality_gate_pass_rate"],
+        velocity_per_day=metrics["velocity_per_day"],
+        active_rollouts=metrics["active_rollouts"],
+        ci_workflows=list(metrics["ci_workflows"]),
+        feature_toggles=[dict(toggle) for toggle in metrics["feature_toggles"]],
+    )
     return DevAgentApplyResponse(
         proposal=proposal_model,
         task=task_model,
         execution=execution_model,
+        metrics=metrics_model,
     )
 
 
@@ -1131,7 +1243,10 @@ def _scenario_evidence_model(spec: ScenarioEvidenceRequirement) -> ScenarioEvide
     )
 
 
-def _scenario_definition_model(definition: ScenarioDefinition) -> ScenarioDefinitionModel:
+def _scenario_definition_model(
+    definition: ScenarioDefinition,
+    director_manifest: ScenarioDirectorManifest | None = None,
+) -> ScenarioDefinitionModel:
     beats: List[ScenarioBeatSpecModel] = []
     for beat in definition.beats:
         if beat.kind == "dynamic":
@@ -1161,6 +1276,8 @@ def _scenario_definition_model(definition: ScenarioDefinition) -> ScenarioDefini
                     duration_ms=scripted.duration_ms,
                 )
             )
+    manifest = director_manifest or ScenarioDirector().compose_manifest(definition)
+    manifest_model = ScenarioDirectorManifestModel.model_validate(manifest.to_dict())
     return ScenarioDefinitionModel(
         scenario_id=definition.id,
         title=definition.title,
@@ -1172,6 +1289,7 @@ def _scenario_definition_model(definition: ScenarioDefinition) -> ScenarioDefini
         variables={name: _scenario_variable_model(variable) for name, variable in definition.variables.items()},
         evidence=[_scenario_evidence_model(spec) for spec in definition.evidence],
         beats=beats,
+        director=manifest_model,
     )
 
 
@@ -1192,11 +1310,16 @@ def _scenario_run_options(payload: ScenarioRunRequestModel) -> ScenarioRunOption
         slot: ScenarioEvidenceBinding(slot_id=slot, value=binding.value, document_id=binding.document_id, type=binding.type)
         for slot, binding in payload.evidence.items()
     }
+    director_overrides = {
+        beat_id: dict(override)
+        for beat_id, override in payload.director_overrides.items()
+    }
     return ScenarioRunOptions(
         scenario_id=payload.scenario_id,
         case_id=payload.case_id,
-        variables=payload.variables,
+        variables=dict(payload.variables),
         evidence=evidence_bindings,
-        participants=payload.participants,
+        participants=list(payload.participants),
         use_tts=payload.enable_tts,
+        director_overrides=director_overrides,
     )
