@@ -18,6 +18,7 @@ import {
   DevAgentTask,
   SandboxCommandResult,
   SandboxExecution,
+  DevAgentMetrics,
 } from '@/types';
 
 const POLL_INTERVAL_MS = 30000;
@@ -31,6 +32,7 @@ type DevTeamContextValue = {
   lastExecution: SandboxExecution | null;
   lastExecutionProposalId: string | null;
   lastUpdated: number | null;
+  metrics: DevAgentMetrics | null;
   selectedTask: DevAgentTask | null;
   selectedProposal: DevAgentProposal | null;
   selectTask: (taskId: string) => void;
@@ -78,6 +80,7 @@ export function DevTeamProvider({ children }: { children: ReactNode }): JSX.Elem
   const [lastExecution, setLastExecution] = useState<SandboxExecution | null>(null);
   const [lastExecutionProposalId, setLastExecutionProposalId] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [metrics, setMetrics] = useState<DevAgentMetrics | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const pollHandle = useRef<number | null>(null);
@@ -116,6 +119,7 @@ export function DevTeamProvider({ children }: { children: ReactNode }): JSX.Elem
     try {
       const response = await fetchDevAgentBacklog();
       setBacklog(response.backlog);
+      setMetrics(response.metrics);
       synchroniseSelection(response.backlog);
       setHasPrivilege(true);
       setError(null);
@@ -125,11 +129,13 @@ export function DevTeamProvider({ children }: { children: ReactNode }): JSX.Elem
         if (cause.status === 401 || cause.status === 403) {
           setHasPrivilege(false);
           setError('You do not have permission to view the Dev Team backlog.');
+          setMetrics(null);
         } else {
           setError(cause.message);
         }
       } else {
         setError(cause instanceof Error ? cause.message : 'Unable to load Dev Team backlog.');
+        setMetrics(null);
       }
     } finally {
       setLoading(false);
@@ -237,6 +243,7 @@ export function DevTeamProvider({ children }: { children: ReactNode }): JSX.Elem
         setSelectedTaskId(response.task.task_id);
         setSelectedProposalId(response.proposal.proposal_id);
         setLastUpdated(Date.now());
+        setMetrics(response.metrics);
         return response.execution;
       } catch (cause) {
         if (cause instanceof HttpError) {
@@ -275,6 +282,7 @@ export function DevTeamProvider({ children }: { children: ReactNode }): JSX.Elem
       lastExecution,
       lastExecutionProposalId,
       lastUpdated,
+      metrics,
       selectedTask,
       selectedProposal,
       selectTask,
@@ -299,6 +307,7 @@ export function DevTeamProvider({ children }: { children: ReactNode }): JSX.Elem
       selectTask,
       selectedProposal,
       selectedTask,
+      metrics,
     ]
   );
 

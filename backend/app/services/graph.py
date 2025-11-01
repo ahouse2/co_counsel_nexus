@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Set, Tuple
 
 try:  # pragma: no cover - optional dependency for runtime graph enrichment
     from neo4j import GraphDatabase
@@ -370,6 +370,102 @@ class GraphTextToCypherResult:
         }
 
 
+@dataclass(slots=True)
+class GraphArgumentLink:
+    node: Dict[str, object]
+    relation: str
+    stance: Literal["support", "contradiction", "neutral"]
+    documents: List[str]
+    weight: float | None = None
+
+    def to_dict(self) -> Dict[str, object]:
+        payload: Dict[str, object] = {
+            "node": dict(self.node),
+            "relation": self.relation,
+            "stance": self.stance,
+            "documents": list(self.documents),
+        }
+        if self.weight is not None:
+            payload["weight"] = self.weight
+        return payload
+
+
+@dataclass(slots=True)
+class GraphArgumentEntry:
+    node: Dict[str, object]
+    supporting: List[GraphArgumentLink] = field(default_factory=list)
+    opposing: List[GraphArgumentLink] = field(default_factory=list)
+    neutral: List[GraphArgumentLink] = field(default_factory=list)
+    documents: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "node": dict(self.node),
+            "supporting": [item.to_dict() for item in self.supporting],
+            "opposing": [item.to_dict() for item in self.opposing],
+            "neutral": [item.to_dict() for item in self.neutral],
+            "documents": list(self.documents),
+        }
+
+
+@dataclass(slots=True)
+class GraphContradiction:
+    source: Dict[str, object]
+    target: Dict[str, object]
+    relation: str
+    documents: List[str]
+    weight: float | None = None
+
+    def to_dict(self) -> Dict[str, object]:
+        payload: Dict[str, object] = {
+            "source": dict(self.source),
+            "target": dict(self.target),
+            "relation": self.relation,
+            "documents": list(self.documents),
+        }
+        if self.weight is not None:
+            payload["weight"] = self.weight
+        return payload
+
+
+@dataclass(slots=True)
+class GraphLeveragePoint:
+    node: Dict[str, object]
+    influence: float
+    connections: int
+    documents: List[str]
+    reason: str
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "node": dict(self.node),
+            "influence": self.influence,
+            "connections": self.connections,
+            "documents": list(self.documents),
+            "reason": self.reason,
+        }
+
+
+@dataclass(slots=True)
+class GraphStrategyBrief:
+    generated_at: str
+    summary: str
+    focus_nodes: List[Dict[str, object]]
+    argument_map: List[GraphArgumentEntry]
+    contradictions: List[GraphContradiction]
+    leverage_points: List[GraphLeveragePoint]
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "generated_at": self.generated_at,
+            "summary": self.summary,
+            "focus_nodes": [dict(node) for node in self.focus_nodes],
+            "argument_map": [entry.to_dict() for entry in self.argument_map],
+            "contradictions": [item.to_dict() for item in self.contradictions],
+            "leverage_points": [item.to_dict() for item in self.leverage_points],
+        }
+
+
 class GraphService:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -385,6 +481,7 @@ class GraphService:
         self._node_cache: Dict[str, GraphNode] = {}
         self._edge_cache: Dict[Tuple[str, str, str, str | None], GraphEdge] = {}
         self._community_cache: GraphCommunitySummary | None = None
+        self._strategy_cache: GraphStrategyBrief | None = None
         self._nx_graph = nx.DiGraph() if nx is not None else None
         if self.mode == "neo4j":
             try:
@@ -845,6 +942,148 @@ class GraphService:
             + (", ".join(relation_types) if relation_types else "None")
         )
 
+    def synthesize_strategy_brief(
+        self, focus_nodes: Iterable[str] | None = None, *, limit: int = 5
+    ) -> GraphStrategyBrief:
+        now = datetime.now(timezone.utc).isoformat()
+        if not self._node_cache:
+            return GraphStrategyBrief(
+                generated_at=now,
+                summary="Strategy map unavailable: graph has no registered nodes.",
+                focus_nodes=[],
+                argument_map=[],
+                contradictions=[],
+                leverage_points=[],
+            )
+
+        focus_list = self._select_focus_nodes(focus_nodes, limit)
+        focus_payload = [
+            self._graph_node_payload(self._node_cache[node_id])
+            for node_id in focus_list
+            if node_id in self._node_cache
+        ]
+
+        contradiction_entries: List[GraphContradiction] = []
+        for edge in self._edge_cache.values():
+            stance = self._classify_relation(edge)
+            if stance != "contradiction":
+                continue
+            source_node = self._node_cache.get(edge.source) or GraphNode(edge.source, "Unknown", {})
+            target_node = self._node_cache.get(edge.target) or GraphNode(edge.target, "Unknown", {})
+            contradiction_entries.append(
+                GraphContradiction(
+                    source=self._graph_node_payload(source_node),
+                    target=self._graph_node_payload(target_node),
+                    relation=str(edge.properties.get("predicate") or edge.type),
+                    documents=self._extract_documents_from_edge(edge),
+                    weight=self._coerce_float(edge.properties.get("weight")),
+                )
+            )
+
+        argument_entries: List[GraphArgumentEntry] = []
+        for node_id in focus_list:
+            node = self._node_cache.get(node_id)
+            if node is None:
+                continue
+            supporting: List[GraphArgumentLink] = []
+            opposing: List[GraphArgumentLink] = []
+            neutral: List[GraphArgumentLink] = []
+            documents: Set[str] = set()
+            for edge in self._edge_cache.values():
+                if edge.source != node_id and edge.target != node_id:
+                    continue
+                other_id = edge.target if edge.source == node_id else edge.source
+                other = self._node_cache.get(other_id) or GraphNode(other_id, "Unknown", {})
+                relation_label = str(edge.properties.get("predicate") or edge.type)
+                doc_ids = self._extract_documents_from_edge(edge)
+                documents.update(doc_ids)
+                stance = self._classify_relation(edge)
+                link = GraphArgumentLink(
+                    node=self._graph_node_payload(other),
+                    relation=relation_label,
+                    stance=stance,
+                    documents=doc_ids,
+                    weight=self._coerce_float(edge.properties.get("weight")),
+                )
+                if stance == "support":
+                    supporting.append(link)
+                elif stance == "contradiction":
+                    opposing.append(link)
+                else:
+                    neutral.append(link)
+            argument_entries.append(
+                GraphArgumentEntry(
+                    node=self._graph_node_payload(node),
+                    supporting=supporting,
+                    opposing=opposing,
+                    neutral=neutral,
+                    documents=sorted(documents),
+                )
+            )
+
+        leverage_points: List[GraphLeveragePoint] = []
+        degree_map = self._degree_map()
+        centrality: Dict[str, float] = {}
+        if self._nx_graph is not None and self._nx_graph.number_of_nodes() > 0:
+            try:
+                centrality = nx.algorithms.centrality.betweenness_centrality(
+                    self._nx_graph, normalized=True
+                )
+            except Exception:  # pragma: no cover - fallback when analytics fails
+                centrality = {node_id: 0.0 for node_id in self._nx_graph.nodes()}
+        else:
+            centrality = {node_id: 0.0 for node_id in degree_map}
+
+        sorted_leverage = sorted(
+            centrality.items(), key=lambda item: item[1], reverse=True
+        )
+        if not sorted_leverage:
+            sorted_leverage = sorted(degree_map.items(), key=lambda item: item[1], reverse=True)
+        elif all(score <= 0 for _, score in sorted_leverage):
+            sorted_leverage = sorted(degree_map.items(), key=lambda item: item[1], reverse=True)
+
+        for node_id, score in sorted_leverage[:limit]:
+            node = self._node_cache.get(node_id)
+            if node is None:
+                continue
+            docs = sorted(self._collect_documents_for_node(node_id))
+            leverage_points.append(
+                GraphLeveragePoint(
+                    node=self._graph_node_payload(node),
+                    influence=float(score),
+                    connections=int(degree_map.get(node_id, 0)),
+                    documents=docs,
+                    reason=self._build_leverage_reason(
+                        node, degree_map.get(node_id, 0), len(docs)
+                    ),
+                )
+            )
+
+        summary_parts = [
+            f"{len(argument_entries)} argument focus node(s)",
+            f"{len(contradiction_entries)} contradiction link(s)",
+            f"{len(leverage_points)} leverage point(s)",
+        ]
+        if focus_list:
+            focus_labels = ", ".join(
+                self._node_display_name(self._node_cache.get(node_id))
+                for node_id in focus_list
+                if self._node_cache.get(node_id) is not None
+            )
+            summary_parts.append(f"focus: {focus_labels}")
+        summary = "Strategy map synthesised with " + ", ".join(summary_parts) + "."
+
+        brief = GraphStrategyBrief(
+            generated_at=now,
+            summary=summary,
+            focus_nodes=focus_payload,
+            argument_map=argument_entries,
+            contradictions=contradiction_entries,
+            leverage_points=leverage_points,
+        )
+        self._strategy_cache = brief
+        return brief
+
     def build_text_to_cypher_prompt(self, question: str, schema: str | None = None) -> str:
         schema_text = schema or self.describe_schema()
         template = self._text_to_cypher_template or _FallbackSimplePropertyGraphStore.text_to_cypher_template
@@ -1093,12 +1332,126 @@ class GraphService:
     def _graph_node_payload(self, node: GraphNode) -> Dict[str, object]:
         return {"id": node.id, "type": node.type, "properties": dict(node.properties)}
 
+    def _select_focus_nodes(
+        self, focus_nodes: Iterable[str] | None, limit: int
+    ) -> List[str]:
+        ordered: List[str] = []
+        if focus_nodes:
+            for candidate in focus_nodes:
+                if candidate in self._node_cache and candidate not in ordered:
+                    ordered.append(candidate)
+                elif candidate in getattr(self, "_nodes", {}) and candidate not in ordered:
+                    ordered.append(candidate)
+        if not ordered:
+            ordered = [node_id for node_id, _ in self._default_focus_nodes(limit)]
+        return ordered[:limit]
+
+    def _default_focus_nodes(self, limit: int) -> List[Tuple[str, int]]:
+        if self._nx_graph is not None and self._nx_graph.number_of_nodes() > 0:
+            degree_sequence = list(self._nx_graph.degree())
+            sorted_nodes = sorted(degree_sequence, key=lambda item: item[1], reverse=True)
+            return sorted_nodes[:limit]
+        degree_map = self._degree_map()
+        return sorted(degree_map.items(), key=lambda item: item[1], reverse=True)[:limit]
+
+    def _degree_map(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for edge in self._edge_cache.values():
+            counts[edge.source] = counts.get(edge.source, 0) + 1
+            counts[edge.target] = counts.get(edge.target, 0) + 1
+        if not counts and hasattr(self, "_nodes"):
+            for node_id in getattr(self, "_nodes").keys():
+                counts.setdefault(node_id, 0)
+        return counts
+
+    def _collect_documents_for_node(self, node_id: str) -> Set[str]:
+        documents: Set[str] = set()
+        for edge in self._edge_cache.values():
+            if edge.source == node_id or edge.target == node_id:
+                documents.update(self._extract_documents_from_edge(edge))
+        return documents
+
+    def _build_leverage_reason(
+        self, node: GraphNode, connections: int, document_count: int
+    ) -> str:
+        label = self._node_display_name(node)
+        fragments: List[str] = []
+        if connections:
+            fragments.append(f"connected to {connections} node(s)")
+        if document_count:
+            fragments.append(f"linked to {document_count} document(s)")
+        if not fragments:
+            fragments.append("currently lightly connected")
+        return f"{label} is {', '.join(fragments)}."
+
+    def _node_display_name(self, node: GraphNode | None) -> str:
+        if node is None:
+            return "unknown node"
+        for key in ("label", "title", "name"):
+            raw = node.properties.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+        return node.id
+
+    def _extract_documents_from_edge(self, edge: GraphEdge) -> List[str]:
+        documents: Set[str] = set()
+        doc_value = edge.properties.get("doc_id")
+        if isinstance(doc_value, (list, tuple, set)):
+            documents.update(str(item) for item in doc_value if item is not None)
+        elif doc_value is not None:
+            documents.add(str(doc_value))
+        evidence = edge.properties.get("evidence")
+        if isinstance(evidence, (list, tuple, set)):
+            documents.update(str(item) for item in evidence if item is not None)
+        elif isinstance(evidence, dict):
+            doc_id = evidence.get("doc_id")
+            if doc_id is not None:
+                documents.add(str(doc_id))
+        elif isinstance(evidence, str):
+            documents.add(evidence)
+        return sorted(documents)
+
+    def _classify_relation(self, edge: GraphEdge) -> Literal["support", "contradiction", "neutral"]:
+        stance_raw = edge.properties.get("stance")
+        if isinstance(stance_raw, str):
+            lowered = stance_raw.lower()
+            if lowered in {"support", "supports", "pro", "favorable", "corroborates"}:
+                return "support"
+            if lowered in {"against", "oppose", "opposes", "refute", "contradict", "challenge", "con"}:
+                return "contradiction"
+        predicate = str(edge.properties.get("predicate") or edge.type).lower()
+        if any(keyword in predicate for keyword in ["contradict", "refute", "disput", "oppose", "challenge", "deny"]):
+            return "contradiction"
+        if any(keyword in predicate for keyword in ["support", "corrobor", "confirm", "sustain", "align"]):
+            return "support"
+        sentiment = edge.properties.get("sentiment")
+        if isinstance(sentiment, str):
+            lowered = sentiment.lower()
+            if lowered in {"positive", "favorable"}:
+                return "support"
+            if lowered in {"negative", "unfavorable"}:
+                return "contradiction"
+        weight = self._coerce_float(edge.properties.get("weight"))
+        if weight is not None and weight < 0:
+            return "contradiction"
+        return "neutral"
+
+    @staticmethod
+    def _coerce_float(value: Any) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     def _register_node(self, node_id: str, node_type: str, properties: Dict[str, object]) -> None:
         existing = self._node_cache.get(node_id)
         merged_props = {**(existing.properties if existing else {}), **properties}
         resolved_type = node_type if node_type != "Unknown" else (existing.type if existing else node_type)
         node = GraphNode(id=node_id, type=resolved_type, properties=merged_props)
         self._node_cache[node_id] = node
+        self._strategy_cache = None
         if self._property_graph is not None:
             try:
                 property_node = self._create_property_node(node)
@@ -1112,6 +1465,7 @@ class GraphService:
     def _record_edge(self, edge: GraphEdge) -> None:
         key = self._edge_key(edge.source, edge.type, edge.target, edge.properties)
         self._edge_cache[key] = edge
+        self._strategy_cache = None
         if self._property_graph is not None:
             try:
                 source_node = self._node_cache.get(edge.source)

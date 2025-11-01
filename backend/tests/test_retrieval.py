@@ -82,6 +82,7 @@ def retrieval_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     service.forensics_service = _DummyForensics()
     service.privilege_classifier = _DummyPrivilege()
     service.timeline_store = TimelineStore(service.settings.timeline_path)
+    service.query_engine = type("_StubQueryEngine", (), {"rrf_constant": 60.0})()
     return service
 
 
@@ -123,13 +124,17 @@ def test_build_trace_includes_graph_payload(retrieval_service: retrieval_module.
         payload={"doc_id": "doc-trace", "text": "context"},
         version=1,
     )
-    trace, relation_statements = retrieval_service._build_trace([point], ["entity-graph"])
+    trace, relation_statements, doc_scope, privilege_decisions = retrieval_service._build_trace(
+        [point], ["entity-graph"]
+    )
     assert relation_statements
     graph_payload = trace.graph
     assert graph_payload["nodes"]
     assert graph_payload["edges"]
     assert graph_payload["events"]
     assert graph_payload["communities"]
+    assert doc_scope
+    assert privilege_decisions == {}
 
 
 def test_build_citations_includes_page_context(
@@ -274,6 +279,29 @@ def test_join_external_results_links_internal_case(
     assert "external:caselaw" in external_payload["retrievers"]
 
 
+def test_reconcile_external_evidence_normalises_scores(
+    retrieval_service: retrieval_module.RetrievalService,
+) -> None:
+    raw_point = qmodels.ScoredPoint(
+        id="caselaw::1",
+        score=1.0,
+        payload={
+            "doc_id": "caselaw::1",
+            "source_type": "caselaw",
+            "text": "Holding text",
+        },
+        version=1,
+    )
+    reconciled = retrieval_service._reconcile_external_evidence([raw_point], [])
+    assert reconciled
+    normalised = reconciled[0]
+    expected_top_score = pytest.approx(1.0 / retrieval_service.query_engine.rrf_constant)
+    assert normalised.score == expected_top_score
+    assert normalised.payload["fusion_score"] == expected_top_score
+    assert normalised.payload["confidence"] == expected_top_score
+    assert normalised.payload["external_raw_score"] == pytest.approx(1.0)
+
+
 def test_contradiction_detection_logs_warning(
     retrieval_service: retrieval_module.RetrievalService,
     caplog: pytest.LogCaptureFixture,
@@ -322,7 +350,8 @@ def test_stream_result_generates_events(
         payload={"doc_id": "doc-trace", "text": "Context"},
         version=1,
     )
-    trace, _ = retrieval_service._build_trace([point], ["entity-graph"])
+    trace, _, doc_scope, privilege_decisions = retrieval_service._build_trace([point], ["entity-graph"])
+    trace.graph["events"] = retrieval_service._timeline_events_for_docs(doc_scope, privilege_decisions, None)
     meta = retrieval_module.QueryMeta(
         page=1,
         page_size=1,
@@ -330,6 +359,10 @@ def test_stream_result_generates_events(
         has_next=False,
         mode=retrieval_module.RetrievalMode.PRECISION,
         reranker="rrf",
+        llm_provider="openai",
+        llm_model="gpt-test",
+        embedding_provider="openai",
+        embedding_model="text-embedding-test",
     )
     result = retrieval_module.QueryResult(
         answer="Segmented answer",

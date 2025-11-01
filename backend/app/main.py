@@ -13,9 +13,10 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
-    Request,
     Response,
     UploadFile,
+    WebSocket,
+    Request,
     status,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -39,6 +40,7 @@ from .models.api import (
     BillingUsageResponse,
     DevAgentApplyRequest,
     DevAgentApplyResponse,
+    DevAgentMetricsModel,
     DevAgentProposalListResponse,
     DevAgentProposalModel,
     DevAgentTaskModel,
@@ -63,6 +65,9 @@ from .models.api import (
     OnboardingSubmission,
     OnboardingSubmissionResponse,
     QueryResponse,
+    ModelCatalogResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
     SandboxCommandResultModel,
     SandboxExecutionModel,
     TimelineEventModel,
@@ -101,6 +106,11 @@ from .services.ingestion import (
 )
 from .services.knowledge import KnowledgeService, get_knowledge_service
 from .services.retrieval import RetrievalMode, RetrievalService, get_retrieval_service
+from .services.settings import (
+    SettingsService,
+    SettingsValidationError,
+    get_settings_service,
+)
 from .services.scenarios import (
     ScenarioDirector,
     ScenarioDirectorManifest,
@@ -127,24 +137,165 @@ from .security.dependencies import (
     authorize_ingest_status,
     authorize_knowledge_read,
     authorize_knowledge_write,
+    authorize_settings_read,
+    authorize_settings_write,
     authorize_query,
     authorize_timeline,
     create_mtls_config,
 )
 from .security.mtls import MTLSMiddleware
 from .storage.agent_memory_store import ImprovementTaskRecord, PatchProposalRecord
+from .storage.settings_store import SettingsStoreError
 
 settings = get_settings()
 setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.add_middleware(MTLSMiddleware, config=create_mtls_config())
-app.add_route("/graphql", graphql_app)
-app.add_websocket_route("/graphql", graphql_app)
+
+
+def _apply_graphql_cors_headers(request: Request, response: Response) -> None:
+    """Ensure GraphQL HTTP responses include negotiated CORS headers."""
+
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        vary_header = response.headers.get("Vary")
+        if vary_header:
+            vary_values = {value.strip() for value in vary_header.split(",") if value}
+            vary_values.add("Origin")
+            response.headers["Vary"] = ", ".join(sorted(vary_values))
+        else:
+            response.headers["Vary"] = "Origin"
+
+    allow_headers = request.headers.get(
+        "access-control-request-headers", "authorization,content-type"
+    )
+    requested_method = request.headers.get("access-control-request-method")
+    allow_methods_list = ["GET", "POST", "OPTIONS"]
+    if requested_method:
+        requested_method_upper = requested_method.upper()
+        if requested_method_upper not in allow_methods_list:
+            allow_methods_list.insert(0, requested_method_upper)
+    allow_methods = ", ".join(dict.fromkeys(allow_methods_list))
+
+    response.headers.setdefault("Access-Control-Allow-Headers", allow_headers)
+    response.headers.setdefault("Access-Control-Allow-Methods", allow_methods)
+
+
+@app.options("/graphql", include_in_schema=False)
+async def graphql_http_options(request: Request) -> Response:
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    requested_method = request.headers.get("access-control-request-method")
+    allow_methods_list = ["GET", "POST", "OPTIONS"]
+    if requested_method:
+        requested_method_upper = requested_method.upper()
+        if requested_method_upper not in allow_methods_list:
+            allow_methods_list.insert(0, requested_method_upper)
+    allow_methods = ", ".join(dict.fromkeys(allow_methods_list))
+    response.headers["Allow"] = allow_methods
+    _apply_graphql_cors_headers(request, response)
+    return response
+    """Handle GraphQL CORS preflight with explicit allow headers."""
+
+    origin = request.headers.get("origin") or "*"
+    requested_headers = request.headers.get("access-control-request-headers")
+    allow_headers = requested_headers or "Authorization, Content-Type"
+
+    headers: dict[str, str] = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "OPTIONS, GET, POST",
+        "Access-Control-Allow-Headers": allow_headers,
+        "Access-Control-Max-Age": "86400",
+    }
+
+    vary_headers: list[str] = ["Origin"]
+    if requested_headers:
+        vary_headers.append("Access-Control-Request-Headers")
+    headers["Vary"] = ", ".join(dict.fromkeys(vary_headers))
+
+    # Only advertise credential support when responding to a specific origin.
+    if origin != "*":
+        headers["Access-Control-Allow-Credentials"] = "true"
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers=headers)
+
+
+@app.api_route("/graphql", methods=["GET", "POST"])
+async def graphql_http(
+    request: Request,
+    principal: Principal = Depends(authorize_timeline),
+) -> Response:
+    request.state.principal = principal
+    record_billing_event(
+        principal,
+        BillingEventType.TIMELINE,
+        attributes={
+            "endpoint": "/graphql",
+            "method": request.method,
+        },
+    )
+    response = await graphql_app.handle_request(request)
+    _apply_graphql_cors_headers(request, response)
+    return response
+
+
+@app.websocket("/graphql")
+async def graphql_websocket(
+    websocket: WebSocket,
+    principal: Principal = Depends(authorize_timeline),
+) -> None:
+    websocket.state.principal = principal
+    record_billing_event(
+        principal,
+        BillingEventType.TIMELINE,
+        attributes={
+            "endpoint": "/graphql",
+            "method": "WEBSOCKET",
+        },
+    )
+    await graphql_app.handle_websocket(websocket)
 
 
 def _raise_workflow_exception(exc: WorkflowException) -> None:
     status_code = exc.status_code or http_status_for_error(exc.error)
     raise HTTPException(status_code=status_code, detail=exc.error.to_dict()) from exc
+
+
+@app.get("/settings", response_model=SettingsResponse)
+def read_application_settings(
+    _principal: Principal = Depends(authorize_settings_read),
+    service: SettingsService = Depends(get_settings_service),
+) -> SettingsResponse:
+    return service.snapshot()
+
+
+@app.put("/settings", response_model=SettingsResponse)
+def update_application_settings(
+    request: SettingsUpdateRequest,
+    _principal: Principal = Depends(authorize_settings_write),
+    service: SettingsService = Depends(get_settings_service),
+) -> SettingsResponse:
+    try:
+        return service.update(request)
+    except SettingsValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except SettingsStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to persist settings",
+        ) from exc
+
+
+@app.get("/settings/models", response_model=ModelCatalogResponse)
+def list_model_catalog(
+    _principal: Principal = Depends(authorize_settings_read),
+    service: SettingsService = Depends(get_settings_service),
+) -> ModelCatalogResponse:
+    return service.model_catalog()
 
 
 def _proposal_from_record(
@@ -164,6 +315,8 @@ def _proposal_from_record(
         validation=dict(proposal.validation),
         approvals=[dict(entry) for entry in proposal.approvals],
         rationale=list(proposal.rationale),
+        validated_at=proposal.validated_at,
+        governance=dict(proposal.governance),
     )
 
 
@@ -942,7 +1095,20 @@ def dev_agent_proposals(
 ) -> DevAgentProposalListResponse:
     _ = principal
     backlog_models = [_task_from_record(task) for task in service.list_backlog()]
-    return DevAgentProposalListResponse(backlog=backlog_models)
+    metrics = service.metrics()
+    metrics_model = DevAgentMetricsModel(
+        generated_at=datetime.fromisoformat(metrics["generated_at"]),
+        total_tasks=metrics["total_tasks"],
+        triaged_tasks=metrics["triaged_tasks"],
+        rollout_pending=metrics["rollout_pending"],
+        validated_proposals=metrics["validated_proposals"],
+        quality_gate_pass_rate=metrics["quality_gate_pass_rate"],
+        velocity_per_day=metrics["velocity_per_day"],
+        active_rollouts=metrics["active_rollouts"],
+        ci_workflows=list(metrics["ci_workflows"]),
+        feature_toggles=[dict(toggle) for toggle in metrics["feature_toggles"]],
+    )
+    return DevAgentProposalListResponse(backlog=backlog_models, metrics=metrics_model)
 
 
 @app.post("/dev-agent/apply", response_model=DevAgentApplyResponse)
@@ -955,10 +1121,24 @@ def dev_agent_apply(
     task_model = _task_from_record(result.task)
     proposal_model = _proposal_from_record(result.task, result.proposal)
     execution_model = _execution_from_result(result.execution)
+    metrics = service.metrics()
+    metrics_model = DevAgentMetricsModel(
+        generated_at=datetime.fromisoformat(metrics["generated_at"]),
+        total_tasks=metrics["total_tasks"],
+        triaged_tasks=metrics["triaged_tasks"],
+        rollout_pending=metrics["rollout_pending"],
+        validated_proposals=metrics["validated_proposals"],
+        quality_gate_pass_rate=metrics["quality_gate_pass_rate"],
+        velocity_per_day=metrics["velocity_per_day"],
+        active_rollouts=metrics["active_rollouts"],
+        ci_workflows=list(metrics["ci_workflows"]),
+        feature_toggles=[dict(toggle) for toggle in metrics["feature_toggles"]],
+    )
     return DevAgentApplyResponse(
         proposal=proposal_model,
         task=task_model,
         execution=execution_model,
+        metrics=metrics_model,
     )
 
 
