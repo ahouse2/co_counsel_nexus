@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+from types import MethodType
 from typing import Any, Dict
 from uuid import uuid4
 
@@ -220,3 +221,65 @@ def test_voice_service_persona_transitions(voice_service: VoiceService) -> None:
     assert last_shift["language"] == "es"
     assert "sentiment" in last_shift["trigger"].lower()
     assert outcome.translation.target_language == "es"
+
+
+def test_voice_session_handles_missing_thread_id(
+    voice_service: VoiceService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agents_service = voice_service.agents_service
+    original_run_case = agents_service.run_case
+
+    def run_case_without_thread(self, *, case_id: str, question: str, principal=None):
+        payload = original_run_case(case_id=case_id, question=question, principal=principal)
+        scrubbed = dict(payload)
+        scrubbed.pop("thread_id", None)
+        return scrubbed
+
+    monkeypatch.setattr(
+        agents_service,
+        "run_case",
+        MethodType(run_case_without_thread, agents_service),
+    )
+
+    outcome = voice_service.create_session(
+        case_id="CASE-DETACHED-003",
+        audio_payload=b"audio",
+        persona_id="aurora",
+        principal=None,
+    )
+
+    assert outcome.session.thread_id is None
+    assert "None" not in agents_service.memory_store.list_threads()
+
+
+def test_voice_session_uses_provided_thread_id_when_missing_from_payload(
+    voice_service: VoiceService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agents_service = voice_service.agents_service
+    original_run_case = agents_service.run_case
+
+    def run_case_without_thread(self, *, case_id: str, question: str, principal=None):
+        payload = original_run_case(case_id=case_id, question=question, principal=principal)
+        scrubbed = dict(payload)
+        scrubbed.pop("thread_id", None)
+        return scrubbed
+
+    monkeypatch.setattr(
+        agents_service,
+        "run_case",
+        MethodType(run_case_without_thread, agents_service),
+    )
+
+    provided_thread_id = "thread-manual-123"
+    outcome = voice_service.create_session(
+        case_id="CASE-DETACHED-004",
+        audio_payload=b"audio",
+        persona_id="aurora",
+        principal=None,
+        thread_id=provided_thread_id,
+    )
+
+    assert outcome.session.thread_id == provided_thread_id
+    stored_thread = agents_service.get_thread(provided_thread_id)
+    voice_metadata = stored_thread["memory"]["voice_sessions"][outcome.session.session_id]
+    assert voice_metadata["source_thread_id"] == provided_thread_id
