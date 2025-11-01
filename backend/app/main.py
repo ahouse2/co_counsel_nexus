@@ -138,6 +138,11 @@ app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.add_middleware(MTLSMiddleware, config=create_mtls_config())
 
 
+@app.options("/graphql", include_in_schema=False)
+async def graphql_http_options() -> Response:
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.api_route("/graphql", methods=["GET", "POST"])
 async def graphql_http(
     request: Request,
