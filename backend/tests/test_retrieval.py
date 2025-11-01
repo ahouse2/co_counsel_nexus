@@ -82,6 +82,7 @@ def retrieval_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     service.forensics_service = _DummyForensics()
     service.privilege_classifier = _DummyPrivilege()
     service.timeline_store = TimelineStore(service.settings.timeline_path)
+    service.query_engine = type("_StubQueryEngine", (), {"rrf_constant": 60.0})()
     return service
 
 
@@ -272,6 +273,29 @@ def test_join_external_results_links_internal_case(
     external_payload = bundle.external_points[0].payload
     assert external_payload["linked_doc_id"] == "doc-internal"
     assert "external:caselaw" in external_payload["retrievers"]
+
+
+def test_reconcile_external_evidence_normalises_scores(
+    retrieval_service: retrieval_module.RetrievalService,
+) -> None:
+    raw_point = qmodels.ScoredPoint(
+        id="caselaw::1",
+        score=1.0,
+        payload={
+            "doc_id": "caselaw::1",
+            "source_type": "caselaw",
+            "text": "Holding text",
+        },
+        version=1,
+    )
+    reconciled = retrieval_service._reconcile_external_evidence([raw_point], [])
+    assert reconciled
+    normalised = reconciled[0]
+    expected_top_score = pytest.approx(1.0 / retrieval_service.query_engine.rrf_constant)
+    assert normalised.score == expected_top_score
+    assert normalised.payload["fusion_score"] == expected_top_score
+    assert normalised.payload["confidence"] == expected_top_score
+    assert normalised.payload["external_raw_score"] == pytest.approx(1.0)
 
 
 def test_contradiction_detection_logs_warning(

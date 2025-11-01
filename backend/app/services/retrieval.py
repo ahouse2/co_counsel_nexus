@@ -838,8 +838,11 @@ class RetrievalService:
         reconciled: List[qmodels.ScoredPoint] = []
         for point in points:
             payload = dict(point.payload or {})
-            payload.setdefault("fusion_score", float(point.score))
-            payload.setdefault("confidence", float(point.score))
+            raw_score = float(point.score or 0.0)
+            normalised_score = self._normalise_external_score(raw_score)
+            payload.setdefault("external_raw_score", raw_score)
+            payload["fusion_score"] = normalised_score
+            payload["confidence"] = normalised_score
             payload["external_case_law"] = True
             linked = self._link_internal_case_law(payload, inventory)
             if linked:
@@ -852,7 +855,7 @@ class RetrievalService:
             reconciled.append(
                 qmodels.ScoredPoint(
                     id=point.id,
-                    score=float(point.score),
+                    score=normalised_score,
                     payload=payload,
                     version=point.version,
                 )
@@ -928,6 +931,35 @@ class RetrievalService:
             bundle.fusion_scores.setdefault(key, float(point.score))
         return bundle
 
+    def _normalise_external_score(self, score: float) -> float:
+        """Map external adapter scores onto the reciprocal-rank fusion scale."""
+
+        try:
+            score_value = float(score)
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            return 0.0
+        if score_value <= 0.0:
+            return 0.0
+
+        rrf_constant = self._safe_float(getattr(self.query_engine, "rrf_constant", None)) or 60.0
+        if rrf_constant <= 0.0:  # pragma: no cover - configuration guard
+            rrf_constant = 60.0
+
+        max_rrf_score = 1.0 / rrf_constant
+        if score_value <= max_rrf_score + 1e-9:
+            # Score already on (or below) the fusion scale; no adjustment needed.
+            return score_value
+
+        try:
+            estimated_rank = (1.0 / score_value) - 1.0
+        except ZeroDivisionError:  # pragma: no cover - defensive guard
+            estimated_rank = 0.0
+        if estimated_rank < 0.0:
+            estimated_rank = 0.0
+
+        normalised = 1.0 / (rrf_constant + estimated_rank)
+        return normalised
+
     def _standardise_external_point(self, point: qmodels.ScoredPoint) -> qmodels.ScoredPoint:
         payload = dict(point.payload or {})
         payload.setdefault("fusion_score", float(point.score))
@@ -968,6 +1000,7 @@ class RetrievalService:
             "linked_doc_summary",
             "linked_doc_citations",
             "citations",
+            "external_raw_score",
         ):
             value = other.get(key)
             if value and not payload.get(key):
