@@ -116,7 +116,7 @@ const TrialUniversityPanel: React.FC = () => {
             />
           </div>
           
-          {/* Lessons grid */}
+          {/* Lessons grid with cinematic styling */}
           <div>
             <h3 className="text-text-primary font-display text-lg mb-4">Course Modules</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -126,8 +126,12 @@ const TrialUniversityPanel: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3, delay: index * 0.1 }}
-                  className="bg-background-surface border border-border-subtle rounded-xl p-4 hover:border-accent-cyan-500/50 transition-colors"
+                  whileHover={{ y: -5 }}
+                  className="bg-background-surface border border-border-subtle rounded-xl p-4 hover:border-accent-cyan-500/50 transition-all duration-300 relative overflow-hidden group"
                 >
+                  {/* Neon accent border on left */}
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-accent-cyan-500 to-accent-violet-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <h4 className="text-text-primary font-medium">{lesson.title}</h4>
@@ -137,28 +141,41 @@ const TrialUniversityPanel: React.FC = () => {
                       variant="ghost"
                       size="sm"
                       onClick={() => toggleBookmark(lesson.id)}
-                      className={lesson.bookmarked ? "text-accent-gold" : "text-text-secondary"}
+                      className={lesson.bookmarked ? "text-accent-gold relative" : "text-text-secondary"}
                     >
                       <Bookmark className={`w-4 h-4 ${lesson.bookmarked ? "fill-current" : ""}`} />
+                      {/* Glow effect when bookmarked */}
+                      {lesson.bookmarked && (
+                        <div className="absolute inset-0 bg-accent-gold rounded-full blur-sm opacity-30" />
+                      )}
                     </Button>
                   </div>
                   
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs px-2 py-1 bg-accent-violet-500/20 text-accent-violet-300 rounded-full">
-                      {lesson.category}
+                    <span className="text-xs px-2 py-1 bg-accent-violet-500/20 text-accent-violet-300 rounded-full relative overflow-hidden">
+                      {/* Glow effect */}
+                      <div className="absolute inset-0 bg-accent-violet-500/10" />
+                      <span className="relative z-10">{lesson.category}</span>
                     </span>
                     <span className="text-text-secondary text-sm">{lesson.duration}</span>
                   </div>
                   
-                  {/* Progress bar */}
+                  {/* Progress bar with glow effect */}
                   <div className="mb-3">
                     <div className="flex justify-between text-xs text-text-secondary mb-1">
                       <span>Progress</span>
                       <span>{lesson.progress}%</span>
                     </div>
-                    <div className="w-full h-2 bg-background-panel rounded-full">
+                    <div className="w-full h-2 bg-background-panel rounded-full relative overflow-hidden">
                       <motion.div 
-                        className="h-full bg-gradient-to-r from-accent-cyan-500 to-accent-violet-500 rounded-full"
+                        className="h-full bg-gradient-to-r from-accent-cyan-500 to-accent-violet-500 rounded-full relative"
+                        initial={{ width: 0 }}
+                        animate={{ width: `${lesson.progress}%` }}
+                        transition={{ duration: 0.5, delay: 0.2 }}
+                      />
+                      {/* Glow effect on progress */}
+                      <motion.div 
+                        className="absolute inset-0 bg-gradient-to-r from-accent-cyan-500/30 to-accent-violet-500/30 rounded-full blur-sm"
                         initial={{ width: 0 }}
                         animate={{ width: `${lesson.progress}%` }}
                         transition={{ duration: 0.5, delay: 0.2 }}
@@ -170,18 +187,22 @@ const TrialUniversityPanel: React.FC = () => {
                     <Button 
                       variant="cinematic" 
                       size="sm" 
-                      className="flex-1"
+                      className="flex-1 relative overflow-hidden"
                     >
-                      <Play className="w-4 h-4 mr-2" />
+                      <Play className="w-4 h-4 mr-2 relative z-10" />
                       Play
+                      {/* Button glow effect */}
+                      <div className="absolute inset-0 bg-gradient-to-r from-accent-violet-600/30 to-accent-cyan-500/30 blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     </Button>
                     <Button 
                       variant="outline" 
                       size="sm"
-                      className="border-border-subtle text-text-secondary"
+                      className="border-border-subtle text-text-secondary relative overflow-hidden group/quiz"
                     >
-                      <Award className="w-4 h-4 mr-2" />
+                      <Award className="w-4 h-4 mr-2 relative z-10" />
                       Quiz
+                      {/* Button glow effect on hover */}
+                      <div className="absolute inset-0 bg-text-secondary/10 blur-sm opacity-0 group-hover/quiz:opacity-100 transition-opacity duration-300" />
                     </Button>
                   </div>
                 </motion.div>

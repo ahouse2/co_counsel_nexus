@@ -2,12 +2,26 @@
 
 NinthOctopusMitten delivers an end-to-end litigation co-counsel experience that blends document ingestion, knowledge graph reasoning, retrieval-augmented generation, multi-agent orchestration, and forensic tooling. The stack now ships with a provider-aware runtime, encrypted operator settings, and a production-ready neon UI for configuring model providers, credentials, and appearance.
 
+## Project Status
+
+**✅ Production Ready** - All core features have been implemented and tested:
+
+- **Cinematic Design System** with Tailwind CSS, shadcn/ui, and Radix primitives
+- **3D Graph Explorer** with React Three Fiber visualization
+- **Evidence Management** with AI-powered summarization
+- **Trial University** with holo-screen video lessons
+- **Mock Trial Arena** with live video conferencing
+
 ## Highlights
 - **Provider registry & catalog** — Gemini 2.5 Flash is the default chat/vision model with optional OpenAI, Azure OpenAI, Hugging Face Inference, Ollama, llama.cpp, and GGUF-local adapters. A machine-readable catalog (`/settings/models`) is current to 2025-10-30.
 - **Encrypted settings service** — `/settings` endpoints persist provider choices, API keys, CourtListener tokens, and research browser credentials using AES-GCM encryption behind `PlatformEngineer` scopes.
 - **Frontend settings panel** — The React app exposes tabs for Providers, Credentials, Research tools, and Appearance (system/dark/light) powered by the new `SettingsContext`.
 - **Observability & auditability** — Retrieval responses stream provider/model metadata, and all changes flow through FastAPI routes secured with mTLS + OAuth.
-- **Deployment matrix** — Docker Compose, Helm, and Terraform overlays support community, pro, and enterprise profiles with optional GPU acceleration and cloud-native backups.
+- **Cinematic UI Experience** — Neon-themed interface with Tailwind CSS, shadcn/ui, and Radix primitives featuring glassmorphism, glow effects, and smooth animations.
+- **3D Graph Explorer** — Interactive 3D visualization of case relationships using React Three Fiber with bloom, depth-of-field, and springy drag interactions.
+- **Evidence Management** — Drag-and-drop upload zone with glowing progress arcs and AI-generated summaries.
+- **Trial University** — Holo-screen video lessons with interactive subtitles and progress tracking.
+- **Mock Trial Arena** — Live video conferencing with draggable exhibits and real-time transcription.
 
 ## Quick Start
 1. **Install prerequisites**
@@ -44,6 +58,54 @@ NinthOctopusMitten delivers an end-to-end litigation co-counsel experience that 
    npm --prefix frontend run test -- --run
    pytest tests/e2e -q           # optional full-stack smoke tests
    ```
+
+## Working with the Project
+
+### Development Workflow
+
+**Frontend Development:**
+```bash
+cd frontend
+npm install
+npm run dev  # Starts development server on http://localhost:5173
+```
+
+**Backend Development:**
+```bash
+# Bootstrap backend dependencies
+./scripts/bootstrap_backend.sh
+
+# Run backend locally
+uvicorn app.main:app --port 8000 --reload
+```
+
+**Testing:**
+```bash
+# Frontend tests
+npm --prefix frontend run test
+
+# Backend tests
+python -m pytest backend/tests -q
+
+# End-to-end tests
+pytest tests/e2e -q
+```
+
+### Key UI Components
+
+1. **Chat Workspace** - Main interface for conversational legal research
+2. **3D Graph Explorer** - Visualize case relationships in an interactive 3D environment
+3. **Evidence Management** - Upload, organize, and analyze case documents with AI summaries
+4. **Trial University** - Access holo-screen video lessons for legal education
+5. **Mock Trial Arena** - Practice courtroom scenarios with live video and draggable exhibits
+
+### Architecture Overview
+
+- **Frontend**: React + Vite with TypeScript
+- **Backend**: FastAPI with Python 3.11+
+- **Databases**: Neo4j (graph), Qdrant (vector search)
+- **AI Models**: Multi-provider support (Gemini, OpenAI, Azure OpenAI, etc.)
+- **Infrastructure**: Docker Compose for local development, Helm/Terraform for production
 
 ## Windows One-Click Installer
 For Windows operators that prefer a turnkey experience, the repository ships with a
@@ -97,7 +159,7 @@ These values can be customised in:
 ### Settings API & panel
 - `GET /settings` / `PUT /settings` surface encrypted state for providers, credentials, research tools, and appearance. Requests require the `settings:read` or `settings:write` scope and the `PlatformEngineer` role.
 - `GET /settings/models` exposes the curated model catalog (provider IDs, capabilities, display names, context windows, availability).
-- The frontend’s **Settings** button (⚙) opens a four-tab panel powered by `SettingsContext`, allowing non-technical operators to select providers/models, upload API keys, manage CourtListener/research tokens, and toggle theme preferences. Changes persist to the encrypted backend store and immediately update the chat/query runtime.
+- The frontend's **Settings** button (⚙) opens a four-tab panel powered by `SettingsContext`, allowing non-technical operators to select providers/models, upload API keys, manage CourtListener/research tokens, and toggle theme preferences. Changes persist to the encrypted backend store and immediately update the chat/query runtime.
 
 ## Deployment Matrix
 A detailed comparison of community vs. pro vs. enterprise capabilities—covering observability, backups, RBAC, and GPU profiles—is maintained in [`docs/roadmaps/2025-11-23_deployment_matrix.md`](docs/roadmaps/2025-11-23_deployment_matrix.md). Highlights:
@@ -118,6 +180,39 @@ A detailed comparison of community vs. pro vs. enterprise capabilities—coverin
 ### Helm & Terraform
 - Helm chart (`infra/helm/full-stack`) mirrors the Compose topology with configurable PVCs, secret handling, CronJobs for backups, and optional GPU tolerations.
 - Terraform module (`infra/terraform/modules/platform`) provisions S3 buckets, IAM roles, and Secrets Manager entries for production deployments. Example environment wiring is located under `infra/terraform/environments/enterprise`.
+
+## UI Features
+The frontend now includes a comprehensive cinematic UI experience with the following features:
+
+### Cinematic Design System
+- Tailwind CSS with custom theme and design tokens
+- shadcn/ui components with Radix primitives
+- Glassmorphism effects and neon glow animations
+- Framer Motion for smooth transitions and interactions
+
+### 3D Graph Explorer
+- React Three Fiber implementation for 3D visualization
+- Neon-glass nodes with bloom and depth-of-field effects
+- Interactive hover tooltips and springy drag interactions
+- Glassmorphic metrics/filter HUD with search and toggles
+
+### Evidence Management
+- Drag-and-drop upload zone with visual feedback
+- Glowing progress arcs for upload status
+- AI-generated summary tiles with expandable details
+- Reorderable evidence cards with tag chips and controls
+
+### Trial University
+- Holo-screen video player with atmospheric edge lighting
+- Interactive subtitle overlays
+- Glass tile lesson cards with neon accents
+- Progress tracking and bookmarking features
+
+### Mock Trial Arena
+- WebRTC-compatible video grid with neon borders
+- Draggable exhibit panel with spotlight functionality
+- Real-time transcript overlays and chat panel
+- Session timers and participant status indicators
 
 ## Archived Reference Assets
 Legacy vendor experiments and snapshots now reside under [`archive/2025-10-30_reference-assets/`](archive/2025-10-30_reference-assets/). These files are retained for historical context; new work should reference the production backend/frontend code paths.

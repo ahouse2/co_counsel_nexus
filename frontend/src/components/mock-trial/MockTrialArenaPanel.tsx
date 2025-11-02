@@ -192,43 +192,55 @@ const MockTrialArenaPanel: React.FC = () => {
           </p>
         </CardHeader>
         <CardContent>
-          {/* Session controls and timer */}
-          <div className="flex flex-wrap items-center justify-between gap-4 mb-6 p-4 bg-background-surface rounded-xl border border-border-subtle">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Timer className="w-5 h-5 text-accent-cyan-500" />
-                <span className="text-text-primary font-mono">{formatTime(elapsedTime)}</span>
+          {/* Session controls and timer with cinematic styling */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6 p-4 bg-background-surface/50 backdrop-blur-sm rounded-xl border border-border-subtle relative overflow-hidden">
+            {/* Glow effect */}
+            <div className="absolute inset-0 bg-gradient-to-r from-accent-cyan-500/5 to-accent-violet-500/5 rounded-xl" />
+            <div className="relative z-10 flex items-center gap-4">
+              <div className="flex items-center gap-2 relative overflow-hidden rounded-lg px-3 py-2 bg-background-panel/80 border border-border-subtle">
+                <Timer className="w-5 h-5 text-accent-cyan-500 relative z-10" />
+                <span className="text-text-primary font-mono relative z-10">{formatTime(elapsedTime)}</span>
+                {/* Glow effect for timer */}
+                <div className="absolute inset-0 bg-accent-cyan-500/10 rounded-lg" />
               </div>
-              <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-accent-violet-500" />
-                <span className="text-text-primary">{participants.length} Participants</span>
+              <div className="flex items-center gap-2 relative overflow-hidden rounded-lg px-3 py-2 bg-background-panel/80 border border-border-subtle">
+                <Users className="w-5 h-5 text-accent-violet-500 relative z-10" />
+                <span className="text-text-primary relative z-10">{participants.length} Participants</span>
+                {/* Glow effect for participants */}
+                <div className="absolute inset-0 bg-accent-violet-500/10 rounded-lg" />
               </div>
             </div>
             
-            <div className="flex gap-2">
+            <div className="relative z-10 flex gap-2">
               <Button 
                 variant="outline" 
                 size="sm"
-                className="flex items-center gap-2 border-border-subtle text-text-secondary"
+                className="flex items-center gap-2 border-border-subtle text-text-secondary relative overflow-hidden group/mute-all"
               >
-                <Mic className="w-4 h-4" />
+                <Mic className="w-4 h-4 relative z-10" />
                 Mute All
+                {/* Button glow effect */}
+                <div className="absolute inset-0 bg-text-secondary/10 rounded-md blur-sm opacity-0 group-hover/mute-all:opacity-100 transition-opacity duration-300" />
               </Button>
               <Button 
                 variant="outline" 
                 size="sm"
-                className="flex items-center gap-2 border-border-subtle text-text-secondary"
+                className="flex items-center gap-2 border-border-subtle text-text-secondary relative overflow-hidden group/video-off"
               >
-                <Video className="w-4 h-4" />
+                <Video className="w-4 h-4 relative z-10" />
                 Video Off
+                {/* Button glow effect */}
+                <div className="absolute inset-0 bg-text-secondary/10 rounded-md blur-sm opacity-0 group-hover/video-off:opacity-100 transition-opacity duration-300" />
               </Button>
               <Button 
                 variant="destructive" 
                 size="sm"
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 relative overflow-hidden group/end"
               >
-                <PhoneOff className="w-4 h-4" />
+                <PhoneOff className="w-4 h-4 relative z-10" />
                 End Session
+                {/* Button glow effect */}
+                <div className="absolute inset-0 bg-accent-red/20 rounded-md blur-sm opacity-0 group-hover/end:opacity-100 transition-opacity duration-300" />
               </Button>
             </div>
           </div>
@@ -254,22 +266,50 @@ const MockTrialArenaPanel: React.FC = () => {
             </div>
           </div>
           
-          {/* Transcript panel */}
-          <div className="mt-6 p-4 bg-background-surface rounded-xl border border-border-subtle">
-            <h3 className="text-text-primary font-display text-lg mb-3">Live Transcript</h3>
-            <div className="h-32 overflow-y-auto">
-              <div className="space-y-2 text-sm">
-                <div className="flex gap-2">
-                  <span className="font-medium text-accent-cyan-500">Alex Johnson:</span>
-                  <span className="text-text-primary">Your Honor, I'd like to present Exhibit A, the contract agreement.</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="font-medium text-accent-violet-500">Sarah Williams:</span>
-                  <span className="text-text-primary">Yes, I signed that document on March 15th, 2023.</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="font-medium text-accent-gold">Michael Chen:</span>
-                  <span className="text-text-primary">Please approach the witness with the document.</span>
+          {/* Transcript panel with cinematic styling */}
+          <div className="mt-6 p-4 bg-background-surface/50 backdrop-blur-sm rounded-xl border border-border-subtle relative overflow-hidden">
+            {/* Glow effect */}
+            <div className="absolute inset-0 bg-gradient-to-r from-accent-cyan-500/5 to-accent-violet-500/5 rounded-xl" />
+            <div className="relative z-10">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-text-primary font-display text-lg">Live Transcript</h3>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="flex items-center gap-2 border-border-subtle text-text-secondary"
+                >
+                  Export
+                </Button>
+              </div>
+              <div className="h-32 overflow-y-auto rounded-lg bg-background-panel/80 border border-border-subtle p-3">
+                <div className="space-y-3 text-sm">
+                  <motion.div 
+                    className="flex gap-2"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <span className="font-medium text-accent-cyan-500 flex-shrink-0">Alex Johnson:</span>
+                    <span className="text-text-primary">Your Honor, I'd like to present Exhibit A, the contract agreement.</span>
+                  </motion.div>
+                  <motion.div 
+                    className="flex gap-2"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3, delay: 0.1 }}
+                  >
+                    <span className="font-medium text-accent-violet-500 flex-shrink-0">Sarah Williams:</span>
+                    <span className="text-text-primary">Yes, I signed that document on March 15th, 2023.</span>
+                  </motion.div>
+                  <motion.div 
+                    className="flex gap-2"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3, delay: 0.2 }}
+                  >
+                    <span className="font-medium text-accent-gold flex-shrink-0">Michael Chen:</span>
+                    <span className="text-text-primary">Please approach the witness with the document.</span>
+                  </motion.div>
                 </div>
               </div>
             </div>

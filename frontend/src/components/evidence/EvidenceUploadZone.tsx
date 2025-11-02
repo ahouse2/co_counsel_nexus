@@ -102,8 +102,11 @@ const EvidenceUploadZone: React.FC = () => {
               "text/plain": [".txt"],
               "image/*": [".png", ".jpg", ".jpeg"]
             }}
-            className="min-h-[200px] flex flex-col items-center justify-center gap-4"
+            className="min-h-[200px] flex flex-col items-center justify-center gap-4 border-2 border-dashed border-accent-cyan-500/50 rounded-2xl bg-background-surface/50 backdrop-blur-sm relative overflow-hidden"
           >
+            {/* Animated background glow */}
+            <div className="absolute inset-0 bg-gradient-to-br from-accent-cyan-500/10 to-accent-violet-500/10 rounded-2xl animate-pulse" />
+            
             <motion.div
               animate={{ 
                 scale: isUploading ? [1, 1.1, 1] : 1,
@@ -114,10 +117,15 @@ const EvidenceUploadZone: React.FC = () => {
                 repeat: isUploading ? Infinity : 0,
                 ease: "easeInOut"
               }}
+              className="relative z-10"
             >
-              <Upload className="w-12 h-12 text-accent-cyan-500" />
+              <div className="relative">
+                <Upload className="w-12 h-12 text-accent-cyan-500" />
+                {/* Glow effect */}
+                <div className="absolute inset-0 bg-accent-cyan-500 rounded-full blur-md opacity-30 animate-pulse" />
+              </div>
             </motion.div>
-            <div className="text-center">
+            <div className="text-center relative z-10">
               <h3 className="text-text-primary font-medium mb-1">
                 {isUploading ? "Uploading files..." : "Drag & drop files here"}
               </h3>
@@ -129,7 +137,7 @@ const EvidenceUploadZone: React.FC = () => {
             </div>
             <Button 
               variant="cinematic" 
-              className="mt-2"
+              className="mt-2 relative z-10"
               disabled={isUploading}
             >
               {isUploading ? (
@@ -141,6 +149,12 @@ const EvidenceUploadZone: React.FC = () => {
                 "Browse Files"
               )}
             </Button>
+            
+            {/* Corner accents */}
+            <div className="absolute top-4 left-4 w-2 h-2 bg-accent-cyan-500 rounded-full animate-pulse" />
+            <div className="absolute top-4 right-4 w-2 h-2 bg-accent-violet-500 rounded-full animate-pulse" />
+            <div className="absolute bottom-4 left-4 w-2 h-2 bg-accent-violet-500 rounded-full animate-pulse" />
+            <div className="absolute bottom-4 right-4 w-2 h-2 bg-accent-cyan-500 rounded-full animate-pulse" />
           </Dropzone>
 
           <AnimatePresence>
@@ -163,13 +177,25 @@ const EvidenceUploadZone: React.FC = () => {
                     className="flex items-center justify-between p-3 bg-background-surface rounded-lg border border-border-subtle"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="flex-shrink-0">
+                      <div className="flex-shrink-0 relative">
                         {file.status === "uploading" ? (
-                          <Loader2 className="w-5 h-5 text-accent-cyan-500 animate-spin" />
+                          <>
+                            <Loader2 className="w-5 h-5 text-accent-cyan-500 animate-spin" />
+                            {/* Glow effect */}
+                            <div className="absolute inset-0 bg-accent-cyan-500 rounded-full blur-sm opacity-30 animate-pulse" />
+                          </>
                         ) : file.status === "success" ? (
-                          <CheckCircle className="w-5 h-5 text-accent-green" />
+                          <>
+                            <CheckCircle className="w-5 h-5 text-accent-green relative z-10" />
+                            {/* Success glow */}
+                            <div className="absolute inset-0 bg-accent-green rounded-full blur-sm opacity-30" />
+                          </>
                         ) : (
-                          <XCircle className="w-5 h-5 text-accent-red" />
+                          <>
+                            <XCircle className="w-5 h-5 text-accent-red relative z-10" />
+                            {/* Error glow */}
+                            <div className="absolute inset-0 bg-accent-red rounded-full blur-sm opacity-30" />
+                          </>
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
@@ -180,11 +206,18 @@ const EvidenceUploadZone: React.FC = () => {
                           {formatFileSize(file.size)}
                         </p>
                         
-                        {/* Progress bar */}
+                        {/* Progress bar with glow effect */}
                         {file.status === "uploading" && (
-                          <div className="mt-2 w-full bg-background-panel rounded-full h-1.5">
+                          <div className="mt-2 w-full bg-background-panel rounded-full h-1.5 relative overflow-hidden">
                             <motion.div 
-                              className="bg-gradient-to-r from-accent-cyan-500 to-accent-violet-500 h-1.5 rounded-full"
+                              className="bg-gradient-to-r from-accent-cyan-500 to-accent-violet-500 h-1.5 rounded-full relative"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${file.progress}%` }}
+                              transition={{ duration: 0.3 }}
+                            />
+                            {/* Glow effect on progress */}
+                            <motion.div 
+                              className="absolute inset-0 bg-gradient-to-r from-accent-cyan-500/30 to-accent-violet-500/30 rounded-full blur-sm"
                               initial={{ width: 0 }}
                               animate={{ width: `${file.progress}%` }}
                               transition={{ duration: 0.3 }}
@@ -192,17 +225,21 @@ const EvidenceUploadZone: React.FC = () => {
                           </div>
                         )}
                         
-                        {/* AI Summary */}
+                        {/* AI Summary with cinematic styling */}
                         {file.status === "success" && file.summary && (
                           <motion.div
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: "auto" }}
                             transition={{ duration: 0.5 }}
-                            className="mt-2 p-2 bg-background-panel rounded border border-border-subtle"
+                            className="mt-2 p-3 bg-background-panel/80 backdrop-blur-sm rounded-lg border border-border-subtle relative overflow-hidden"
                           >
-                            <p className="text-text-secondary text-xs">
-                              {file.summary}
-                            </p>
+                            {/* Summary glow effect */}
+                            <div className="absolute inset-0 bg-gradient-to-r from-accent-cyan-500/5 to-accent-violet-500/5 rounded-lg" />
+                            <div className="relative z-10">
+                              <p className="text-text-secondary text-xs">
+                                {file.summary}
+                              </p>
+                            </div>
                           </motion.div>
                         )}
                       </div>
