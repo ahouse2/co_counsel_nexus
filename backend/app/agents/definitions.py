@@ -69,4 +69,11 @@ def build_agent_graph(tools: Dict[str, AgentTool]) -> List[AgentDefinition]:
             tool=tools["qa"],
             delegates=[],
         ),
+        AgentDefinition(
+            name="Echo",
+            role="echo",
+            description="A simple agent that echoes back the input using an LLM.",
+            tool=tools["echo"],
+            delegates=[],
+        ),
     ]

@@ -40,6 +40,15 @@ class OcrProvider(str, Enum):
     VISION = "vision"
 
 
+class LlmProvider(str, Enum):
+    """LLM backends supported by the ingestion runtime for text generation tasks."""
+
+    OPENAI = "openai"
+    AZURE_OPENAI = "azure_openai"
+    OLLAMA = "ollama"
+    HUGGINGFACE = "huggingface"
+
+
 @dataclass(frozen=True)
 class EmbeddingConfig:
     """Concrete embedding selection for a pipeline execution."""
@@ -66,6 +75,17 @@ class OcrConfig:
 
 
 @dataclass(frozen=True)
+class LlmConfig:
+    """LLM backend selection and parameters for text generation."""
+
+    provider: LlmProvider
+    model: str
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PipelineTuning:
     """Chunking, batching and retry knobs for the pipeline."""
 
@@ -82,6 +102,7 @@ class LlamaIndexRuntimeConfig:
     cost_mode: IngestionCostMode
     embedding: EmbeddingConfig
     ocr: OcrConfig
+    llm: LlmConfig # Added LLM configuration
     tuning: PipelineTuning
     workspace_dir: Path
     llama_cache_dir: Path
@@ -172,6 +193,36 @@ def build_ocr_config(settings: "Settings") -> OcrConfig:
     )
 
 
+def build_llm_config(settings: "Settings") -> LlmConfig:
+    mode = resolve_cost_mode(settings.ingestion_cost_mode)
+    if mode is IngestionCostMode.COMMUNITY:
+        return LlmConfig(
+            provider=LlmProvider.OLLAMA, # Assuming Ollama for community tier
+            model=settings.ingestion_ollama_model,
+            api_base=settings.ingestion_ollama_base,
+        )
+    if mode is IngestionCostMode.PRO:
+        return LlmConfig(
+            provider=LlmProvider.OPENAI,
+            model=settings.ingestion_openai_model,
+            api_key=settings.ingestion_openai_api_key,
+            api_base=settings.ingestion_openai_base,
+        )
+    return LlmConfig(
+        provider=LlmProvider.AZURE_OPENAI
+        if settings.ingestion_azure_openai_endpoint
+        else LlmProvider.OPENAI,
+        model=settings.ingestion_enterprise_llm_model,
+        api_key=settings.ingestion_enterprise_llm_api_key
+        or settings.ingestion_openai_api_key,
+        api_base=settings.ingestion_azure_openai_endpoint or settings.ingestion_openai_base,
+        extra={
+            "azure_deployment": settings.ingestion_azure_openai_deployment,
+            "api_version": settings.ingestion_azure_openai_api_version,
+        },
+    )
+
+
 def build_pipeline_tuning(settings: "Settings") -> PipelineTuning:
     return PipelineTuning(
         chunk_size=settings.ingestion_chunk_size,
@@ -186,6 +237,7 @@ def build_runtime_config(settings: "Settings") -> LlamaIndexRuntimeConfig:
         cost_mode=resolve_cost_mode(settings.ingestion_cost_mode),
         embedding=build_embedding_config(settings),
         ocr=build_ocr_config(settings),
+        llm=build_llm_config(settings), # Added LLM configuration
         tuning=build_pipeline_tuning(settings),
         workspace_dir=settings.ingestion_workspace_dir,
         llama_cache_dir=settings.ingestion_llama_cache_dir,
@@ -202,9 +254,12 @@ __all__ = [
     "LlamaIndexRuntimeConfig",
     "OcrConfig",
     "OcrProvider",
+    "LlmConfig", # Added
+    "LlmProvider", # Added
     "PipelineTuning",
     "build_embedding_config",
     "build_ocr_config",
+    "build_llm_config", # Added
     "build_pipeline_tuning",
     "build_runtime_config",
     "resolve_cost_mode",

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ScenarioProvider, useScenario } from '@/context/ScenarioContext';
@@ -33,7 +33,8 @@ const metadataResponse: ScenarioListResponse = {
 };
 
 const definition: ScenarioDefinition = {
-  scenario_id: 'opening-arguments',
+  
+  director: {} as any,scenario_id: 'opening-arguments',
   title: 'Opening Arguments',
   description: 'Simulate a high-stakes patent dispute.',
   category: 'trial',
@@ -89,7 +90,7 @@ const definition: ScenarioDefinition = {
       stage_direction: 'Steps forward to the podium.',
       emphasis: 'assertive',
       duration_ms: 3200,
-      fallback_text: 'Ladies and gentlemen of the jury…',
+      fallback_text: 'Ladies and gentlemen of the juryâ€¦',
     },
   ],
 };
@@ -102,7 +103,7 @@ const runResponse: ScenarioRunResponse = {
       beat_id: 'beat-1',
       speaker_id: 'counsel',
       speaker: definition.participants[1],
-      text: 'Ladies and gentlemen of the jury…',
+      text: 'Ladies and gentlemen of the juryâ€¦',
       kind: 'scripted',
       stage_direction: 'Steps forward to the podium.',
       emphasis: 'assertive',
@@ -195,3 +196,4 @@ describe('ScenarioContext', () => {
     expect(api.synthesiseSpeech).toHaveBeenCalledWith({ text: 'Testing preview', voice: 'larynx:counsel' });
   });
 });
+

@@ -146,6 +146,11 @@ class PipelineContext:
         return " ".join(line for line in self.summary_lines if line).strip()
 
 
+from ..services.audit import get_audit_service
+from ..security.authz import Principal
+
+
+
 class ForensicsService:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -161,6 +166,7 @@ class ForensicsService:
         *,
         nodes: List[Dict[str, Any]] | None = None,
         ingestion_metadata: Dict[str, Any] | None = None,
+        principal: Principal | None = None,
     ) -> ForensicsReport:
         ctx = PipelineContext(
             file_id=file_id,
@@ -190,9 +196,17 @@ class ForensicsService:
         )
         report.report_path = self._persist(report)
         self._record_pipeline_metrics(ctx, duration_ms)
+        if principal:
+            audit_service = get_audit_service()
+            audit_service.log_event(
+                event_type="FORENSICS_DOCUMENT_GENERATED",
+                principal=principal,
+                resource_id=file_id,
+                details={"path": str(path)},
+            )
         return report
 
-    def build_image_artifact(self, file_id: str, path: Path) -> ForensicsReport:
+    def build_image_artifact(self, file_id: str, path: Path, principal: Principal | None = None) -> ForensicsReport:
         ctx = PipelineContext(file_id=file_id, artifact_type="image", source_path=path)
         stages = [
             PipelineStage("canonicalise", self._stage_canonicalise),
@@ -214,9 +228,17 @@ class ForensicsService:
         )
         report.report_path = self._persist(report)
         self._record_pipeline_metrics(ctx, duration_ms)
+        if principal:
+            audit_service = get_audit_service()
+            audit_service.log_event(
+                event_type="FORENSICS_IMAGE_GENERATED",
+                principal=principal,
+                resource_id=file_id,
+                details={"path": str(path)},
+            )
         return report
 
-    def build_financial_artifact(self, file_id: str, path: Path) -> ForensicsReport:
+    def build_financial_artifact(self, file_id: str, path: Path, principal: Principal | None = None) -> ForensicsReport:
         ctx = PipelineContext(file_id=file_id, artifact_type="financial", source_path=path)
         stages = [
             PipelineStage("canonicalise", self._stage_canonicalise),
@@ -238,22 +260,46 @@ class ForensicsService:
         )
         report.report_path = self._persist(report)
         self._record_pipeline_metrics(ctx, duration_ms)
+        if principal:
+            audit_service = get_audit_service()
+            audit_service.log_event(
+                event_type="FORENSICS_FINANCIAL_GENERATED",
+                principal=principal,
+                resource_id=file_id,
+                details={"path": str(path)},
+            )
         return report
 
-    def load_report(self, file_id: str) -> Dict[str, Any]:
+    def load_report(self, file_id: str, principal: Principal | None = None) -> Dict[str, Any]:
         report_path = self.base_dir / file_id / "report.json"
         if not report_path.exists():
             raise FileNotFoundError(f"No forensics report found for {file_id}")
+        if principal:
+            audit_service = get_audit_service()
+            audit_service.log_event(
+                event_type="FORENSICS_REPORT_ACCESSED",
+                principal=principal,
+                resource_id=file_id,
+                details={"path": str(report_path)},
+            )
         return json.loads(report_path.read_text())
 
-    def load_artifact(self, file_id: str, artifact: str) -> Dict[str, Any]:
+    def load_artifact(self, file_id: str, artifact: str, principal: Principal | None = None) -> Dict[str, Any]:
         try:
-            report = self.load_report(file_id)
+            report = self.load_report(file_id, principal=principal)
         except FileNotFoundError:
             legacy_path = self.base_dir / file_id / f"{artifact}.json"
             if not legacy_path.exists():
                 raise
             legacy_payload = json.loads(legacy_path.read_text())
+            if principal:
+                audit_service = get_audit_service()
+                audit_service.log_event(
+                    event_type="FORENSICS_LEGACY_ARTIFACT_ACCESSED",
+                    principal=principal,
+                    resource_id=file_id,
+                    details={"path": str(legacy_path)},
+                )
             return {
                 "summary": f"Legacy {artifact} artefact",
                 "data": legacy_payload,
@@ -267,6 +313,14 @@ class ForensicsService:
         artifacts = report.get("artifacts", {})
         if artifact not in artifacts:
             raise FileNotFoundError(f"Artifact {artifact} missing for {file_id}")
+        if principal:
+            audit_service = get_audit_service()
+            audit_service.log_event(
+                event_type="FORENSICS_ARTIFACT_ACCESSED",
+                principal=principal,
+                resource_id=file_id,
+                details={"artifact": artifact},
+            )
         return artifacts[artifact]
 
     def report_exists(self, file_id: str, artifact: str) -> bool:

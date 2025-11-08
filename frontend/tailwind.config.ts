@@ -50,6 +50,8 @@ const config: Config = {
           gold: '#ffd65a',
           red: '#ff204e',
           green: '#4ade80',
+          pink: '#ff00ff',
+          blue: '#3b82f6',
         },
         border: {
           DEFAULT: '#383b44',

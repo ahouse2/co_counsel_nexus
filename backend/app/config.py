@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     model_providers_primary: str = Field(default="gemini")
     model_providers_secondary: str | None = Field(default="openai")
+    provider: Optional[str] = Field(default=None)
+    gemini_api_key: Optional[str] = Field(default=None)
     default_chat_model: str = Field(default="gemini-2.5-flash")
     default_embedding_model: str = Field(default="text-embedding-004")
     default_vision_model: str = Field(default="gemini-2.5-flash")
@@ -51,7 +53,8 @@ class Settings(BaseSettings):
     forensics_chain_path: Path = Field(default=Path("storage/forensics_chain/ledger.jsonl"))
     timeline_path: Path = Field(default=Path("storage/timeline.jsonl"))
     job_store_dir: Path = Field(default=Path("storage/jobs"))
-    document_store_dir: Path = Field(default=Path("storage/documents"))
+    encryption_key: str = Field(default="a_very_secret_key_for_document_encryption_32_bytes_long", min_length=32) # Added
+    document_storage_path: Path = Field(default=Path("storage/documents")) # Renamed from document_store_dir for clarity
     ingestion_workspace_dir: Path = Field(default=Path("storage/workspaces"))
     agent_threads_dir: Path = Field(default=Path("storage/agent_threads"))
     agent_retry_attempts: int = Field(default=3, ge=1)
@@ -85,6 +88,8 @@ class Settings(BaseSettings):
     scenario_library_path: Path | None = Field(default=None)
     scenario_default_top_k: int = Field(default=4, ge=1, le=20)
 
+    secret_key: str = Field(default="super-secret-jwt-key", min_length=32)
+
     tts_enabled: bool = Field(default=True)
     tts_service_url: str | None = Field(default=None)
     tts_timeout_seconds: float = Field(default=15.0, ge=1.0)
@@ -98,6 +103,10 @@ class Settings(BaseSettings):
     privilege_policy_review_threshold: float = Field(default=0.68)
     privilege_policy_block_threshold: float = Field(default=0.92)
     privilege_policy_audit_category: str = Field(default="security.privilege")
+
+    verify_pdf_endpoint: Optional[str] = Field(default=None, description="Endpoint for the VerifyPDF API.")
+    verify_pdf_api_key: Optional[str] = Field(default=None, description="API key for the VerifyPDF API.")
+
 
     security_mtls_ca_path: Path | None = Field(default=None)
     security_mtls_registry_path: Path | None = Field(default=None)
@@ -216,6 +225,17 @@ class Settings(BaseSettings):
     ingestion_vision_endpoint: Optional[str] = Field(default=None)
     ingestion_vision_model: Optional[str] = Field(default=None)
     ingestion_vision_api_key: Optional[str] = Field(default=None)
+    ingestion_ollama_model: str = Field(default="llama2") # Added
+    ingestion_ollama_base: Optional[str] = Field(default=None) # Added
+    ingestion_enterprise_llm_model: str = Field(default="gpt-4o") # Added
+    ingestion_enterprise_llm_api_key: Optional[str] = Field(default=None) # Added
+    
+    # Blockchain API Keys for Crypto Tracing
+    blockchain_api_key_ethereum: Optional[str] = Field(default=None, description="API key for Ethereum blockchain data provider (e.g., Etherscan).")
+    blockchain_api_key_bitcoin: Optional[str] = Field(default=None, description="API key for Bitcoin blockchain data provider (e.g., Blockchair).")
+    blockchain_api_base_ethereum: Optional[str] = Field(default=None, description="Base URL for Ethereum blockchain API.")
+    blockchain_api_base_bitcoin: Optional[str] = Field(default=None, description="Base URL for Bitcoin blockchain API.")
+
     ingestion_queue_maxsize: int = Field(default=32)
     ingestion_worker_concurrency: int = Field(default=1)
 
@@ -226,6 +246,10 @@ class Settings(BaseSettings):
     caselaw_endpoint: str = Field(default="https://api.case.law/v1/cases/")
     caselaw_api_key: Optional[str] = Field(default=None)
     caselaw_max_results: int = Field(default=10, ge=0, le=100)
+
+    sql_database_uri: Optional[str] = Field(default=None, description="Connection URI for the SQL database (e.g., 'sqlite:///./sql_app.db').")
+    govinfo_api_key: Optional[str] = Field(default=None) # Added for GovInfo API
+    timeline_storage_path: Path = Field(default=Path("storage/timelines")) # Updated for TimelineService
 
     retrieval_max_search_window: int = Field(default=60)
     retrieval_graph_hop_window: int = Field(default=12)
@@ -245,9 +269,9 @@ class Settings(BaseSettings):
             self.ingestion_hf_cache_dir.mkdir(parents=True, exist_ok=True)
         self.forensics_dir.mkdir(parents=True, exist_ok=True)
         self.forensics_chain_path.parent.mkdir(parents=True, exist_ok=True)
-        self.timeline_path.parent.mkdir(parents=True, exist_ok=True)
+        self.timeline_storage_path.mkdir(parents=True, exist_ok=True) # Updated for TimelineService
         self.job_store_dir.mkdir(parents=True, exist_ok=True)
-        self.document_store_dir.mkdir(parents=True, exist_ok=True)
+        self.document_storage_path.mkdir(parents=True, exist_ok=True) # Updated
         self.ingestion_workspace_dir.mkdir(parents=True, exist_ok=True)
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)

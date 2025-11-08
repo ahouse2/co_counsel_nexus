@@ -1,10 +1,19 @@
-FROM python:3.11-slim
+FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
+
+# Install Python 3.11 and other necessary packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 \
-    && rm -rf /var/lib/apt/lists/*
+# Create a Python virtual environment and activate it
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt

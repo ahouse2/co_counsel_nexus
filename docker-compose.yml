@@ -1,36 +1,31 @@
 version: '3.9'
 
 services:
-  # Frontend service
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "5173:5173"
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000
-    depends_on:
-      - api
-    networks:
-      - app-network
-
-  # Backend API service
+  # Include all existing services from infra/docker-compose.yml
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    profiles:
+      - community
+      - pro
+      - enterprise
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
-      - MODEL_PROVIDERS_PRIMARY=gemini
-      - MODEL_PROVIDERS_SECONDARY=openai
-      - DEFAULT_CHAT_MODEL=gemini-2.5-flash
-      - DEFAULT_EMBEDDING_MODEL=text-embedding-004
-      - DEFAULT_VISION_MODEL=gemini-2.5-flash
+      - MODEL_PROVIDERS_PRIMARY=${MODEL_PROVIDERS_PRIMARY:-gemini}
+      - MODEL_PROVIDERS_SECONDARY=${MODEL_PROVIDERS_SECONDARY:-openai}
+      - DEFAULT_CHAT_MODEL=${DEFAULT_CHAT_MODEL:-gemini-2.5-flash}
+      - DEFAULT_EMBEDDING_MODEL=${DEFAULT_EMBEDDING_MODEL:-text-embedding-004}
+      - DEFAULT_VISION_MODEL=${DEFAULT_VISION_MODEL:-gemini-2.5-flash}
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=securepassword
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-securepassword}
       - QDRANT_URL=http://qdrant:6333
       - VECTOR_DIR=/data/vector
       - VOICE_SESSIONS_DIR=/data/voice/sessions
@@ -39,21 +34,24 @@ services:
       - GRAPH_SNAPSHOT_PATH=/var/cocounsel/graphs
       - TELEMETRY_BUFFER_PATH=/var/cocounsel/telemetry
       - BILLING_USAGE_PATH=/data/billing/usage.json
-      - BILLING_DEFAULT_PLAN=community
-      - TELEMETRY_ENABLED=false
-      - TELEMETRY_OTLP_ENDPOINT=http://otel-collector:4317
-      - TELEMETRY_OTLP_INSECURE=true
-      - TELEMETRY_ENVIRONMENT=community
-      - STT_SERVICE_URL=http://stt:9000
-      - TTS_SERVICE_URL=http://tts:5002
+      - BILLING_DEFAULT_PLAN=${BILLING_DEFAULT_PLAN:-community}
+      - TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-false}
+      - TELEMETRY_OTLP_ENDPOINT=${TELEMETRY_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - TELEMETRY_OTLP_INSECURE=${TELEMETRY_OTLP_INSECURE:-true}
+      - TELEMETRY_ENVIRONMENT=${TELEMETRY_ENVIRONMENT:-community}
+      - STT_SERVICE_URL=${STT_SERVICE_URL:-http://stt:9000}
+      - TTS_SERVICE_URL=${TTS_SERVICE_URL:-http://tts:5002}
       - HUGGINGFACE_HUB_CACHE=/var/cocounsel/models/huggingface
       - WHISPER_MODEL_PATH=/var/cocounsel/models/whisper
       - TTS_MODEL_PATH=/var/cocounsel/models/tts
+    ports:
+      - "8000:8000"
     depends_on:
       - neo4j
       - qdrant
+      - postgres
     networks:
-      - app-network
+      - backend
     volumes:
       - api_data:/data
       - voice_models:/models
@@ -64,147 +62,34 @@ services:
       - ./var/models/whisper:/var/cocounsel/models/whisper
       - ./var/models/tts:/var/cocounsel/models/tts
 
-  # Neo4j database
-  neo4j:
-    image: neo4j:5.20
-    environment:
-      - NEO4J_AUTH=neo4j/securepassword
-      - NEO4J_dbms_memory_heap_initial__size=1G
-      - NEO4J_dbms_memory_heap_max__size=2G
-      - NEO4J_dbms_security_auth__enabled=true
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - neo4j_data:/data
-      - ./infra/migrations/neo4j:/var/lib/neo4j/migrations:ro
-    networks:
-      - app-network
-
-  # Qdrant vector database
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    networks:
-      - app-network
-
-  # Speech-to-text service
-  stt:
-    image: ghcr.io/guillaumekln/faster-whisper-server:latest
-    environment:
-      - ASR_MODEL=openai/whisper-small
-      - ASR_ENGINE=faster_whisper
-      - ASR_BEAM_SIZE=5
-      - ASR_DEVICE=cpu
-      - HUGGINGFACE_HUB_CACHE=/models/huggingface
-      - ASR_OUTPUT_LANGUAGE=en
-    ports:
-      - "9000:9000"
-    volumes:
-      - ./var/models/huggingface:/models/huggingface
-      - ./var/models/whisper:/models/whisper
-    networks:
-      - app-network
-
-  # Text-to-speech service
-  tts:
-    image: rhasspy/larynx:latest
-    environment:
-      - LARYNX_VOICE=en-us-blizzard_lessac
-      - LARYNX_OUTPUT_DIR=/output
-      - HUGGINGFACE_HUB_CACHE=/models/huggingface
-    ports:
-      - "5002:5002"
-    volumes:
-      - ./var/models/huggingface:/models/huggingface
-      - ./var/models/tts:/models/tts
-      - ./var/audio:/output
-    networks:
-      - app-network
-
-volumes:
-  neo4j_data:
-  qdrant_data:
-  api_data:
-  voice_models:
-
-networks:
-  app-network:
-    driver: bridgeversion: '3.9'
-
-services:
-  # Frontend service
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    profiles:
+      - community
+      - pro
+      - enterprise
     ports:
       - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     environment:
-      - VITE_API_BASE_URL=http://localhost:8000
+      - VITE_API_BASE_URL=http://api:8000
+    networks:
+      - backend
     depends_on:
       - api
-    networks:
-      - app-network
 
-  # Backend API service
-  api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - MODEL_PROVIDERS_PRIMARY=gemini
-      - MODEL_PROVIDERS_SECONDARY=openai
-      - DEFAULT_CHAT_MODEL=gemini-2.5-flash
-      - DEFAULT_EMBEDDING_MODEL=text-embedding-004
-      - DEFAULT_VISION_MODEL=gemini-2.5-flash
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=securepassword
-      - QDRANT_URL=http://qdrant:6333
-      - VECTOR_DIR=/data/vector
-      - VOICE_SESSIONS_DIR=/data/voice/sessions
-      - VOICE_CACHE_DIR=/models
-      - DOCUMENT_STORAGE_PATH=/var/cocounsel/documents
-      - GRAPH_SNAPSHOT_PATH=/var/cocounsel/graphs
-      - TELEMETRY_BUFFER_PATH=/var/cocounsel/telemetry
-      - BILLING_USAGE_PATH=/data/billing/usage.json
-      - BILLING_DEFAULT_PLAN=community
-      - TELEMETRY_ENABLED=false
-      - TELEMETRY_OTLP_ENDPOINT=http://otel-collector:4317
-      - TELEMETRY_OTLP_INSECURE=true
-      - TELEMETRY_ENVIRONMENT=community
-      - STT_SERVICE_URL=http://stt:9000
-      - TTS_SERVICE_URL=http://tts:5002
-      - HUGGINGFACE_HUB_CACHE=/var/cocounsel/models/huggingface
-      - WHISPER_MODEL_PATH=/var/cocounsel/models/whisper
-      - TTS_MODEL_PATH=/var/cocounsel/models/tts
-    depends_on:
-      - neo4j
-      - qdrant
-    networks:
-      - app-network
-    volumes:
-      - api_data:/data
-      - voice_models:/models
-      - ./var/storage/documents:/var/cocounsel/documents
-      - ./var/storage/graphs:/var/cocounsel/graphs
-      - ./var/storage/telemetry:/var/cocounsel/telemetry
-      - ./var/models/huggingface:/var/cocounsel/models/huggingface
-      - ./var/models/whisper:/var/cocounsel/models/whisper
-      - ./var/models/tts:/var/cocounsel/models/tts
-
-  # Neo4j database
   neo4j:
     image: neo4j:5.20
+    profiles:
+      - community
+      - pro
+      - enterprise
     environment:
-      - NEO4J_AUTH=neo4j/securepassword
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-securepassword}
       - NEO4J_dbms_memory_heap_initial__size=1G
       - NEO4J_dbms_memory_heap_max__size=2G
       - NEO4J_dbms_security_auth__enabled=true
@@ -215,42 +100,82 @@ services:
       - neo4j_data:/data
       - ./infra/migrations/neo4j:/var/lib/neo4j/migrations:ro
     networks:
-      - app-network
+      - backend
 
-  # Qdrant vector database
   qdrant:
     image: qdrant/qdrant:latest
+    profiles:
+      - community
+      - pro
+      - enterprise
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
-      - app-network
+      - backend
 
-  # Speech-to-text service
+  postgres:
+    image: postgres:16-alpine
+    profiles:
+      - community
+      - pro
+      - enterprise
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cocounsel}
+      POSTGRES_USER: ${POSTGRES_USER:-cocounsel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securepassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+
   stt:
     image: ghcr.io/guillaumekln/faster-whisper-server:latest
+    profiles:
+      - community
+      - pro
+      - enterprise
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
-      - ASR_MODEL=openai/whisper-small
+      - ASR_MODEL=${STT_MODEL_NAME:-openai/whisper-small}
       - ASR_ENGINE=faster_whisper
       - ASR_BEAM_SIZE=5
-      - ASR_DEVICE=cpu
+      - ASR_DEVICE=${STT_DEVICE:-cpu}
       - HUGGINGFACE_HUB_CACHE=/models/huggingface
-      - ASR_OUTPUT_LANGUAGE=en
+      - ASR_OUTPUT_LANGUAGE=${STT_OUTPUT_LANGUAGE:-en}
     ports:
       - "9000:9000"
     volumes:
       - ./var/models/huggingface:/models/huggingface
       - ./var/models/whisper:/models/whisper
     networks:
-      - app-network
+      - backend
 
-  # Text-to-speech service
   tts:
     image: rhasspy/larynx:latest
+    profiles:
+      - community
+      - pro
+      - enterprise
+      - gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
-      - LARYNX_VOICE=en-us-blizzard_lessac
+      - LARYNX_VOICE=${TTS_VOICE:-en-us-blizzard_lessac}
       - LARYNX_OUTPUT_DIR=/output
       - HUGGINGFACE_HUB_CACHE=/models/huggingface
     ports:
@@ -260,14 +185,70 @@ services:
       - ./var/models/tts:/models/tts
       - ./var/audio:/output
     networks:
-      - app-network
+      - backend
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.98.0
+    profiles:
+      - pro
+      - enterprise
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "9464:9464"
+    networks:
+      - backend
+
+  grafana:
+    image: grafana/grafana-oss:11.1.4
+    profiles:
+      - enterprise
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - otel-collector
+    networks:
+      - backend
+
+  storage-backup:
+    image: ghcr.io/offen/docker-volume-backup:latest
+    profiles:
+      - community
+      - pro
+      - enterprise
+    environment:
+      - BACKUP_CRON=${BACKUP_CRON_SCHEDULE:-0 3 * * *}
+      - BACKUP_FILENAME=full-stack
+      - BACKUP_PATH=/var/backups
+      - BACKUP_PRUNING_PREFIX=full-stack
+      - BACKUP_PRUNING_KEEP_DAYS=${BACKUP_RETENTION_DAYS:-7}
+      - BACKUP_LATEST_SYMLINK=true
+    volumes:
+      - ./var/backups:/var/backups
+      - ./var/storage/documents:/backup/documents:ro
+      - ./var/storage/graphs:/backup/graphs:ro
+      - ./var/storage/telemetry:/backup/telemetry:ro
+    networks:
+      - backend
 
 volumes:
   neo4j_data:
   qdrant_data:
   api_data:
   voice_models:
+  grafana_data:
+  postgres_data:
 
 networks:
-  app-network:
+  backend:
     driver: bridge

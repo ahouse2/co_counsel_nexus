@@ -1,14 +1,32 @@
 # Co-Counsel Backend
 
-The backend for the NinthOctopusMitten legal tech platform, built with FastAPI and Python 3.11+.
+The backend for the Co-Counsel legal tech platform, built with FastAPI and Python 3.11+.
 
 ## Getting Started
 
-### Prerequisites
+### Quick Start - Single Command Launch
+
+The easiest way to get started with the entire platform (frontend, backend, and all services) is to use the root launcher from the project root directory:
+
+**On Linux/macOS:**
+```bash
+./start.sh
+```
+
+**On Windows:**
+```cmd
+start.bat
+```
+
+This will launch the complete stack including the backend on http://localhost:8000.
+
+### Manual Installation
+
+#### Prerequisites
 - Python 3.11+
 - Optional: [`uv`](https://github.com/astral-sh/uv) for Python dependency management
 
-### Installation
+#### Installation
 ```bash
 # Bootstrap backend dependencies
 ./scripts/bootstrap_backend.sh
@@ -19,7 +37,7 @@ Or manually install dependencies:
 pip install -r requirements.txt
 ```
 
-### Development Server
+#### Development Server
 ```bash
 uvicorn app.main:app --port 8000 --reload
 ```

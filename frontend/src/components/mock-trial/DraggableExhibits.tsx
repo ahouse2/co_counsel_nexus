@@ -1,4 +1,5 @@
-import * as React from "react"
+﻿import * as React from "react";
+
 import { motion } from "framer-motion"
 import { FileText, Image, Link, FileSearch, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -56,7 +57,7 @@ const DraggableExhibits: React.FC<DraggableExhibitsProps> = ({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: index * 0.1 }}
             draggable
-            onDragStart={(e) => handleDragStart(e, exhibit.id)}
+            onDragStart={((e: any) => handleDragStart(e, exhibit.id)) as any}
             onDragEnd={handleDragEnd}
             whileHover={{ 
               scale: 1.02,
@@ -137,3 +138,5 @@ const DraggableExhibits: React.FC<DraggableExhibitsProps> = ({
 }
 
 export { DraggableExhibits }
+
+

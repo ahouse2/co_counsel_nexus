@@ -42,3 +42,11 @@ soundfile==0.12.1
 torch==2.4.0
 transformers>=4.52.1
 uvicorn[standard]==0.30.6
+psycopg2-binary==2.9.9
+pybreaker>=1.0.0
+locust
+web3==6.20.0 # Added for Ethereum blockchain interaction
+bitcoinlib==0.6.0 # Added for Bitcoin blockchain interaction
+beautifulsoup4==4.12.3 # Added for web scraping
+lxml==5.2.2 # Added for parsing HTML and XML
+agent-framework # Added for Microsoft Agent Framework integration

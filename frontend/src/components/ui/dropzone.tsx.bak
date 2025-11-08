@@ -1,0 +1,57 @@
+﻿import * as React from "react"
+import { useDropzone, DropzoneOptions } from "react-dropzone"
+import { motion } from "framer-motion"
+import { cn } from "@/lib/utils"
+
+interface DropzoneProps extends DropzoneOptions {
+  className?: string
+  children?: React.ReactNode
+  onFileUpload?: (files: File[]) => void
+}
+
+const Dropzone = React.forwardRef<HTMLDivElement, DropzoneProps>(
+  ({ className, children, onFileUpload, ...props }, ref) => {
+    const [isDragActive, setIsDragActive] = React.useState(false)
+    
+    const onDrop = React.useCallback((acceptedFiles: File[]) => {
+      if (onFileUpload) {
+        onFileUpload(acceptedFiles)
+      }
+      setIsDragActive(false)
+    }, [onFileUpload])
+
+    const { getRootProps, getInputProps, isDragReject } = useDropzone({
+      onDrop,
+      onDragEnter: () => setIsDragActive(true),
+      onDragLeave: () => setIsDragActive(false),
+      ...props
+    })
+
+    return (
+True// @ts-expect-error framer-motion drag vs react onDrag typing
+      <motion.div
+        ref={ref}
+        className={cn(
+          "relative border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 ease-elastic",
+          "bg-background-panel border-border-subtle",
+          isDragActive && "border-accent-cyan-500 bg-accent-cyan-500/10 shadow-cyan-md",
+          isDragReject && "border-accent-red bg-accent-red/10",
+          className
+        )}
+        {...(getRootProps() as any)}
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+      >
+        <input {...getInputProps()} />
+        {children}
+      </motion.div>
+    )
+  }
+)
+
+Dropzone.displayName = "Dropzone"
+
+export { Dropzone }
+
+
+

@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any, Dict, List, Optional
+
+from neuro_san.interfaces.coded_tool import CodedTool
+try:  # pragma: no cover - optional cloud embeddings
+    from langchain_google_genai import (
+        GoogleGenerativeAIEmbeddings,
+        ChatGoogleGenerativeAI,
+    )
+except Exception:  # pragma: no cover - offline fallback
+    GoogleGenerativeAIEmbeddings = ChatGoogleGenerativeAI = None
+
+from apps.legal_discovery.chain_logger import ChainEventType, log_event
+from apps.legal_discovery.database import db
+from apps.legal_discovery.models import (
+    Agent,
+    Conversation,
+    Document,
+    Message,
+    MessageVisibility,
+)
+
+from .knowledge_graph_manager import KnowledgeGraphManager
+from .privilege_detector import PrivilegeDetector
+from .vector_database_manager import VectorDatabaseManager
+
+
+class RetrievalChatAgent(CodedTool):
+    """Query vector and graph stores with privilege filtering and audit logging."""
+
+    def __init__(
+        self,
+        vector_db: VectorDatabaseManager | None = None,
+        graph_db: KnowledgeGraphManager | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.vector_db = vector_db or VectorDatabaseManager(**kwargs)
+        self.graph_db = graph_db or KnowledgeGraphManager(**kwargs)
+        self.detector = PrivilegeDetector()
+        # Provider selection: auto (default), genai, huggingface, or local.
+        provider = os.getenv("CHAT_AGENT_PROVIDER", "auto").strip().lower()
+
+        class NoopLLM:
+            def invoke(self, prompt: str):
+                return type("R", (), {"content": ""})()
+
+        class HashedEmbedding:
+            def embed_query(self, text: str) -> List[float]:
+                import hashlib
+
+                digest = hashlib.sha256(text.encode()).digest()
+                return [b / 255 for b in digest[:16]]
+
+        if provider == "local":
+            # Silent local mode: no noisy warnings when explicitly selected.
+            self._embedder = HashedEmbedding()
+            self._llm = NoopLLM()
+        elif provider == "genai":
+            # Force Google GenAI; warn once if unavailable and fall back to local.
+            try:
+                if not (GoogleGenerativeAIEmbeddings and ChatGoogleGenerativeAI):
+                    raise RuntimeError("langchain_google_genai is unavailable")
+                self._embedder = GoogleGenerativeAIEmbeddings()
+                self._llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+            except Exception as exc:  # pragma: no cover - best-effort
+                logging.warning("CHAT_AGENT_PROVIDER=genai requested but unavailable: %s", exc)
+                self._embedder = HashedEmbedding()
+                self._llm = NoopLLM()
+        elif provider == "huggingface":
+            # Force HF embeddings; warn once if unavailable and fall back to local.
+            try:
+                from langchain_huggingface import HuggingFaceEmbeddings
+
+                self._embedder = HuggingFaceEmbeddings(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+            except Exception as exc:  # pragma: no cover - best-effort
+                logging.warning("CHAT_AGENT_PROVIDER=huggingface requested but unavailable: %s", exc)
+                self._embedder = HashedEmbedding()
+            self._llm = NoopLLM()
+        else:
+            # Auto mode: prefer GenAI, then HF, then local. Use INFO to avoid spammy warnings.
+            try:
+                if GoogleGenerativeAIEmbeddings and ChatGoogleGenerativeAI:
+                    self._embedder = GoogleGenerativeAIEmbeddings()
+                    self._llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+                else:
+                    raise RuntimeError("langchain_google_genai is unavailable")
+            except Exception as exc:  # pragma: no cover - offline fallback
+                logging.info("chat_agent: using local embeddings/llm due to: %s", exc)
+                try:
+                    from langchain_huggingface import HuggingFaceEmbeddings
+
+                    self._embedder = HuggingFaceEmbeddings(
+                        model_name="sentence-transformers/all-MiniLM-L6-v2"
+                    )
+                except Exception as inner_exc:  # pragma: no cover - last resort
+                    logging.info("chat_agent: huggingface embeddings unavailable: %s", inner_exc)
+                    self._embedder = HashedEmbedding()
+                self._llm = NoopLLM()
+
+    def _ensure_conversation(self, conversation_id: Optional[str], sender_id: int) -> Conversation:
+        if conversation_id:
+            convo = Conversation.query.get(conversation_id)
+            if convo:
+                if sender_id not in convo.participants:
+                    convo.participants.append(sender_id)
+                    db.session.commit()
+                return convo
+        convo = Conversation(participants=[sender_id])
+        db.session.add(convo)
+        db.session.commit()
+        return convo
+
+    def store_message(
+        self,
+        conversation_id: Optional[str],
+        sender_id: int,
+        content: str,
+        document_ids: Optional[List[int]] = None,
+        reply_to: Optional[str] = None,
+    ) -> Message:
+        # Ensure a corresponding Agent exists for the sender to satisfy FK.
+        try:
+            agent = Agent.query.get(sender_id)
+            if agent is None:
+                agent = Agent(id=sender_id, name=f"user-{sender_id}", role="user")
+                db.session.add(agent)
+                db.session.commit()
+        except Exception:
+            # Best-effort: continue; FK will surface if creation failed
+            pass
+        convo = self._ensure_conversation(conversation_id, sender_id)
+        privileged, spans = self.detector.detect(content)
+        visibility = (
+            MessageVisibility.ATTORNEY_ONLY if privileged else MessageVisibility.PUBLIC
+        )
+        text = self.detector.redact_text(content, spans) if privileged else content
+        message = Message(
+            conversation_id=convo.id,
+            sender_id=sender_id,
+            content=text,
+            document_ids=document_ids or [],
+            reply_to_id=reply_to,
+            visibility=visibility,
+        )
+        db.session.add(message)
+        db.session.commit()
+
+        try:
+            embedding = self._embedder.embed_query(text)
+            message.vector_id = f"msg-{message.id}"
+            self.vector_db.add_messages(
+                [text],
+                [
+                    {
+                        "message_id": message.id,
+                        "conversation_id": convo.id,
+                        "visibility": visibility.value,
+                    }
+                ],
+                [message.vector_id],
+                [embedding],
+            )
+            if not convo.vector_id:
+                convo.vector_id = f"conv-{convo.id}"
+                self.vector_db.add_conversations(
+                    [text],
+                    [{"conversation_id": convo.id}],
+                    [convo.vector_id],
+                    [embedding],
+                )
+            db.session.commit()
+        except Exception as exc:  # pragma: no cover - best effort
+            logging.warning("embedding/vector store failed: %s", exc)
+
+        try:
+            msg_node_id = self.graph_db.create_node(
+                "Message", {"id": message.id, "conversation_id": convo.id}
+            )
+            for doc_id in document_ids or []:
+                doc_node_id = self.graph_db.create_node("Document", {"id": doc_id})
+                self.graph_db.create_relationship(msg_node_id, doc_node_id, "REFERS_TO")
+        except Exception as exc:  # pragma: no cover - best effort
+            logging.warning("graph link failed: %s", exc)
+
+        return message
+
+    def query(
+        self,
+        question: str,
+        sender_id: int = 0,
+        conversation_id: Optional[str] = None,
+        top_k: int = 5,
+    ) -> Dict[str, Any]:
+        message = self.store_message(conversation_id, sender_id, question)
+        query_emb = self._embedder.embed_query(question)
+        vec = self.vector_db.query([question], n_results=top_k)
+        documents: List[Dict[str, Any]] = []
+        for doc_id, meta in zip(vec.get("ids", [[]])[0], vec.get("metadatas", [[]])[0]):
+            doc = Document.query.filter_by(id=int(meta.get("id", doc_id))).first()
+            if not doc or doc.is_privileged:
+                continue
+            log_event(doc.id, ChainEventType.ACCESSED, metadata={"message_id": message.id})
+            documents.append({"id": doc.id, "name": doc.name})
+        msg_res = self.vector_db.query_messages(
+            query_embeddings=[query_emb],
+            n_results=top_k,
+            where={"visibility": "public"},
+        )
+        messages: List[Dict[str, Any]] = []
+        for text, meta in zip(
+            msg_res.get("documents", [[]])[0], msg_res.get("metadatas", [[]])[0]
+        ):
+            messages.append({"id": meta.get("message_id"), "content": text})
+        try:
+            records = self.graph_db.run_query(
+                "MATCH (f:Fact) WHERE toLower(f.text) CONTAINS toLower($q) RETURN f.text AS text LIMIT $k",
+                {"q": question, "k": top_k},
+            )
+            facts = [r["text"] for r in records]
+        except Exception as exc:  # pragma: no cover - best effort
+            logging.warning("graph query failed: %s", exc)
+            facts = []
+
+        snippets = [m["content"] for m in messages]
+        prompt_parts = []
+        if snippets:
+            prompt_parts.append("Prior conversation:\n" + "\n".join(snippets))
+        if facts:
+            prompt_parts.append("Relevant facts:\n" + "\n".join(facts))
+        prompt = "\n\n".join(prompt_parts + [f"Question: {question}"])
+        answer = ""
+        try:
+            answer = self._llm.invoke(prompt).content
+        except Exception as exc:  # pragma: no cover - best effort
+            logging.warning("llm invocation failed: %s", exc)
+
+        return {
+            "message_id": message.id,
+            "conversation_id": message.conversation_id,
+            "documents": documents,
+            "facts": facts,
+            "messages": messages,
+            "answer": answer,
+        }
+
+
+__all__ = ["RetrievalChatAgent"]

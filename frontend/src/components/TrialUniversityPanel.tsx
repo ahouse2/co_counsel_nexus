@@ -1,3 +1,4 @@
+﻿import { cssVar } from "@/lib/utils";
 const lessons = [
   {
     id: 'module-1',
@@ -35,7 +36,7 @@ export function TrialUniversityPanel(): JSX.Element {
       <div className="lesson-grid">
         {lessons.map((lesson) => (
           <article key={lesson.id} className="lesson-card">
-            <div className="lesson-progress" style={{ ['--progress' as const]: lesson.progress }}>
+            <div className="lesson-progress" style={cssVar('--progress', lesson.progress)}>
               <span className="progress-glow" aria-hidden />
               <span className="progress-fill" aria-hidden />
             </div>
@@ -56,3 +57,4 @@ export function TrialUniversityPanel(): JSX.Element {
     </section>
   );
 }
+

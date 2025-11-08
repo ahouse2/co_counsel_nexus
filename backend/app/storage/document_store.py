@@ -1,105 +1,178 @@
-from __future__ import annotations
-
-from datetime import datetime, timezone
+import os
+import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Optional, Union, List
+from datetime import datetime
+import json
 
-from ..config import get_settings
-from ..utils.storage import (
-    ManifestExpired,
-    ManifestIntegrityError,
-    atomic_write_json,
-    decrypt_manifest,
-    encrypt_manifest,
-    ensure_retention_days,
-    load_manifest_key,
-    read_json,
-    retention_expiry,
-    safe_path,
-)
-
+from backend.app.storage.encryption_service import EncryptionService
 
 class DocumentStore:
-    """File-backed document metadata store with encryption and retention enforcement."""
+    """
+    Manages secure storage, retrieval, and versioning of documents.
+    Ensures strict segregation between 'My Documents' and 'Opposition Documents'.
+    """
+    def __init__(self, base_dir: Union[str, Path], encryption_key: str):
+        self.base_dir = Path(base_dir)
+        self.my_docs_dir = self.base_dir / "my_documents"
+        self.opposition_docs_dir = self.base_dir / "opposition_documents"
+        self.encryption_service = EncryptionService(encryption_key)
 
-    def __init__(
+        self.my_docs_dir.mkdir(parents=True, exist_ok=True)
+        self.opposition_docs_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_storage_path(self, doc_type: str, case_id: str, doc_id: str, version: Optional[str] = None) -> Path:
+        if doc_type == "my_documents":
+            storage_root = self.my_docs_dir
+        elif doc_type == "opposition_documents":
+            storage_root = self.opposition_docs_dir
+        else:
+            raise ValueError("Invalid document type. Must be 'my_documents' or 'opposition_documents'.")
+
+        case_path = storage_root / case_id
+        case_path.mkdir(parents=True, exist_ok=True)
+
+        if version:
+            return case_path / f"{doc_id}_v{version}"
+        return case_path / doc_id
+
+    def save_document(
         self,
-        root: Path,
-        *,
-        key: bytes | None = None,
-        retention_days: int | None = None,
-    ) -> None:
-        settings = get_settings()
-        self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.key = key or load_manifest_key(settings.manifest_encryption_key_path)
-        days = retention_days if retention_days is not None else settings.manifest_retention_days
-        self.retention_days = ensure_retention_days(days)
-        self._prune_expired()
+        doc_type: str,
+        case_id: str,
+        doc_id: str,
+        content: Union[str, bytes],
+        file_name: str,
+        author: Optional[str] = None,
+        keywords: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        custom_metadata: Optional[dict] = None,
+    ) -> str:
+        """
+        Saves and encrypts a document, returning its version.
+        """
+        current_time = datetime.now().strftime("%Y%m%d%H%M%S")
+        storage_path = self._get_storage_path(doc_type, case_id, doc_id, version=current_time)
 
-    def _path(self, doc_id: str) -> Path:
-        return safe_path(self.root, doc_id)
+        encrypted_content = self.encryption_service.encrypt(content)
+        storage_path.with_suffix(".encrypted").write_bytes(encrypted_content)
 
-    def _expiry(self) -> datetime:
-        return retention_expiry(self.retention_days)
+        metadata = {
+            "file_name": file_name,
+            "author": author,
+            "keywords": keywords,
+            "tags": tags,
+            "custom_metadata": custom_metadata,
+            "created_at": current_time,
+        }
+        storage_path.with_suffix(".meta").write_text(json.dumps(metadata))
 
-    def _prune_expired(self) -> None:
-        now = datetime.now(timezone.utc)
-        for file in self.root.glob("*.json"):
-            try:
-                envelope = read_json(file)
-            except (ValueError, OSError):
+        return current_time
+
+    def get_document(self, doc_type: str, case_id: str, doc_id: str, version: Optional[str] = None) -> Optional[str]:
+        """
+        Retrieves and decrypts a document.
+        If version is None, retrieves the latest version.
+        """
+        if version is None:
+            # Find the latest version
+            case_path = self._get_storage_path(doc_type, case_id, "").parent # Get case directory
+            versions = sorted([
+                f.name.replace(f"{doc_id}_v", "").replace(".encrypted", "")
+                for f in case_path.glob(f"{doc_id}_v*.encrypted")
+            ], reverse=True)
+            if not versions:
+                return None
+            latest_version = versions[0]
+            storage_path = self._get_storage_path(doc_type, case_id, doc_id, version=latest_version).with_suffix(".encrypted")
+        else:
+            storage_path = self._get_storage_path(doc_type, case_id, doc_id, version=version).with_suffix(".encrypted")
+
+        if not storage_path.exists():
+            return None
+
+        encrypted_content = storage_path.read_bytes()
+        return self.encryption_service.decrypt(encrypted_content)
+
+    def list_document_versions(self, doc_type: str, case_id: str, doc_id: str) -> List[str]:
+        """
+        Lists all available versions for a given document.
+        """
+        case_path = self._get_storage_path(doc_type, case_id, "").parent
+        versions = sorted([
+            f.name.replace(f"{doc_id}_v", "").replace(".encrypted", "")
+            for f in case_path.glob(f"{doc_id}_v*.encrypted")
+        ], reverse=True)
+        return versions
+
+    def delete_document(self, doc_type: str, case_id: str, doc_id: str, version: Optional[str] = None):
+        """
+        Deletes a specific version of a document, or all versions if version is None.
+        """
+        if version:
+            storage_path = self._get_storage_path(doc_type, case_id, doc_id, version=version)
+            if storage_path.with_suffix(".encrypted").exists():
+                storage_path.with_suffix(".encrypted").unlink()
+            if storage_path.with_suffix(".meta").exists():
+                storage_path.with_suffix(".meta").unlink()
+        else:
+            # Delete all versions and potentially the document directory if empty
+            case_path = self._get_storage_path(doc_type, case_id, "").parent
+            for f in case_path.glob(f"{doc_id}_v*"):
+                f.unlink()
+            # Clean up case directory if empty
+            if not any(case_path.iterdir()):
+                shutil.rmtree(case_path)
+
+    def get_document_path(self, doc_type: str, case_id: str, doc_id: str, version: Optional[str] = None) -> Optional[Path]:
+        """
+        Returns the absolute path to a document (encrypted).
+        """
+        if version is None:
+            case_path = self._get_storage_path(doc_type, case_id, "").parent
+            versions = sorted([
+                f.name.replace(f"{doc_id}_v", "").replace(".encrypted", "")
+                for f in case_path.glob(f"{doc_id}_v*.encrypted")
+            ], reverse=True)
+            if not versions:
+                return None
+            latest_version = versions[0]
+            return self._get_storage_path(doc_type, case_id, doc_id, version=latest_version).with_suffix(".encrypted")
+        else:
+            storage_path = self._get_storage_path(doc_type, case_id, doc_id, version=version).with_suffix(".encrypted")
+            return storage_path if storage_path.exists() else None
+
+    def list_all_documents(self, case_id: str) -> List[dict]:
+        """
+        Lists all documents for a given case.
+        """
+        documents = []
+        for doc_type_dir in [self.my_docs_dir, self.opposition_docs_dir]:
+            case_path = doc_type_dir / case_id
+            if not case_path.exists():
                 continue
-            expires_at = envelope.get("expires_at")
-            if not expires_at:
-                continue
-            try:
-                expiry_ts = datetime.fromisoformat(str(expires_at))
-            except ValueError:
-                continue
-            if expiry_ts <= now:
-                file.unlink(missing_ok=True)
 
-    def write_document(self, doc_id: str, payload: Dict[str, object]) -> None:
-        path = self._path(doc_id)
-        envelope = encrypt_manifest(payload, self.key, associated_data=doc_id, expires_at=self._expiry())
-        atomic_write_json(path, envelope)
+            doc_ids = set()
+            for doc_file in case_path.glob("*.encrypted"):
+                doc_ids.add(doc_file.name.split("_v")[0])
 
-    def read_document(self, doc_id: str) -> Dict[str, object]:
-        path = self._path(doc_id)
-        if not path.exists():
-            raise FileNotFoundError(f"Document {doc_id} missing from store")
-        envelope = read_json(path)
-        try:
-            return decrypt_manifest(envelope, self.key, associated_data=doc_id)
-        except ManifestExpired as exc:
-            path.unlink(missing_ok=True)
-            raise FileNotFoundError(f"Document {doc_id} expired") from exc
-        except ManifestIntegrityError as exc:
-            raise RuntimeError(f"Document {doc_id} failed integrity checks") from exc
+            for doc_id in doc_ids:
+                versions = self.list_document_versions(doc_type_dir.name, case_id, doc_id)
+                if not versions:
+                    continue
+                latest_version = versions[0]
+                meta_path = self._get_storage_path(doc_type_dir.name, case_id, doc_id, version=latest_version).with_suffix(".meta")
+                if meta_path.exists():
+                    with open(meta_path, "r") as f:
+                        metadata = json.load(f)
+                    file_name = metadata.get("file_name", doc_id)
+                else:
+                    file_name = doc_id
 
-    def list_documents(self) -> List[Dict[str, object]]:
-        documents: List[Dict[str, object]] = []
-        for file in sorted(self.root.glob("*.json")):
-            try:
-                envelope = read_json(file)
-                doc = decrypt_manifest(envelope, self.key)
-            except (ValueError, FileNotFoundError, OSError, ManifestIntegrityError, ManifestExpired):
-                if file.exists():
-                    try:
-                        file.unlink()
-                    except OSError:
-                        pass
-                continue
-            documents.append(doc)
+                documents.append({
+                    "id": doc_id,
+                    "name": file_name,
+                    "type": doc_type_dir.name,
+                    "url": f"/api/{case_id}/{doc_type_dir.name}/{doc_id}"
+                })
         return documents
-
-    def remove(self, doc_id: str) -> None:
-        path = self._path(doc_id)
-        if path.exists():
-            path.unlink()
-
-    def clear(self) -> None:
-        for file in self.root.glob("*.json"):
-            file.unlink(missing_ok=True)
-

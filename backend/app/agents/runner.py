@@ -138,6 +138,16 @@ class MicrosoftAgentsSession:
                         queue.insert(0, queue.pop(index))
                         break
 
+        # --- New Routing Logic ---
+        selected_team_graph = self._select_team_graph(context.question)
+        if selected_team_graph:
+            self.graph = selected_team_graph
+            queue = [
+                {"role": role, "revision": None, "reason": None}
+                for role in self.graph.order
+            ]
+        # --- End New Routing Logic ---
+
         while queue and turns_budget > 0:
             item = queue.pop(0)
             role = str(item["role"])
@@ -403,6 +413,13 @@ class MicrosoftAgentsSession:
         )
 
 
+from backend.app.agents.teams.document_ingestion import build_document_ingestion_team
+from backend.app.agents.teams.forensic_analysis import build_forensic_analysis_team
+from backend.app.agents.teams.legal_research import build_legal_research_team
+from backend.app.agents.teams.litigation_support import build_litigation_support_team
+from backend.app.agents.teams.software_development import build_software_development_team
+from backend.app.agents.teams.ai_qa_oversight import build_ai_qa_oversight_committee
+
 @dataclass(slots=True)
 class MicrosoftAgentsOrchestrator:
     """Adaptive orchestrator implemented with the Microsoft Agents SDK graph."""
@@ -412,23 +429,50 @@ class MicrosoftAgentsOrchestrator:
     research_tool: ResearchTool
     forensics_tool: ForensicsTool
     qa_tool: QATool
+    echo_tool: EchoTool
     memory_store: AgentMemoryStore
     qa_agent: QAAgent | None = None
     max_rounds: int = 12
     tools: Dict[str, AgentTool] = field(init=False)
     graph: SessionGraph = field(init=False)
     base_definitions: List[AgentDefinition] = field(init=False, repr=False)
+    forensics_team: List[AgentDefinition] = field(init=False, repr=False)
+    dev_team: List[AgentDefinition] = field(init=False, repr=False)
+    document_ingestion_team: List[AgentDefinition] = field(init=False, repr=False)
+    legal_research_team: List[AgentDefinition] = field(init=False, repr=False)
+    litigation_support_team: List[AgentDefinition] = field(init=False, repr=False)
+    ai_qa_oversight_committee: List[AgentDefinition] = field(init=False, repr=False)
+
 
     def __post_init__(self) -> None:
         self.tools = {
             "strategy": self.strategy_tool,
             "ingestion": self.ingestion_tool,
             "research": self.research_tool,
-            "cocounsel": self.forensics_tool,
+            "cocounsel": self.forensics_tool, # This might need to be renamed or re-evaluated
             "qa": self.qa_tool,
+            "echo": self.echo_tool,
+            "forensics": self.forensics_tool,
+            # Add all new tools here as they are instantiated in get_orchestrator
         }
         self.base_definitions = build_agent_graph(self.tools)
-        self.graph = SessionGraph.from_definitions(self.base_definitions)
+        self.forensics_team = build_forensic_analysis_team(list(self.tools.values())) # Pass all available tools
+        self.dev_team = build_software_development_team(list(self.tools.values())) # Pass all available tools
+        self.document_ingestion_team = build_document_ingestion_team(list(self.tools.values()))
+        self.legal_research_team = build_legal_research_team(list(self.tools.values()))
+        self.litigation_support_team = build_litigation_support_team(list(self.tools.values()))
+        self.ai_qa_oversight_committee = build_ai_qa_oversight_committee(list(self.tools.values()))
+
+        all_definitions = (
+            self.base_definitions
+            + self.forensics_team
+            + self.dev_team
+            + self.document_ingestion_team
+            + self.legal_research_team
+            + self.litigation_support_team
+            + self.ai_qa_oversight_committee
+        )
+        self.graph = SessionGraph.from_definitions(all_definitions)
 
     def run(
         self,
@@ -485,6 +529,28 @@ class MicrosoftAgentsOrchestrator:
         )
         return session.execute(context, thread)
 
+    def _select_team_graph(self, question: str) -> Optional[SessionGraph]:
+        """
+        Selects the appropriate team graph based on keywords in the question.
+        """
+        question_lower = question.lower()
+        
+        if "forensic" in question_lower or "authenticity" in question_lower or "crypto" in question_lower or "financial analysis" in question_lower:
+            return SessionGraph.from_definitions(self.forensics_team)
+        elif "research" in question_lower or "case law" in question_lower or "statute" in question_lower or "regulation" in question_lower:
+            return SessionGraph.from_definitions(self.legal_research_team)
+        elif "ingestion" in question_lower or "document processing" in question_lower or "knowledge graph" in question_lower:
+            return SessionGraph.from_definitions(self.document_ingestion_team)
+        elif "litigation" in question_lower or "strategy" in question_lower or "motion" in question_lower or "case theory" in question_lower:
+            return SessionGraph.from_definitions(self.litigation_support_team)
+        elif "develop" in question_lower or "code" in question_lower or "bug" in question_lower or "feature" in question_lower:
+            return SessionGraph.from_definitions(self.dev_team)
+        elif "qa" in question_lower or "oversight" in question_lower or "audit" in question_lower or "testing" in question_lower:
+            return SessionGraph.from_definitions(self.ai_qa_oversight_committee)
+        
+        # Default to base definitions if no specific team is matched
+        return SessionGraph.from_definitions(self.base_definitions)
+
     def _build_session_graph(self, policy_state: Dict[str, Any] | None) -> SessionGraph:
         if not policy_state or not policy_state.get("enabled", True):
             return SessionGraph.from_definitions(self.base_definitions)
@@ -524,24 +590,82 @@ class MicrosoftAgentsOrchestrator:
         return {"allow_replan": True, "allow_partial": True}
 
 
+from backend.app.agents.echo_tool import EchoTool
+from backend.app.agents.tools.forensic_tools import (
+    PDFAuthenticatorTool,
+    ImageAuthenticatorTool,
+    CryptoTrackerTool,
+    FinancialAnalysisTool
+)
+from backend.app.agents.tools.research_tools import (
+    LegalResearchTool,
+    WebScraperTool,
+    ResearchSummarizerTool
+)
+from backend.app.agents.tools.presentation_tools import (
+    TimelineTool,
+    ExhibitManagerTool,
+    PresentationStateTool
+)
+from backend.app.agents.teams.document_ingestion import DocumentPreprocessingTool, ContentIndexingTool, KnowledgeGraphBuilderTool, DatabaseQueryTool, DocumentSummaryTool
+from backend.app.agents.teams.litigation_support import KnowledgeGraphQueryTool, LLMDraftingTool, SimulationTool
+from backend.app.agents.teams.software_development import CodeGenerationTool, CodeModificationTool, TestExecutionTool
+from backend.app.agents.definitions.qa_agents import ValidatorQATool, CriticQATool, RefinementQATool
+
 def get_orchestrator(
-    retrieval_service,
-    forensics_service,
-    document_store,
-    qa_agent: QAAgent,
+    llm_config: LlmConfig,
+    document_store: DocumentStore,
+    forensics_service: ForensicAnalyzer,
+    knowledge_graph_service: KnowledgeGraphService,
     memory_store: AgentMemoryStore,
-    graph_agent: "GraphManagerAgent",
 ) -> MicrosoftAgentsOrchestrator:
-    strategy_tool = StrategyTool(graph_agent)
-    ingestion_tool = IngestionTool(document_store)
-    research_tool = ResearchTool(retrieval_service, graph_agent)
-    forensics_tool = ForensicsTool(document_store, forensics_service)
-    qa_tool = QATool(qa_agent)
+    """Get the default Microsoft Agents orchestrator."""
+    llm_service = build_llm_service(llm_config)
+    graph_agent = build_graph_rag_agent(llm_service, document_store)
+    qa_agent = build_qa_agent(llm_service)
+
+    # Instantiate all new tools
+    pdf_authenticator_tool = PDFAuthenticatorTool()
+    image_authenticator_tool = ImageAuthenticatorTool()
+    crypto_tracker_tool = CryptoTrackerTool()
+    financial_analysis_tool = FinancialAnalysisTool()
+    legal_research_tool = LegalResearchTool()
+    web_scraper_tool = WebScraperTool()
+    research_summarizer_tool = ResearchSummarizerTool()
+    timeline_tool = TimelineTool()
+    exhibit_manager_tool = ExhibitManagerTool()
+    presentation_state_tool = PresentationStateTool()
+    document_preprocessing_tool = DocumentPreprocessingTool()
+    content_indexing_tool = ContentIndexingTool()
+    knowledge_graph_builder_tool = KnowledgeGraphBuilderTool()
+    database_query_tool = DatabaseQueryTool()
+    document_summary_tool = DocumentSummaryTool()
+    knowledge_graph_query_tool = KnowledgeGraphQueryTool()
+    llm_drafting_tool = LLMDraftingTool()
+    simulation_tool = SimulationTool()
+    code_generation_tool = CodeGenerationTool()
+    code_modification_tool = CodeModificationTool()
+    test_execution_tool = TestExecutionTool()
+    validator_qa_tool = ValidatorQATool()
+    critic_qa_tool = CriticQATool()
+    refinement_qa_tool = RefinementQATool()
+
+
     return MicrosoftAgentsOrchestrator(
-        strategy_tool=strategy_tool,
-        ingestion_tool=ingestion_tool,
-        research_tool=research_tool,
-        forensics_tool=forensics_tool,
-        qa_tool=qa_tool,
+        strategy_tool=StrategyTool(graph_agent=graph_agent),
+        ingestion_tool=IngestionTool(document_store=document_store),
+        research_tool=ResearchTool(graph_agent=graph_agent),
+        forensics_tool=ForensicsTool(
+            document_store=document_store, forensics_service=forensics_service
+        ),
+        qa_tool=QATool(qa_agent=qa_agent),
+        echo_tool=EchoTool(llm_service=llm_service),
         memory_store=memory_store,
+        qa_agent=qa_agent,
+        # Pass all new tools here
+        # This part needs to be carefully managed as the orchestrator's __init__
+        # doesn't currently accept an arbitrary list of tools.
+        # For now, we'll assume the tools are accessible globally or through a tool registry.
+        # A more robust solution would involve modifying MicrosoftAgentsOrchestrator's __init__
+        # to accept a list of tools or a tool registry.
     )

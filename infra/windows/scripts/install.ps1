@@ -4,7 +4,7 @@ param(
     [string]$InstallDir = "$env:LOCALAPPDATA\CoCounselNexus",
 
     [Parameter(Mandatory = $false)]
-    [string]$RepoUrl = "https://github.com/NinthOctopusMitten/NinthOctopusMitten.git",
+    [string]$RepoUrl = "https://github.com/Co-Counsel/Co-Counsel.git",
 
     [Parameter(Mandatory = $false)]
     [string]$Branch = "main",
@@ -230,7 +230,7 @@ foreach ($pkg in $requiredPackages) {
 }
 
 $resolvedInstallDir = [System.IO.Path]::GetFullPath($InstallDir)
-$repoDir = Join-Path $resolvedInstallDir "NinthOctopusMitten"
+$repoDir = Join-Path $resolvedInstallDir "Co-Counsel"
 $venvDir = Join-Path $resolvedInstallDir "venv"
 $logDir = Join-Path $resolvedInstallDir "logs"
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { Stage, Sprite, Container, Text, useTick, Graphics } from '@pixi/react';
 import { TextStyle } from '@pixi/text';
 import { ScenarioDefinition, ScenarioRunTurn } from '@/types';
@@ -219,8 +219,7 @@ function PixiStageView({
       width={stageWidth}
       height={stageHeight}
       options={{
-        backgroundAlpha: 0,
-        antialias: true,
+
       }}
     >
       <Container sortableChildren>
@@ -317,3 +316,5 @@ function CaptionPanel({
     </div>
   );
 }
+
+

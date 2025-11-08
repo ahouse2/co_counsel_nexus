@@ -9,11 +9,6 @@ x-gpu-capable: &gpu-capable
               - gpu
             count: ${GPU_DEVICE_COUNT:-0}
             driver: ${GPU_DRIVER:-nvidia}
-  device_requests:
-    - capabilities:
-        - gpu
-      count: ${GPU_DEVICE_COUNT:-0}
-      driver: ${GPU_DRIVER:-nvidia}
 
 services:
   api:

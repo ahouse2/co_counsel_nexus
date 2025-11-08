@@ -8,7 +8,7 @@ from importlib.util import find_spec
 from typing import Any
 
 from .fallback import FallbackSentenceSplitter, MetadataModeEnum
-from .settings import EmbeddingConfig, EmbeddingProvider, LlamaIndexRuntimeConfig, PipelineTuning
+from .settings import EmbeddingConfig, EmbeddingProvider, LlmConfig, LlmProvider, LlamaIndexRuntimeConfig, PipelineTuning
 
 
 def _import_attr(path: str, attribute: str) -> Any | None:
@@ -20,6 +20,65 @@ def _import_attr(path: str, attribute: str) -> Any | None:
         return None
     module = import_module(path)
     return getattr(module, attribute, None)
+
+
+try:
+    import openai
+except ImportError:
+    openai = None
+
+try:
+    import ollama
+except ImportError:
+    ollama = None
+
+
+class BaseLlmService:
+    """Base class for LLM services."""
+    def generate_text(self, prompt: str) -> str:
+        raise NotImplementedError
+
+
+class OpenAILlmService(BaseLlmService):
+    """OpenAI LLM service."""
+    def __init__(self, config: LlmConfig):
+        if openai is None:
+            raise RuntimeError("OpenAI client not installed. Please install with 'pip install openai'")
+        self.client = openai.OpenAI(api_key=config.api_key, base_url=config.api_base)
+        self.model = config.model
+
+    def generate_text(self, prompt: str) -> str:
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500, # Limit response to avoid excessive token usage
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error calling OpenAI LLM: {e}")
+            raise
+
+
+class OllamaLlmService(BaseLlmService):
+    """Ollama LLM service."""
+    def __init__(self, config: LlmConfig):
+        if ollama is None:
+            raise RuntimeError("Ollama client not installed. Please install with 'pip install ollama'")
+        self.client = ollama.Client(host=config.api_base)
+        self.model = config.model
+
+    def generate_text(self, prompt: str) -> str:
+        try:
+            response = self.client.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                options={"num_predict": 500}, # Limit response to avoid excessive token usage
+            )
+            return response["message"]["content"]
+        except Exception as e:
+            print(f"Error calling Ollama LLM: {e}")
+            raise
 
 
 SentenceSplitterCls = _import_attr("llama_index.core.node_parser", "SentenceSplitter")
@@ -124,8 +183,20 @@ def create_embedding_model(config: EmbeddingConfig) -> Any:
     )
 
 
+def create_llm_service(config: LlmConfig) -> BaseLlmService:
+    """Instantiate the LLM service for text generation."""
+    if config.provider is LlmProvider.OPENAI or config.provider is LlmProvider.AZURE_OPENAI:
+        return OpenAILlmService(config)
+    if config.provider is LlmProvider.OLLAMA:
+        return OllamaLlmService(config)
+    # Add other LLM providers here as needed
+    raise ValueError(f"Unsupported LLM provider: {config.provider}")
+
+
 __all__ = [
     "configure_global_settings",
     "create_embedding_model",
     "create_sentence_splitter",
+    "create_llm_service", # Added
+    "BaseLlmService", # Added
 ]

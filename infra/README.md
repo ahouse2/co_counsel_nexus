@@ -1,10 +1,12 @@
 # Infrastructure
 
-Infrastructure configurations for the NinthOctopusMitten platform.
+Infrastructure configurations for the Co-Counsel platform.
 
 ## Overview
 
 This directory contains all infrastructure-as-code configurations for deploying the Co-Counsel platform in various environments.
+
+**Note:** For most users, we recommend using the root-level Docker Compose file and launcher scripts which provide a simpler way to start the complete stack. See the [root README](../README.md) for details.
 
 ## Directory Structure
 ```
@@ -28,9 +30,19 @@ infra/
 
 ## Deployment Options
 
-### Local Development (Docker Compose)
+### Quick Start (Recommended)
+From the project root directory:
 ```bash
-docker compose up -d
+# On Linux/macOS
+./start.sh
+
+# On Windows
+start.bat
+```
+
+### Manual Docker Compose Deployment
+```bash
+docker compose --project-directory . up -d
 ```
 
 ### Production (Helm + Kubernetes)

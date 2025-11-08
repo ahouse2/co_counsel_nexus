@@ -1,3 +1,4 @@
+﻿import { cssVar } from "@/lib/utils";
 import { SimulationWorkbench } from '@/components/simulation/SimulationWorkbench';
 
 const participants = [
@@ -26,7 +27,7 @@ export function MockTrialArenaPanel(): JSX.Element {
                 <span className="participant-name">{participant.name}</span>
                 <span className="participant-status">{participant.status}</span>
                   <span className="participant-meter">
-                    <span style={{ ['--level' as const]: participant.level }} />
+                    <span style={cssVar('--level', participant.level)} />
                   </span>
               </li>
             ))}
@@ -53,3 +54,4 @@ export function MockTrialArenaPanel(): JSX.Element {
     </section>
   );
 }
+

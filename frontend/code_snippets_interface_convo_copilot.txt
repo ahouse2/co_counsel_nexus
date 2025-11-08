@@ -1,0 +1,641 @@
+https://copilot.microsoft.com/shares/fZfga7WPSnMhwT1iooAWz
+
+
+
+Prompt: “Next-Level Dark UI + Experience Generator” Design a world-class, premium-grade, dark-mode interface and theming system for an AI-powered legal discovery and trial platform. The aesthetic must immediately communicate luxury, power, intelligence, and precision — this is not a startup SaaS dashboard, this is the F1 of litigation software. Create a comprehensive, cohesive design system (color palette, typography, spacing, components, transitions, and motion rules) that feels cinematic, tactile, and alive. 🎨 Visual Language Core mood: dark, minimal, dramatic contrast, with soft glows, blurred depth, and micro-motion. Visual inspiration: Apple Pro apps (Logic, Motion), Unreal Engine editor, cyber-chic UI from “The Batman” or “Ghost in the Shell”, and the compositional balance of Framer or Linear. Avoid all generic “flat SaaS” aesthetics — this needs texture, dimensionality, precision, and quiet elegance. Use accent lighting (e.g., neon cyan, violet, crimson, or electric gold) sparingly to create focus zones. 🧩 Core Components & Pages Dashboard Hub – interactive panels with cinematic depth, live metrics, and smooth transitions between cards. Evidence Upload & File Intelligence – drag-and-drop folder zones with animated progress, AI summaries, and auto-tagging. Graph Explorer – 3D-inspired cluster visualization with dynamic Cypher query input, glowing node animations, zoom/pan inertia, and contextual popovers. Trial University – modular learning interface with video lessons, case walkthroughs, and quiz/test flow; use “holoscreen” glass-panel styling. Mock Trial Arena – cinematic virtual courtroom with live video chat, draggable exhibits, and realtime AI side-panel assistance. Live Co-Counsel Chat – integrated live video/audio chat UI with streaming captions, floating reaction bubbles, and transcript playback. ⚙️ Motion & Transitions Subtle parallax and inertia; motion should feel natural, not gimmicky. Micro-interactions on hover/tap (ripples, particle bursts, data-pulse effects). Panel transitions fade/slide in 250-400 ms, easing cubic-bezier(0.4, 0, 0.2, 1). Graph nodes pulse faintly when active, emit trails on connection creation. 🧠 Technical Design Notes Built for React (Next.js / Vite) with Tailwind or shadcn/ui. Use Framer Motion or GSAP for animations. Use WebRTC for video chat, integrated seamlessly into layout. Theming system should be tokenized (CSS variables or design tokens) with easy mode toggling (dark, cyber-dark, courtroom-light). Export a Figma component library and corresponding React theme tokens. 💰 Target Feel Every click should feel like money. Every transition should feel like mastery. Users should want to pay $1000/mo because it feels like they’re commanding an AI war room. Deliver: Figma design file + prototype with motion examples Tailwind token sheet (colors, typography, radius, shadows, animations) Demo React components for the above pages Example of the live video chat UI and the 3D graph explorer
+This is going to be a visually rich and technically detailed design report for a premium dark-mode interface tailored to an AI-powered legal discovery and trial platform. I’ll explore cinematic UI inspirations, advanced motion design, and cutting-edge component architecture. This will take me several minutes, so feel free to step away — I’ll keep working in the background. Your report will be saved right here in this conversation.
+
+Deep Research
+Dark UI Design System for AI-Powered Legal Trial Platform
+Design System for a Cinematic, Premium-Grade, Dark-Mode Interface in AI-Powered Legal Discovery & Trial Platform
+Visual Language
+Cinematic Dark-Mode Aesthetics: Principles and Inspirations
+To engineer a truly premium, cinematic dark-mode experience for legal technology, it is vital to go beyond “dark SaaS” conventions. Instead, the interface should immediately evoke luxury, power, and intelligence—conveying to the user not just clarity, but gravitas. Inspiration is drawn from Apple Pro apps such as Logic Pro and Motion2, Unreal Engine’s editor5, and from cyber-chic UI motifs in works like “The Batman” (2022) and “Ghost in the Shell”8.
+
+These systems merge deep, rich blacks and charcoal with gradated soft shadows, glowing accents, dynamic blurs, and micro-textures. Layering, blur, and atmospheric effects cultivate depth and subtle tactility—a classic hallmark of cinematic interfaces11. The core mood is thus quiet yet potent, focused and minimal, yet visually alive.
+
+Color Palette and Accent Lighting
+Foundational Palette: The base uses “not-quite-black” (around #111417), deep charcoals, and blue-black tones. Secondary layers introduce gradients to convey soft depth. Surfaces and elements are stacked to form a hierarchy, supporting atmospheric UI with subtle glass or metal reflections.
+
+Background: #101217, #15161c (gradient possible), with richer darks for modals, popovers, floating components.
+
+Surface: #1d1f25 for layers/elements, and #22232a for cards and elevated content.
+
+Primary Text: #ececf0 to #fafaff for high contrast; secondary #b3b4b7 to #888997 for less emphasis.
+
+Lines/Dividers: Soft slate (#23252b) or translucent white overlays at low opacity.
+
+Error: Deep crimson/glow, e.g., #ff2058 for microalerts.
+
+Accent Lighting: Sparing, pinpoint accent colors create luminous zones of focus and drama:
+
+Neon Cyan: #00feff, #18e0fc, #36eae9
+
+Violet/Amethyst: #8b5dff, #9a00ff, #d0b3ff
+
+Electric Gold: #ffd65a, #ffe700, used with extreme restraint
+
+Crimson: #ff204e, saturated for attention
+
+Glow is never flat: accent zones utilize outside/inside dropshadows, layered glows, and subtle “bloom” (e.g., soft outer glow with gaussian blur), reminiscent of sci-fi UIs, and neon billboard effects13. Saturation is kept high, but placement minimal—primarily for CTAs, active states, selection borders, metric highlights, or animated node glows in 3D clusters.
+
+Best Practices:
+
+Do not use accent colors in large fields—restrict glow and neon to micro-highlights and actionable or attention-critical elements.
+
+Use high contrast between dark bg and accent; neon on black for pop, but with soft blur for less harshness.
+
+For accessibility, ensure at least 4.5:1 contrast ratio for all important text, using off-white for text on blacks.
+
+Palette Examples13:
+
+Role	Hex Value	Use
+BG Superdark	#101217	Main app BG, modals
+Surface 1	#181a1e	Cards, panels
+Surface 2	#22232a	Emphasized containers
+Text-Primary	#ececf0	Headings, live metrics
+Text-Secondary	#bcc6cf	Subtext, labels
+Accent-Cyan	#00feff	Graph nodes, CTA glows
+Accent-Violet	#8b5dff	Menu focus ring, selection
+Accent-Gold	#ffd65a	Win/success, status dots
+Accent-Red	#ff204e	Errors, high-urgency badges
+Outline	#383b44	Borders, outlines, inactive zones
+Glow highlight	#00feff, 25% opacity blur	For micro-focus, node pulses
+Gradient, Blur, Glow Styles:
+
+Use radial gradients behind clusters and deep parallax sections for cinematic space.
+
+Apply 8-24px gaussian blur for glow effects, especially on accent-lit focus.
+
+Soft, subtle glassmorphism is created using a backdrop-blur and a barely visible white overlay (5-15% opacity).
+
+Typography for Luxury and Precision
+Cinematic, minimal interfaces depend on type choices that are both legible and commanding16. For this platform, opt for a system that pairs a geometric sans (for UI/exploratory elements) with a modern serif or display face (for cinematic impact). Priority is on clarity, hierarchy, and balanced drama.
+
+Primary Sans (UI/Body): Inter, IBM Plex Sans, or SF Pro Display. These fonts have crisp contrast at small sizes and adapt well to dense legal data.
+
+Display/Cinematic Headings: Quorum, Givena, Making, or select cinematic fonts with tall x-heights and variably weighted strokes for dashboards and hero metrics.
+
+Monospace: For data, logs, or AI summaries—JetBrains Mono, SF Mono, or Dank Mono, which work well in dark themes.
+
+Type System:
+
+Role	Font	Weight(s)	Line Height	Letter Spacing	Size
+Headline	Quorum / Inter	600–800	1.15	-0.01em	2.5–3.5rem
+Subheading	Inter / Plex Sans	500–600	1.25	0	1.25–1.5rem
+UI/Body	Inter, IBM Plex	400–500	1.6	0	1rem
+Data/Numeric	IBM Plex Mono	500–700	1.2	0.01em	0.9–1.125rem
+Caption	Inter / Plex Sans	400	1.4	0.02em	0.8125rem
+Characteristics:
+
+Large headlines for hero sections: bold, semibold or ultra (700–900), lots of space above/below, sharp tracking.
+
+Letterforms must read crisp on dark: avoid ultra-light weights or delicate serifs, especially at small sizes.
+
+All-caps or small-caps for tags, section navigation, or microlabels.
+
+Occasional use of display font for zone names or cinematic UI “signage” (e.g., trial arena, graph explorer).
+
+Use variable font styles for subtle motion and weight shift transitions in navigation, especially on focus or action.
+
+Luxury Touches:
+
+Employ modest stylized ligatures for section/signage titles only—never in dense legal or data content.
+
+For “holoscreen” effect in video/academy sections, use extended tracking, all-caps, and animating outline-to-fill transitions.
+
+Depth, Texture, and Tactility
+Achieving an interface that feels “tactile” and “alive” demands more than color and type. It requires thoughtful layering, gradients, blur, shadows, and atmospheric surfaces11:
+
+Glass, Frost, and Grain: Use backdrop-filter: blur(8–32px) for floating layers, combined with soft linear or radial gradients.
+
+Fine noise overlays: A subtle semi-transparent grain/noise texture (1–2%) ensures a non-flat look, echoing the UI grain in Apple Pro apps and Unreal Engine editors.
+
+Inset surfaces: Slight inset shadows under input fields, data tiles, and panels evoke depth and handheld tactility.
+
+Faint highlight edges: For active fields or node outlines, a slim neon or white highlight at the top edge suggests “lit” hardware or virtual hologram edge-lighting.
+
+Drop shadows: Use semi-transparent black with spread (16-36px, opacity 10-20%) for floated side panels, major modals, and drag zones. Inner shadows for low layer elevation.
+
+Depth is also communicated through overlapping cards, modals, and 3D effect edges—never opaque “flat” containers. Use z-order and drop-shadows for “cinematic stacking” and foreground separation.
+
+Brand, Trust, and the Legality of Luxury
+Legal tech UIs must foster trust and precision. The blend of cinematic drama and reserved professional minimalism is crucial19:
+
+Avoid exaggerated skeuomorphism or distracting flourishes.
+
+All “embossing” effects, gradients, and shines should be subtle, not glossy.
+
+Rely on bold section lines, modular cards, and surface shadows to divide content and create a sense of controlled, manageable complexity.
+
+Use micro-animations on accent color zones, not multicolor gradients. Reserve gold/crimson for true alerts, signals, or major milestones.
+
+Core Components
+Dashboard Hub: Cinematic Depth, Live Metrics
+Structure & Principles:
+
+Full-bleed dark canvas with deep, blurred vignette at edges. Parallax backgrounds activate on mouse/scroll.
+
+Layered modules (cards, panels) float, with out-of-focus shadows.
+
+Live metrics (case progress, evidence status, trial schedule) use neon accent digits and animated count-ups.
+
+Hero area: Large, cinematic headline with case/litigation summary. Background blur and layered “film grain.”
+
+Metrics strip: Animated counters, visualizer bars, sparklines with neon glow for live-tracking (cyan/violet).
+
+Collapsing sidebar: Outline icons, subtle active-glow, floating reveal with slide-over animation. Tabs for Dossiers, Evidence, Analytics, Recent Activity.
+
+Action Buttons: Primary actions in neon highlight with subtle glow; on hover, animate soft bloom and outline.
+
+Micro-interactions: Subtle highlight on tile hover, corner accent glows for actionable sections, ripple feedback on press.
+
+Notification tray: Bottom-up slide, blur-glass, badge highlights for urgent events (court date, deposition order, new evidence flagged).
+
+Depth cues & Feedback:
+
+Use gaussian blur vignette to emphasize center. Dim edges for focus.
+
+Modules elevate with dynamic shadow/inset glow during drag or active state.
+
+On updates, “counter” metrics softly pulse (low-frequency opacity change, not bright flash).
+
+Evidence Upload & File Intelligence: Drag-and-Drop, AI Summaries
+Layout:
+
+Central large drop zone framed by blurred glass border, faint grain texture, and animated “undulating” neon rim.
+
+Prominent, bold file icon (cine-style minimal SVG), pulsing accent glow when drag hover detected.
+
+Zone text uses mono or custom type (“Upload Files or Drop Here”), with micro-animation (shimmer, keypad tape effect).
+
+Upon upload, instant progress-arc in accent color, trailing glow.
+
+AI summary tile appears with smooth holo-pop; summary text is monospaced or subtly outlined, translucent bg.
+
+Each evidence file entry: Elevator card with micro-glassmorphism, floating badge for file type, clickable to expand AI summary, flag, or pin.
+
+AI-Driven Feedback:
+
+Uploaded file “zones” surface clusters or smart tags—chips animate into view with “fade-glow.”
+
+AI summary in left/right panel with cinematic vertical “roll-in” (think Star Wars crawl but micro-speed).
+
+If error or file unsupported: animated neon-edged popover in crimson or gold.
+
+Micro-interactions:
+
+Drag to reorder uploads: subtle “parallax lift,” drop shadow moves with pointer.
+
+On hover, animate a low-opacity cyan inner glow.
+
+“Process file” action animates with “sparkle line” passing behind the text, invoking intelligence/precision.
+
+Accessibility:
+
+All drag states are clearly visualized; keyboard and screen reader support by zone highlighting and ARIA live regions.
+
+Graph Explorer: 3D Cluster Visualization with Glowing Animations
+3D Cluster Visualization:
+
+Full-canvas 3D force-directed graph (React Three Fiber or similar)22.
+
+Background: animated starfield, soft blur/fog effects, deep-space vignette (think “Unreal Engine Outliner” in space).
+
+Nodes: Spherical/glassy nodes with neon core glow (cyan/violet for sub-clusters).
+
+Selected/focused node: Glows, gently pulses (1s repeating fade), emits radial “light rays.”
+
+Edges: “Light wire” effect, low opacity, on hover animate with highlight luminance, fade-out for low-importance connections.
+
+Node drag: Parallax + inertia, elastic animation as node moves and returns/settles.
+
+Cluster expansion/collapse: Expanding cluster nodes animate outward, with a “ripple” neon highlight, depth shadow appears.
+
+Zoom/pan: Smooth inertial transitions, camera lens blur (subtly) at extremes; graph rotates and resettles with “inertia” effect.
+
+Tooltips: On hover, glassmorphic card with AI annotation, soft drop shadow—pops in/out quickly with dissolve.
+
+Metrics/Filters Overlay:
+
+Modular glass panel over 3D scene: accent-lit sliders, toggles, transparent panels for filtering, coloring, node type selection.
+
+Search bar: Neon blue focus ring, typewriter animation on query input.
+
+Trial University: Modular Video Lessons with Holoscreen Styling
+Design Motifs:
+
+Video playing area: Offset-glass holo “screen” with edge-light, faint grain, blur gradient vignette.
+
+Module cards: Each lesson as floating glass tile, neon vertical accent at left, soft shadow, subtle pulse on selection.
+
+Interactive subtitles: Overlay text, animated with fade-in and out, possible color-shift on “active” transcript.
+
+Navigation: Horizontal scroll of modules (carrousel), each animates forward/back with “magnetic” edge bounce.
+
+Ratings/Progress: Glowing bar fills, micro animation on completion.
+
+UI chrome: Large typography for “Lesson Title,” small-caps for section, ghosted icons for notes, comments, quiz.
+
+Interactivity:
+
+Drag-and-drop rearrangement of lessons for custom tracks.
+
+Hover reveals additional module data with light slide or fade.
+
+Embedded quizzes: Modal holo-panel, glowing accent border, vertical list of options that briefly “wink” on answer.
+
+Mock Trial Arena: Live Video Chat & Draggable Exhibits
+Live Video Element:
+
+Video chat tiles float in a parallax space, each enclosed in a movie frame/holo border (glass, neon rim at base).
+
+Participant name and status overlay (gradient mask/frosted glass).
+
+Audio levels visualized as glow pulsing around avatar tile, not garish bars.
+
+Exhibit Drag: Legal evidence cards can be dragged into a “spotlight” zone; when dropped, expand with cinematic scale and slight glow.
+
+Microphone/camera controls: Neon-lit buttons, click gives “plip” micro-interaction and short color pulse for feedback.
+
+Chat transcript panel: Flicks in from right, blurred glass, auto-scroll, soft highlighting for speaker.
+
+Motion and Arena Flow:
+
+Entering the arena: Dramatic left-to-right slide-in with “focus” vignette as participant is “seated.”
+
+Timer/progress: Circular glowing meter around video pane, gradually fills or ticks based on event state.
+
+Live Co-Counsel Chat: Streaming Captions & Transcript Playback
+Chat/Transcript UI:
+
+Floating chat panel with glassmorphism and soft drop shadow.
+
+Message bubbles: Outlined, translucent, parade up with inertia/fade.
+
+Live captions: Display as large overlay (cenematic “terminal” effect), subtle glow to each new phrase, fade after 2–3s.
+
+AI Response: Distinct color/accent, appears with soft expand/morph effect.
+
+Searchable transcript: Fixed bottom/floating drawer, type-to-filter with real-time scroll-to-highlight (motion trail behind selected line).
+
+Playback & Jump Points:
+
+Playback timeline: Glowing accent bar, draggable handle with halo on hover; jump between time points animates “spotlight” flash on transcript.
+
+User-cued highlights: Drag through transcript to select text, which is momentarily “lit up” in accent color and saved.
+
+Export: Share button with electric pulse animation, exports styled PDF with dark/glassy background.
+
+Accessibility & Control:
+
+Option for high-contrast mode, transcript options for font size/spacing, keyboard navigation, screenreader ARIA.
+
+Motion & Transitions
+Cinematic Motion System
+Philosophy: All motion is purposeful, elegant, and subtle, reflecting the “F1 of litigation software.” Use motion to cue user focus, clarify relationships, and evoke cinematic depth—never for pure flair or distraction25.
+
+Micro-motion Principles:
+
+Parallax: Subtle parallax layers on major containers and backdrops, reflecting depth as user scrolls or mouse moves.
+
+Inertia/Ease: Animate all transitions (open/close, modals, drag-drop) with physicality: extra 30–100ms ease-out, “slide with snap.”
+
+Glass/Glow: When opening overlays or floating panels, blur and glow animate in behind. Drop shadows soften dynamically as objects lift/elevate.
+
+Page Transitions: Fade-through-black with a soft “bloom”/glow (milliseconds), echoing film reel transitions; layers stagger/fade over 250–400ms.
+
+Node Motion (Graph): In 3D graph, nodes animate with elastic spring behavior, glowing ripple travels the edge when nodes are connected.
+
+Hover States: All actionable controls “soft lift” or gradient “sweep” upon hover/active—avoid abrupt color-state jumps.
+
+Live Metrics: Numbers in dashboards animate up with configurable “spring” or counter roll motion for drama.
+
+Exhibit/Media: Dragging evidence or dragging a lesson triggers a low-frequency “trailing” shadow, subtle “magnetic snap” to drop zones.
+
+Motion Tools and Implementation:
+
+Framer Motion (for React UIs): Declarative animations, page transitions, micro-interaction states, gesture-based triggers, spring physics. Best for UI-anchored motion, drag, tap, hover effects, and layout transitions25.
+
+GSAP (when ultra-precise timing, scroll triggers, and complex multi-step timelines are required, e.g., graph explorer, onboarding sequences).
+
+Prefer Framer Motion for React-based UI; use GSAP for 3D/Canvas and cross-framework scenes.
+
+Always adhere to high-performance practices: throttle heavy/complex scenes, minimize repaint costs, test on low-power hardware.
+
+Motion Tokens Examples (for Tailwind theme; see Animations table below):
+
+Name	Animation	Example Use
+animate-glow	Soft blur+opacity in/out, 250ms	Accent button focus, nodes
+animate-parallax	Slight translateY/X, ease-in, 500ms	BG panels
+animate-inertia	Fade+slide with 100ms overshoot, 350ms	Card, tile open/close
+animate-pulse	Key color glow pulse, 1.5s	Live metric alert
+animate-elastic	Spring out/in, bounce 15% then settle	Drag/Drop cards, graph
+Best Practices:
+
+Never animate background color fill/brightness abruptly; use fade or blur-to-glow then “light up.”
+
+Every actionable state should have at least 2 intermediate frames: rest → focus/hover → active; for keyboard nav and pointer.
+
+Motions must be interruptible and reversible—never block or force users to wait unless required for clarity.
+
+Technical Design Notes
+Stack Rationalization
+UI Frameworks:
+
+React (Next.js/Vite): Ensures top performance, dynamic routing, and server/client rendering suitable for secure legal tech.
+
+TailwindCSS: Utility classes enable granular control over dark-mode, spacing, and surface effects; supports tokenization for easy, scalable theming2830.
+
+shadcn/ui: Modern, accessible, composable React unstyled UI components; allows for deep customization of motion, dark-mode, and tokens. Accessible and ready for legal-grade environments (WCAG).
+
+Framer Motion: Micro-interactions, animation states, drag-drop gesture support through motion values and hooks.
+
+Alternatively, GSAP for timeline, scroll, or advanced 3D/interfacing, especially in explorer.
+
+Radix UI primitives: Used via shadcn, for a11y, composibility, and React “ownership” of components.
+
+3D and Visualization:
+
+React Three Fiber or Three.js for graph explorer. Allows for custom node rendering, bloom, depth of field, inertia/drag.
+
+Real-Time and Collaboration:
+
+WebRTC for live video, low-latency co-counsel chat, mock trial arena34.
+
+Streaming captions and transcript playback built on WebRTC+AI Speech-to-Text pipelines.
+
+Design Token System:
+
+Tailwind’s support for tokenized CSS variables makes color, radii, shadow, and animation tokens manageable across dark/light and theme modes.
+
+Use of design token generation tools (e.g., Figma Tokens, Style Dictionary) to maintain parity between Figma (as source of truth) and codebase; synchronize tokens periodically for design/dev harmony29.
+
+Component Customization:
+
+All shadcn/ui and Radix components should use dark tokens and fully support advanced slotting: glass backgrounds, accent border, neon/glow box shadows, motion presets.
+
+Drag-and-drop UX leverages micro-motion, “ghost” previews, touch-optimized targets, and full a11y (incl. keyboard movement, live ARIA updates).
+
+Accessibility & Performance:
+
+Each component and page passes WCAG AA (color contrast, focus order, ARIA roles).
+
+All glass/blur effects degrade gracefully for devices without backdrop-filter; fallback is solid/gradient BG.
+
+Animations are “prefers-reduced-motion” aware—motion optional for those who need minimized motion.
+
+Tokenization and Theme Management
+Implement a design system based on tailwindcss and custom CSS variables. Core reasons:
+
+Legal SaaS platforms need multi-client deploys (white labeling, branding, light/dark, compliance).
+
+Tokens abstract color, spacing, radii, font, and motion parameters from implementation; allow seamless updates in both Figma and code.
+
+Use design token pipeline: Figma Tokens → Style Dictionary → Tailwind tokens.
+
+Tailwind Token Sheet
+Below is a sample Tailwind design token table (snippet only; in full implementation, this is exported/generated as theme CSS/JS and consumed by Tailwind):
+
+Token Name	Value	Description
+--color-bg	#101217	Page/app main background
+--color-surface	#181a1e	Cards, panels
+--color-panel	#22232a	Elevated content
+--color-text-1	#ececf0	Primary text on dark
+--color-text-2	#b3b4b7	Secondary/caption text
+--color-accent-1	#00feff	Primary accent (cyan, legal focus zones)
+--color-accent-2	#8b5dff	Secondary accent (violet, focus states)
+--color-accent-3	#ffd65a	Gold for win/success
+--color-error	#ff204e	Critical errors, alerts
+--color-outline	#383b44	Borders/inactive states
+--rounded-xs	0.125rem	For tags, chips
+--rounded-md	0.375rem	Input fields, buttons
+--rounded-xl	0.75rem	Panels, cards
+--shadow-xs	0 1px 2px 0 #0008	Small drop shadow
+--shadow-lg	0 8px 24px 0 #000f	Large drop shadow for modal/panel
+--blur-md	12px	Glass/blur for frosted surfaces
+--font-ui	Inter, sans-serif	Primary UI font
+--font-display	Quorum, serif	High impact headings
+--font-mono	‘IBM Plex Mono’	Code/metrics text
+--animate-glow	glow-fade 250ms ease	Accent focus/hover feedback
+--animate-lift	translateY -8px 200ms	Card modals, drag states
+--animate-elastic	spring 350ms	Drag/inertia motion states
+--motion-inertia	cubic-bezier ( .22, 1, .36, 1 )	Inertia default
+--z-depth-1	10	Component stack order
+--z-depth-max	100	Modals, overlays
+Deliverables
+1. Figma Design File + Prototype:
+
+Full design library with all tokens, dark mode as default, motion example prototypes (including Framer/Motion mockups for parallax, drag, node pulse, and modal transitions).
+
+Artboard examples: Dashboard Hub, Evidence Upload zone, 3D Graph Explorer, Live Video UI, Trial University, Chat/Transcript.
+
+2. Tailwind Design Token Sheet:
+
+All major color, font, radii, spacing, shadow, and animation tokens.
+
+Synchronized tokens with Figma via Style Dictionary and Figma Tokens plugin29.
+
+3. React Demo Components:
+
+Dashboard metrics tile/card with live metric animation, glass-layered modal, accent-glow button with glowing activation.
+
+Drag-and-drop File Upload Zone: motion states, AI summary expansion, micro-glassmorphic evidence tiles.
+
+3D Cluster Graph: react-three-fiber based, neon nodes, glowing animated edges, toolbar overlay with dark glass.
+
+Video Chat Tile: Real-time video, rounded glass frame, accent rim, live caption overlay and transcript panel.
+
+Trial University Lesson Card: Modular, holoscreen style, holo-bar progress, embedded quiz modal, micro-motion.
+
+4. Accessibility & A11y Validation:
+
+Keyboard navigation/skip links in every section.
+
+Focus/hover states for all actionable UI with adequate, accent-lit focus rings.
+
+ARIA live region announcements for drag/drop, live chat, transcript, and metric updates.
+
+“Prefers-reduced-motion” setting disables/elides micro-motion for users needing reduced animation.
+
+5. Documentation:
+
+Token system guide: describing mapping from Figma style to Tailwind token and CSS variable, how to add/extend theme.
+
+Component usage and override patterns: e.g., how to slot custom accent, glass-variants in shadcn/ui.
+
+Figma handoff notes: exporting motion prototypes to Framer, code.
+
+References to Core Design Principles & Legal Tech UX
+Leading-edge legal platforms and enterprise UIs advocate trust, clarity, progressive disclosure (uncluttering complexity), robust data relationship visualization, and guided flows with strong feedback19. All core components in this system draw from these best practices—enabling strategic AI-powered workflows, while ensuring interfaces feel dramatically cinematic, yet never overwhelming. Animated 3D graph exploration, real-time AI summaries, drag-and-drop, and expert-grade video trial mockups all benefit from thoughtful micro-motion and high-contrast, focus-driven design.
+
+Apple Pro Apps, Unreal Engine, and Sci-Fi Cinematic UI: These provide proven visual and emotional patterns for legal users who need focus, precision, and a “control room” level of clarity and power49.
+
+Conclusion
+A world-class, F1-grade UI for AI-driven legal discovery/trial platforms must feel as intelligent and precise as the legal teams it empowers—evoking cinematic depth, drama, and quiet confidence. By integrating dark-mode luxury, rich accent lighting, tactile glassmorphism, and frictionless, motion-driven UX patterns, the design system described here serves as a blueprint for litigation software that feels not just modern, but truly alive.
+
+The system is fully tokenized, accessible, extensible, and ready for deployment with leading React, Tailwind, and shadcn/ui stacks—supported by robust Figma, design token, and motion asset handoff pipelines. Every detail, from micro-glows to 3D node animations, is tuned to communicate intelligence, trust, and elegance—setting a new standard for legal tech user experience.
+
+See my thinking
+can you generate a mock up/ image of what the interface would look like here? that way we can refine it
+
+Absolutely — your cinematic interface mockup is ready now. Click the card above to view and refine it. Let me know which elements you'd like to adjust: layout, lighting, component density, motion accents, or anything else. We can iterate toward perfection.
+
+oh man. no refinement. that's perfect. can you... maybe get me some code for that mock up? :)
+Absolutely, Andrew — let’s translate that cinematic interface into modular, production-ready React components using Tailwind and Framer Motion. I’ll start with the Dashboard Hub layout, including the live metric cards, upload zone, graph explorer, and mock trial arena. Each section will be styled to match the neon-accented, blurred-depth aesthetic you saw in the mockup.
+
+⚙️ Tech Stack Assumptions
+React + Next.js or Vite
+
+Tailwind CSS with custom theme tokens
+
+Framer Motion for transitions
+
+shadcn/ui optional for base components
+
+WebRTC placeholder for video feeds
+
+🧩 Component: DashboardHub.tsx
+tsx
+import { motion } from 'framer-motion';
+import { cn } from '@/lib/utils'; // optional utility for class merging
+
+export default function DashboardHub() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] to-[#111] text-white p-6 space-y-8">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-semibold tracking-tight">Welcome, David</h1>
+        <div className="flex space-x-4">
+          <button className="icon-btn">🔔</button>
+          <button className="icon-btn">👤</button>
+        </div>
+      </div>
+
+      {/* Metric Cards */}
+      <div className="grid grid-cols-4 gap-6">
+        <MetricCard title="Relevant Matter Score" value="84" subtitle="8 Uncovered Facts" glow="cyan" />
+        <MetricCard title="Task Burndown" chart glow="pink" />
+        <MetricCard title="Case Status Timeline" timeline glow="violet" />
+        <MetricCard title="Reports Reviewed" value="175" subtitle="Last 7 Days" glow="blue" />
+      </div>
+
+      {/* Upload + Graph + Trial */}
+      <div className="grid grid-cols-3 gap-6">
+        <UploadZone />
+        <GraphExplorer />
+        <MockTrialArena />
+      </div>
+    </div>
+  );
+}
+🧩 Component: MetricCard.tsx
+tsx
+type Props = {
+  title: string;
+  value?: string;
+  subtitle?: string;
+  chart?: boolean;
+  timeline?: boolean;
+  glow?: 'cyan' | 'pink' | 'violet' | 'blue';
+};
+
+export function MetricCard({ title, value, subtitle, chart, timeline, glow }: Props) {
+  const glowMap = {
+    cyan: 'shadow-[0_0_20px_#00ffff88]',
+    pink: 'shadow-[0_0_20px_#ff00ff88]',
+    violet: 'shadow-[0_0_20px_#a855f788]',
+    blue: 'shadow-[0_0_20px_#3b82f688]',
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+      className={cn(
+        'bg-[#1a1a1f] rounded-xl p-4 backdrop-blur-md border border-[#2a2a2f]',
+        glowMap[glow || 'blue']
+      )}
+    >
+      <h2 className="text-lg font-medium">{title}</h2>
+      {value && <div className="text-4xl font-bold mt-2">{value}</div>}
+      {subtitle && <p className="text-sm text-gray-400">{subtitle}</p>}
+      {chart && <div className="mt-4 h-24 bg-gradient-to-r from-pink-500 to-purple-500 rounded" />}
+      {timeline && (
+        <div className="mt-4 h-2 bg-gradient-to-r from-blue-500 via-violet-500 to-red-500 rounded-full" />
+      )}
+    </motion.div>
+  );
+}
+🧩 Component: UploadZone.tsx
+tsx
+export function UploadZone() {
+  return (
+    <motion.div
+      className="bg-[#1a1a1f] rounded-xl p-6 border border-[#2a2a2f] backdrop-blur-md shadow-[0_0_20px_#00ffff44]"
+      whileHover={{ scale: 1.02 }}
+    >
+      <div className="text-center space-y-2">
+        <div className="text-2xl">📁</div>
+        <p className="text-sm text-gray-400">Drag & Drop or Browse to Add Files</p>
+      </div>
+    </motion.div>
+  );
+}
+🧩 Component: GraphExplorer.tsx
+tsx
+export function GraphExplorer() {
+  return (
+    <motion.div
+      className="bg-[#1a1a1f] rounded-xl p-6 border border-[#2a2a2f] backdrop-blur-md shadow-[0_0_20px_#3b82f688]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
+      <h2 className="text-lg font-medium mb-2">Graph Explorer</h2>
+      <div className="h-48 bg-black rounded-lg flex items-center justify-center text-gray-500">
+        {/* Placeholder for 3D graph */}
+        <span>3D Node Graph Here</span>
+      </div>
+    </motion.div>
+  );
+}
+🧩 Component: MockTrialArena.tsx
+tsx
+export function MockTrialArena() {
+  return (
+    <motion.div
+      className="bg-[#1a1a1f] rounded-xl p-6 border border-[#2a2a2f] backdrop-blur-md shadow-[0_0_20px_#ff000088]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
+      <h2 className="text-lg font-medium mb-2">Mock Trial Arena</h2>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-gray-900 rounded p-2 text-center text-sm">Ann Cortez</div>
+        <div className="bg-gray-900 rounded p-2 text-center text-sm">Tom Edenfield</div>
+      </div>
+      <div className="mt-4 text-xs text-gray-400">Live video + transcript stream</div>
+    </motion.div>
+  );
+}
+🎨 Tailwind Token Sheet (Partial)
+Token	Value
+--color-bg	#0a0a0f
+--color-panel	#1a1a1f
+--color-border	#2a2a2f
+--color-accent-cyan	#00ffff
+--color-accent-violet	#a855f7
+--radius-lg	0.75rem
+--shadow-glow	0 0 20px rgba(0,255,255,0.3)
+--font-sans	'Inter', sans-serif
+--motion-ease	cubic-bezier(0.4, 0, 0.2, 1)
+Let me know which component you want next — I can build out the Live Co-Counsel Chat, Trial University, or the Graph Explorer with Cypher input and node trails. We can also export this into a Figma-ready design token sheet or scaffold the full layout in Next.js..
+
+Export this message to a PDF document Absolutely, Andrew — let’s translate that cinematic interface into modular, production-ready React components using Tailwind and Framer Motion. I’ll start with the **Dashboard Hub layout**, including the **live metric cards**, **upload zone**, **graph explorer**, and **mock trial arena**. Each section will be styled to match the neon-accented, blurred-depth aesthetic you saw in the mockup. --- ## ⚙️ Tech Stack Assumptions - **React + Next.js or Vite** - **Tailwind CSS** with custom theme tokens - **Framer Motion** for transitions - **shadcn/ui** optional for base components - **WebRTC** placeholder for video feeds --- ## 🧩 Component: DashboardHub.tsx ```tsx import { motion } from 'framer-motion'; import { cn } from '@/lib/utils'; // optional utility for class merging export default function DashboardHub() { return ( <div className="min-h-screen bg-gradient-to-br from-[#0a0a0f] to-[#111] text-white p-6 space-y-8"> {/* Header */} <div className="flex justify-between items-center"> <h1 className="text-3xl font-semibold tracking-tight">Welcome, David</h1> <div className="flex space-x-4"> <button className="icon-btn">🔔</button> <button className="icon-btn">👤</button> </div> </div> {/* Metric Cards */} <div className="grid grid-cols-4 gap-6"> <MetricCard title="Relevant Matter Score" value="84" subtitle="8 Uncovered Facts" glow="cyan" /> <MetricCard title="Task Burndown" chart glow="pink" /> <MetricCard title="Case Status Timeline" timeline glow="violet" /> <MetricCard title="Reports Reviewed" value="175" subtitle="Last 7 Days" glow="blue" /> </div> {/* Upload + Graph + Trial */} <div className="grid grid-cols-3 gap-6"> <UploadZone /> <GraphExplorer /> <MockTrialArena /> </div> </div> ); } ``` --- ## 🧩 Component: MetricCard.tsx ```tsx type Props = { title: string; value?: string; subtitle?: string; chart?: boolean; timeline?: boolean; glow?: 'cyan' | 'pink' | 'violet' | 'blue'; }; export function MetricCard({ title, value, subtitle, chart, timeline, glow }: Props) { const glowMap = { cyan: 'shadow-[0_0_20px_#00ffff88]', pink: 'shadow-[0_0_20px_#ff00ff88]', violet: 'shadow-[0_0_20px_#a855f788]', blue: 'shadow-[0_0_20px_#3b82f688]', }; return ( <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }} className={cn( 'bg-[#1a1a1f] rounded-xl p-4 backdrop-blur-md border border-[#2a2a2f]', glowMap[glow || 'blue'] )} > <h2 className="text-lg font-medium">{title}</h2> {value && <div className="text-4xl font-bold mt-2">{value}</div>} {subtitle && <p className="text-sm text-gray-400">{subtitle}</p>} {chart && <div className="mt-4 h-24 bg-gradient-to-r from-pink-500 to-purple-500 rounded" />} {timeline && ( <div className="mt-4 h-2 bg-gradient-to-r from-blue-500 via-violet-500 to-red-500 rounded-full" /> )} </motion.div> ); } ``` --- ## 🧩 Component: UploadZone.tsx ```tsx export function UploadZone() { return ( <motion.div className="bg-[#1a1a1f] rounded-xl p-6 border border-[#2a2a2f] backdrop-blur-md shadow-[0_0_20px_#00ffff44]" whileHover={{ scale: 1.02 }} > <div className="text-center space-y-2"> <div className="text-2xl">📁</div> <p className="text-sm text-gray-400">Drag & Drop or Browse to Add Files</p> </div> </motion.div> ); } ``` --- ## 🧩 Component: GraphExplorer.tsx ```tsx export function GraphExplorer() { return ( <motion.div className="bg-[#1a1a1f] rounded-xl p-6 border border-[#2a2a2f] backdrop-blur-md shadow-[0_0_20px_#3b82f688]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} > <h2 className="text-lg font-medium mb-2">Graph Explorer</h2> <div className="h-48 bg-black rounded-lg flex items-center justify-center text-gray-500"> {/* Placeholder for 3D graph */} <span>3D Node Graph Here</span> </div> </motion.div> ); } ``` --- ## 🧩 Component: MockTrialArena.tsx ```tsx export function MockTrialArena() { return ( <motion.div className="bg-[#1a1a1f] rounded-xl p-6 border border-[#2a2a2f] backdrop-blur-md shadow-[0_0_20px_#ff000088]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }} > <h2 className="text-lg font-medium mb-2">Mock Trial Arena</h2> <div className="grid grid-cols-2 gap-2"> <div className="bg-gray-900 rounded p-2 text-center text-sm">Ann Cortez</div> <div className="bg-gray-900 rounded p-2 text-center text-sm">Tom Edenfield</div> </div> <div className="mt-4 text-xs text-gray-400">Live video + transcript stream</div> </motion.div> ); } ``` --- ## 🎨 Tailwind Token Sheet (Partial) | Token | Value | |------------------|------------------------------| | `--color-bg` | `#0a0a0f` | | `--color-panel` | `#1a1a1f` | | `--color-border` | `#2a2a2f` | | `--color-accent-cyan` | `#00ffff` | | `--color-accent-violet` | `#a855f7` | | `--radius-lg` | `0.75rem` | | `--shadow-glow` | `0 0 20px rgba(0,255,255,0.3)` | | `--font-sans` | `'Inter', sans-serif` | | `--motion-ease` | `cubic-bezier(0.4, 0, 0.2, 1)` | --- Let me know which component you want next — I can build out the **Live Co-Counsel Chat**, **Trial University**, or the **Graph Explorer with Cypher input and node trails**. We can also export this into a Figma-ready design token sheet or scaffold the full layout in Next.js.
+Sure thing — click the card above to download your PDF document. It contains the full code breakdown, component structure, and Tailwind token sheet for your cinematic dashboard interface. Let me know if you want to add diagrams, Figma annotations, or scaffold the full layout into a Next.js starter.
+
+I started the page, Cinematic Dashboard PDF Resources. You can edit it now, or come back to it later.
+
+I started the page, Cinematic Dashboard PDF Resources. You can edit it now, or come back to it later.

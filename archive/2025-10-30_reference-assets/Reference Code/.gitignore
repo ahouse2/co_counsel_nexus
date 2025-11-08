@@ -1,8 +1,0 @@
-# Ignore cloned upstream repositories; track only sync tooling.
-*/.git
-*/.github
-*/.venv
-*/node_modules
-*/__pycache__
-*/dist
-*/build

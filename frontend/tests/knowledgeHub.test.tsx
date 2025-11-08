@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+﻿import type { ReactNode } from 'react';
+import { describe, expect, it, beforeEach, vi, Mock } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { KnowledgeHub } from '@/components/KnowledgeHub';
 import {
@@ -9,13 +9,10 @@ import {
   updateKnowledgeBookmark,
   updateKnowledgeProgress,
 } from '@/utils/apiClient';
-
 vi.mock('react-markdown', () => ({
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
-
 vi.mock('remark-gfm', () => ({ default: () => null }));
-
 vi.mock('@/utils/apiClient', async () => {
   const actual = await vi.importActual<typeof import('@/utils/apiClient')>('@/utils/apiClient');
   return {
@@ -30,7 +27,7 @@ vi.mock('@/utils/apiClient', async () => {
 
 describe('KnowledgeHub', () => {
   beforeEach(() => {
-    (fetchKnowledgeLessons as unknown as vi.Mock).mockResolvedValue({
+    (fetchKnowledgeLessons as unknown as Mock).mockResolvedValue({
       lessons: [
         {
           lesson_id: 'civil-discovery-foundations',
@@ -56,7 +53,7 @@ describe('KnowledgeHub', () => {
         media_types: ['pdf'],
       },
     });
-    (fetchKnowledgeLesson as unknown as vi.Mock).mockResolvedValue({
+    (fetchKnowledgeLesson as unknown as Mock).mockResolvedValue({
       lesson_id: 'civil-discovery-foundations',
       title: 'Civil Discovery Foundations',
       summary: 'Operational blueprint for proportional discovery.',
@@ -117,7 +114,7 @@ describe('KnowledgeHub', () => {
         ],
       },
     });
-    (searchKnowledge as unknown as vi.Mock).mockResolvedValue({
+    (searchKnowledge as unknown as Mock).mockResolvedValue({
       results: [
         {
           lesson_id: 'civil-discovery-foundations',
@@ -134,12 +131,12 @@ describe('KnowledgeHub', () => {
       elapsed_ms: 12.5,
       applied_filters: {},
     });
-    (updateKnowledgeBookmark as unknown as vi.Mock).mockResolvedValue({
+    (updateKnowledgeBookmark as unknown as Mock).mockResolvedValue({
       lesson_id: 'civil-discovery-foundations',
       bookmarked: true,
       bookmarks: ['civil-discovery-foundations'],
     });
-    (updateKnowledgeProgress as unknown as vi.Mock).mockResolvedValue({
+    (updateKnowledgeProgress as unknown as Mock).mockResolvedValue({
       lesson_id: 'civil-discovery-foundations',
       section_id: 'overview',
       completed_sections: ['overview'],
@@ -189,3 +186,7 @@ describe('KnowledgeHub', () => {
     expect(snippets.length).toBeGreaterThan(0);
   });
 });
+
+
+
+

@@ -1,0 +1,11 @@
+{
+    "scenario_name": "forensic_pdf_analysis_basic",
+    "team_name": "ForensicAnalysisCrew",
+    "prompt": "Analyze the attached PDF for any signs of tampering or alteration. Provide a summary of your findings.",
+    "input_files": ["path/to/sample.pdf"],
+    "expected_output": {
+        "expected_text_contains": "metadata_analysis",
+        "expected_key": "sha256_hash"
+    },
+    "description": "Tests the ForensicAnalysisCrew's ability to analyze a PDF and report on its authenticity."
+}

@@ -11,16 +11,22 @@ from importlib.util import find_spec
 
 from backend.app.models.api import IngestionSource
 from backend.app.utils.triples import EntitySpan, Triple, extract_entities, extract_triples
+from backend.app.forensics.analyzer import ForensicAnalyzer
+from backend.app.forensics.crypto_tracer import CryptoTracer
+from backend.app.forensics.models import ForensicAnalysisResult, CryptoTracingResult
 
 from .loader_registry import LoadedDocument, LoaderRegistry
 from .llama_index_factory import (
     configure_global_settings,
     create_embedding_model,
     create_sentence_splitter,
+    create_llm_service, # Added
+    BaseLlmService, # Added
 )
 from .metrics import record_document_yield, record_node_yield, record_pipeline_metrics
 from .settings import LlamaIndexRuntimeConfig
 from .fallback import MetadataModeEnum
+from .categorization import categorize_document, tag_document
 
 
 def _has_spec(path: str) -> bool:
@@ -58,7 +64,11 @@ class DocumentPipelineResult:
     loaded: LoadedDocument
     nodes: List[PipelineNodeRecord]
     entities: List[EntitySpan]
-    triples: List[Triple]
+    triples: List[Triple] = field(default_factory=list)
+    categories: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    forensic_analysis_result: Optional[ForensicAnalysisResult] = None # Added
+    crypto_tracing_result: Optional[CryptoTracingResult] = None # Added
 
 
 @dataclass
@@ -86,12 +96,13 @@ def run_ingestion_pipeline(
     configure_global_settings(runtime_config)
     splitter = create_sentence_splitter(runtime_config.tuning)
     embedding_model = create_embedding_model(runtime_config.embedding)
+    llm_service = create_llm_service(runtime_config.llm) # Create LLM service
 
     with record_pipeline_metrics(source.type.lower(), job_id):
         loaded_documents = registry.load_documents(materialized_root, source, origin=origin)
         record_document_yield(len(loaded_documents), source_type=source.type.lower(), job_id=job_id)
         documents = [
-            _process_loaded_document(loaded, splitter, embedding_model)
+            _process_loaded_document(loaded, splitter, embedding_model, llm_service) # Pass LLM service
             for loaded in loaded_documents
         ]
         total_nodes = sum(len(doc.nodes) for doc in documents)
@@ -103,6 +114,7 @@ def _process_loaded_document(
     loaded: LoadedDocument,
     splitter,
     embedding_model,
+    llm_service: BaseLlmService, # Accept LLM service
 ) -> DocumentPipelineResult:
     nodes = _split_nodes(splitter, loaded.document)
     pipeline_nodes: List[PipelineNodeRecord] = []
@@ -123,7 +135,38 @@ def _process_loaded_document(
         )
     entities = extract_entities(loaded.text)
     triples = extract_triples(loaded.text)
-    return DocumentPipelineResult(loaded=loaded, nodes=pipeline_nodes, entities=entities, triples=triples)
+    
+    # Categorization and Tagging
+    categories = categorize_document(loaded.text, llm_service) # Use llm_service
+    tags = tag_document(loaded.text, llm_service) # Use llm_service
+
+    forensic_analysis_result = None
+    crypto_tracing_result = None
+
+    doc_type = loaded.source.metadata.get("doc_type")
+    if doc_type == "opposition_documents":
+        forensic_analyzer = ForensicAnalyzer()
+        forensic_analysis_result = forensic_analyzer.analyze_document(
+            document_id=loaded.source.source_id,
+            document_content=loaded.document.text.encode('utf-8'), # Assuming text can be encoded
+            metadata=loaded.source.metadata,
+        )
+        crypto_tracer = CryptoTracer()
+        crypto_tracing_result = crypto_tracer.trace_document_for_crypto(
+            document_content=loaded.document.text,
+            document_id=loaded.source.source_id,
+        )
+
+    return DocumentPipelineResult(
+        loaded=loaded,
+        nodes=pipeline_nodes,
+        entities=entities,
+        triples=triples,
+        categories=categories,
+        tags=tags,
+        forensic_analysis_result=forensic_analysis_result, # Added
+        crypto_tracing_result=crypto_tracing_result, # Added
+    )
 
 
 def _split_nodes(splitter, document) -> Sequence[Any]:

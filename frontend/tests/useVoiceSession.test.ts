@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+﻿import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useVoiceSession } from '@/hooks/useVoiceSession';
@@ -19,7 +19,6 @@ class MockAudio {
   public src = '';
   public currentTime = 0;
   private listeners: Record<string, () => void> = {};
-
   constructor(src?: string) {
     if (src) {
       this.src = src;
@@ -59,13 +58,16 @@ class MockAudio {
     MockAudio.playSpy.mockReset();
     MockAudio.pauseSpy.mockReset();
     MockAudio.lastInstance = null;
-    // @ts-expect-error overriding Audio constructor for testing
     globalThis.Audio = MockAudio as unknown as typeof globalThis.Audio;
   });
 
   it('loads personas and submits a session', async () => {
-    const response: VoiceSessionResponse = {
-      session_id: 'session-1',
+    const response = {
+      
+      
+      
+      
+      translation: "",persona_shifts: [],sentiment_arc: [],persona_directive: "",session_id: 'session-1',
       thread_id: 'thread-1',
       case_id: 'CASE-1',
       persona_id: 'aurora',
@@ -76,8 +78,7 @@ class MockAudio {
       segments: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    };
-    vi.mocked(createVoiceSession).mockResolvedValue(response);
+    } as unknown as VoiceSessionResponse;vi.mocked(createVoiceSession).mockResolvedValue(response);
     vi.mocked(fetchVoiceSession).mockResolvedValue({ ...response, voice_memory: {} });
 
     const { result } = renderHook(() => useVoiceSession());
@@ -92,15 +93,15 @@ class MockAudio {
 
     expect(createVoiceSession).toHaveBeenCalledTimes(1);
     const [[formData]] = vi.mocked(createVoiceSession).mock.calls as [[FormData]];
-    const entries = Array.from(formData.entries());
+    const entries = Array.from((formData as any).entries()) as [string, any][];
     expect(entries).toEqual(
       expect.arrayContaining([
         ['case_id', 'CASE-1'],
         ['persona_id', 'aurora'],
       ])
     );
-    const audioEntry = entries.find(([key]) => key === 'audio');
-    expect(audioEntry?.[1]).toBeInstanceOf(Blob);
+    const audioEntry = entries.find(([key]) => key === 'audio') as [string, any] | undefined;
+expect(audioEntry?.[1]).toBeInstanceOf(Blob);
     expect(result.current.session?.assistant_text).toBe('Answer');
     expect(fetchVoiceSession).toHaveBeenCalledWith('session-1');
     expect(MockAudio.lastInstance?.src).toBe('/voice/sessions/session-1/response');
@@ -118,3 +119,7 @@ class MockAudio {
     expect(result.current.playing).toBe(false);
   });
 });
+
+
+
+
