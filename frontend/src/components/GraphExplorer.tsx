@@ -69,7 +69,7 @@ export function GraphExplorer() {
             <h3>Edges:</h3>
             <ul>
               {graphData.edges.map((edge, index) => (
-                <li key={index}>{edge.source} -> {edge.target}</li>
+                <li key={index}>{edge.source} {'->'} {edge.target}</li>
               ))}
             </ul>
           </div>

@@ -16,6 +16,7 @@ interface GraphNode {
 }
 
 interface GraphEdge {
+  id?: string; // Added id property
   from: string;
   to: string;
   label?: string;
@@ -26,8 +27,8 @@ interface GraphEdge {
 
 const KnowledgeGraphViewer: React.FC = () => {
   const networkRef = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes] = useState<DataSet<GraphNode>>(new DataSet());
-  const [edges, setEdges] = useState<DataSet<GraphEdge>>(new DataSet());
+  const [nodes, setNodes] = useState<DataSet<GraphNode, 'id'>>(new DataSet<GraphNode, 'id'>());
+  const [edges, setEdges] = useState<DataSet<GraphEdge, 'id'>>(new DataSet<GraphEdge, 'id'>());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchNodeId, setSearchNodeId] = useState('');
@@ -58,7 +59,7 @@ const KnowledgeGraphViewer: React.FC = () => {
       network.on("click", (properties) => {
         if (properties.nodes.length > 0) {
           const nodeId = properties.nodes[0];
-          const clickedNode = nodes.get(nodeId);
+          const clickedNode = nodes.get(nodeId) as GraphNode;
           if (clickedNode) {
             toast({
               title: `Node: ${clickedNode.label}`,
@@ -91,8 +92,8 @@ const KnowledgeGraphViewer: React.FC = () => {
           { id: 'B', label: 'Entity B', group: 'related' },
         ];
         fetchedEdges = [
-          { from: nodeId, to: 'A', label: 'RELATES_TO' },
-          { from: 'A', to: 'B', label: 'HAS_PROPERTY' },
+          { id: `${nodeId}-A`, from: nodeId, to: 'A', label: 'RELATES_TO' },
+          { id: `A-B`, from: 'A', to: 'B', label: 'HAS_PROPERTY' },
         ];
       } else {
         // Simulate fetching a general subgraph
@@ -104,16 +105,16 @@ const KnowledgeGraphViewer: React.FC = () => {
           { id: 'ContractZ', label: 'Sales Contract', group: 'contract' },
         ];
         fetchedEdges = [
-          { from: '1', to: 'PersonX', label: 'MENTIONS' },
-          { from: '1', to: 'CompanyY', label: 'MENTIONS' },
-          { from: 'PersonX', to: 'ContractZ', label: 'SIGNED' },
-          { from: 'CompanyY', to: 'ContractZ', label: 'PART_OF' },
-          { from: '2', to: 'PersonX', label: 'REFERENCES' },
+          { id: `1-PersonX`, from: '1', to: 'PersonX', label: 'MENTIONS' },
+          { id: `1-CompanyY`, from: '1', to: 'CompanyY', label: 'MENTIONS' },
+          { id: `PersonX-ContractZ`, from: 'PersonX', to: 'ContractZ', label: 'SIGNED' },
+          { id: `CompanyY-ContractZ`, from: 'CompanyY', to: 'ContractZ', label: 'PART_OF' },
+          { id: `2-PersonX`, from: '2', to: 'PersonX', label: 'REFERENCES' },
         ];
       }
 
-      setNodes(new DataSet(fetchedNodes));
-      setEdges(new DataSet(fetchedEdges));
+      setNodes(new DataSet<GraphNode, 'id'>(fetchedNodes));
+      setEdges(new DataSet<GraphEdge, 'id'>(fetchedEdges));
 
     } catch (err) {
       console.error("Failed to fetch graph data:", err);
@@ -167,7 +168,7 @@ const KnowledgeGraphViewer: React.FC = () => {
               type="text"
               placeholder="Search for a node ID..."
               value={searchNodeId}
-              onChange={(e) => setSearchNodeId(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchNodeId(e.target.value)}
               className="flex-grow bg-gray-700 border-gray-600 text-gray-100 placeholder-gray-400"
             />
             <Button onClick={handleSearch} className="bg-blue-600 hover:bg-blue-700 text-white">

@@ -105,7 +105,7 @@ const EvidenceBinderManager: React.FC = () => {
                 <Input
                   id="name"
                   value={newBinderName}
-                  onChange={(e) => setNewBinderName(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewBinderName(e.target.value)}
                   className="col-span-3 bg-gray-800 border-gray-700 text-gray-100"
                 />
               </div>
@@ -114,7 +114,7 @@ const EvidenceBinderManager: React.FC = () => {
                 <Textarea
                   id="description"
                   value={newBinderDescription}
-                  onChange={(e) => setNewBinderDescription(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNewBinderDescription(e.target.value)}
                   className="col-span-3 bg-gray-800 border-gray-700 text-gray-100"
                 />
               </div>

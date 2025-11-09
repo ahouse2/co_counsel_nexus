@@ -34,3 +34,6 @@ pytest-backend.xml
 .DS_Store
 Thumbs.db
 
+
+.gemini/
+gha-creds-*.json

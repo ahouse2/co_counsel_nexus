@@ -131,61 +131,61 @@ services:
     networks:
       - backend
 
-  stt:
-    image: ghcr.io/guillaumekln/faster-whisper-server:latest
-    profiles:
-      - community
-      - pro
-      - enterprise
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    environment:
-      - ASR_MODEL=${STT_MODEL_NAME:-openai/whisper-small}
-      - ASR_ENGINE=faster_whisper
-      - ASR_BEAM_SIZE=5
-      - ASR_DEVICE=${STT_DEVICE:-cpu}
-      - HUGGINGFACE_HUB_CACHE=/models/huggingface
-      - ASR_OUTPUT_LANGUAGE=${STT_OUTPUT_LANGUAGE:-en}
-    ports:
-      - "9000:9000"
-    volumes:
-      - ./var/models/huggingface:/models/huggingface
-      - ./var/models/whisper:/models/whisper
-    networks:
-      - backend
-
-  tts:
-    image: rhasspy/larynx:latest
-    profiles:
-      - community
-      - pro
-      - enterprise
-      - gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    environment:
-      - LARYNX_VOICE=${TTS_VOICE:-en-us-blizzard_lessac}
-      - LARYNX_OUTPUT_DIR=/output
-      - HUGGINGFACE_HUB_CACHE=/models/huggingface
-    ports:
-      - "5002:5002"
-    volumes:
-      - ./var/models/huggingface:/models/huggingface
-      - ./var/models/tts:/models/tts
-      - ./var/audio:/output
-    networks:
-      - backend
+#  stt:
+#    image: ghcr.io/guillaumekln/faster-whisper-server:latest
+#    profiles:
+#      - community
+#      - pro
+#      - enterprise
+#      - gpu
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu]
+#    environment:
+#      - ASR_MODEL=${STT_MODEL_NAME:-openai/whisper-small}
+#      - ASR_ENGINE=faster_whisper
+#      - ASR_BEAM_SIZE=5
+#      - ASR_DEVICE=${STT_DEVICE:-cpu}
+#      - HUGGINGFACE_HUB_CACHE=/models/huggingface
+#      - ASR_OUTPUT_LANGUAGE=${STT_OUTPUT_LANGUAGE:-en}
+#    ports:
+#      - "9000:9000"
+#    volumes:
+#      - ./var/models/huggingface:/models/huggingface
+#      - ./var/models/whisper:/models/whisper
+#    networks:
+#      - backend
+#
+#  tts:
+#    image: rhasspy/larynx:latest
+#    profiles:
+#      - community
+#      - pro
+#      - enterprise
+#      - gpu
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu]
+#    environment:
+#      - LARYNX_VOICE=${TTS_VOICE:-en-us-blizzard_lessac}
+#      - LARYNX_OUTPUT_DIR=/output
+#      - HUGGINGFACE_HUB_CACHE=/models/huggingface
+#    ports:
+#      - "5002:5002"
+#    volumes:
+#      - ./var/models/huggingface:/models/huggingface
+#      - ./var/models/tts:/models/tts
+#      - ./var/audio:/output
+#    networks:
+#      - backend
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.98.0

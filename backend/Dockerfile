@@ -16,7 +16,9 @@ RUN python3.11 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install uv
+ENV UV_HTTP_TIMEOUT=1200
+RUN uv pip install -r requirements.txt --prerelease=allow
 
 ENV FASTER_WHISPER_CACHE=/models/whisper \
     COQUI_TTS_CACHE=/models/tts

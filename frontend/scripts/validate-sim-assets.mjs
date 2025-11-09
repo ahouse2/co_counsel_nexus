@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const publicRoot = path.join(repoRoot, 'frontend', 'public');
+const publicRoot = path.join(repoRoot, 'public');
 const simulationsRoot = path.join(publicRoot, 'simulations');
 const manifestPath = path.join(simulationsRoot, 'manifest.json');
 

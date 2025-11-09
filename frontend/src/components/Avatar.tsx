@@ -1,11 +1,12 @@
-import { Avatar as VisageAvatar, useVisage } from "@readyplayerme/visage";
+import { Avatar as VisageAvatar } from "@readyplayerme/visage";
+import * as Visage from "@readyplayerme/visage";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { WaWaLipsync } from "wawa-lipsync";
+import WaWaLipsync from "wawa-lipsync";
 
 const modelSrc = "https://models.readyplayer.me/65805362d72a7a816405eca3.glb";
 
 export const Avatar = forwardRef((props, ref) => {
-  const { visage } = useVisage();
+  const { visage } = Visage.useVisage();
   const [lipsync, setLipsync] = useState<WaWaLipsync | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
