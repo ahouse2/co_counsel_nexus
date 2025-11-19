@@ -158,6 +158,12 @@ class Settings(BaseSettings):
     telemetry_metrics_interval: float = Field(default=30.0)
     telemetry_console_fallback: bool = Field(default=True)
 
+    # Agentic Systems Flags (for future hardening and toggles)
+    hitl_enabled: bool = Field(default=False, description="Enable Human-In-The-Loop HITL workflow for QA gating.")
+    advanced_routing_enabled: bool = Field(default=False, description="Enable LL routing knob to switch between keyword routing and LL-based routing.")
+    dynamic_tool_loading_enabled: bool = Field(default=False, description="Enable dynamic loading/discovery of tools at runtime.")
+
+
     billing_default_plan: str = Field(default="community")
     billing_plan_overrides: Dict[str, str] = Field(default_factory=dict)
     billing_support_overrides: Dict[str, str] = Field(default_factory=dict)

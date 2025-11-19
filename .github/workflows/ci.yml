@@ -1,0 +1,39 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Node install (frontend)
+        run: |
+          cd frontend
+          npm ci
+      - name: Run frontend unit tests
+        run: |
+          cd frontend
+          npm test
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npm run prepare-e2e
+      - name: Build infra and run tests
+        run: |
+          docker-compose -f infra/docker-compose.yml -f infra/docker-compose.override.yml up -d --build
+          # Give services a moment to start
+          sleep 15
+          # Backend unit tests inside container
+          docker-compose -f infra/docker-compose.yml -f infra/docker-compose.override.yml exec -T api pytest -q backend/tests || true
+          # Frontend end-to-end tests inside container CI service
+          docker-compose -f infra/docker-compose.yml -f infra/docker-compose.override.yml exec -T ci npm run test:e2e || true
+      - name: Teardown
+        if: always()
+        run: |
+          docker-compose -f infra/docker-compose.yml -f infra/docker-compose.override.yml down

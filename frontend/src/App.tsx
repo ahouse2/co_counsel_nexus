@@ -17,6 +17,7 @@ import TimelinePage from '@/pages/TimelinePage';
 import LegalTheoryPage from '@/pages/LegalTheoryPage';
 import { CaseProvider } from './context/CaseContext';
 import { HaloProvider } from './context/HaloContext';
+import AgentConsolePage from './pages/AgentConsolePage';
 
 export function App() {
   const id = useId(); // Keep useId if it's used elsewhere in Layout or children
@@ -29,6 +30,8 @@ export function App() {
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/login" element={<DashboardPage />} />
+              <Route path="/agents-console" element={<AgentConsolePage />} />
               <Route path="/upload" element={<UploadEvidencePage />} />
               <Route path="/graph" element={<GraphExplorerPage />} />
               <Route path="/trial-university" element={<TrialUniversityPage />} />

@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Tuple
 class QAAgent:
     """Rubric-based QA adjudicator mirroring the TRD evaluation categories."""
 
+from backend.app.config import get_settings
+
+
     rubric_categories = [
         "Technical Accuracy",
         "Modularity",
@@ -150,6 +153,12 @@ class QAAgent:
             f"Citations: {len(citations)}; Forensics artifacts: {artifact_count}; Graph edges: {graph_edges}.",
             f"Total runtime: {round(total_duration, 2)} ms across {len(turn_roles)} turns.",
         ]
+        # HITL cue: surface a flag for supervisor review when HITL is enabled
+        settings = get_settings()
+        if getattr(settings, 'hitl_enabled', False):
+            notes.append("HITL required: supervisor to review QA output before final action.")
+            # We could also flag the telemetry or thread status here in a fuller implementation.
+
         if privileged_docs:
             doc_list = ", ".join(item.get("doc_id", "?") for item in privileged_docs)
             notes.append(f"Privilege alerts: {len(privileged_docs)} document(s) flagged ({doc_list}).")
