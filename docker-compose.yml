@@ -11,10 +11,9 @@ services:
       DEFAULT_CHAT_MODEL: ${DEFAULT_CHAT_MODEL:-gemini-2.5-flash}
       DEFAULT_EMBEDDING_MODEL: ${DEFAULT_EMBEDDING_MODEL:-text-embedding-004}
       DEFAULT_VISION_MODEL: ${DEFAULT_VISION_MODEL:-gemini-2.5-flash}
-      NEBULA_GRAPH_HOST: nebula-graphd
-      NEBULA_GRAPH_PORT: 9669
-      NEBULA_GRAPH_USER: root
-      NEBULA_GRAPH_PASSWORD: nebula
+      NEO4J_URI: neo4j://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
       QDRANT_URL: http://qdrant:6333
       VECTOR_DIR: /data/vector
       VOICE_SESSIONS_DIR: /data/voice/sessions
@@ -33,12 +32,14 @@ services:
       HUGGINGFACE_HUB_CACHE: /var/cocounsel/models/huggingface
       WHISPER_MODEL_PATH: /var/cocounsel/models/whisper
       TTS_MODEL_PATH: /var/cocounsel/models/tts
+      SECRET_KEY: ${SECRET_KEY}
+      # Ingestion Configuration
+      INGESTION_VISION_MODEL: gemini-2.0-flash-exp
+      INGESTION_VISION_API_KEY: ${GEMINI_API_KEY}
     ports:
       - "8000:8000"
     depends_on:
-      - nebula-graphd
-      - nebula-metad
-      - nebula-storaged
+      - neo4j
       - qdrant
       - postgres
     networks:
@@ -52,88 +53,31 @@ services:
       - ./var/models/huggingface:/var/cocounsel/models/huggingface
       - ./var/models/whisper:/var/cocounsel/models/whisper
       - ./var/models/tts:/var/cocounsel/models/tts
+      # - ./backend:/src/backend  # Disabled due to volume mount issues
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     ports:
-      - "8080:80"
+      - "8088:80"
     networks:
       - backend
     depends_on:
       - api
 
-  nebula-metad:
-    image: vesoft/nebula-metad:v3.6.0
-    container_name: nebula-metad
+  neo4j:
+    image: neo4j:5.23.0
+    container_name: neo4j
     ports:
-      - "9559:9559"
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password
     volumes:
-      - nebula_metad_data:/data
+      - neo4j_data:/data
     networks:
       - backend
-    command:
-      - --port=9559
-      - --ws_http_port=19559
-      - --data_path=/data/meta
-      - --log_dir=/data/meta/logs
-      - --v=0
-      - --minloglevel=0
-      - --max_log_size=100
-      - --log_reserve_hours=72
-      - --num_io_threads=1
-      - --num_worker_threads=1
-      - --meta_server_addrs=nebula-metad:9559
-
-  nebula-storaged:
-    image: vesoft/nebula-storaged:v3.6.0
-    container_name: nebula-storaged
-    ports:
-      - "9779:9779"
-    volumes:
-      - nebula_storaged_data:/data
-    networks:
-      - backend
-    depends_on:
-      - nebula-metad
-    command:
-      - --port=9779
-      - --ws_http_port=19779
-      - --data_path=/data/storage
-      - --log_dir=/data/storage/logs
-      - --v=0
-      - --minloglevel=0
-      - --max_log_size=100
-      - --log_reserve_hours=72
-      - --num_io_threads=1
-      - --num_worker_threads=1
-      - --meta_server_addrs=nebula-metad:9559
-
-  nebula-graphd:
-    image: vesoft/nebula-graphd:v3.6.0
-    container_name: nebula-graphd
-    ports:
-      - "9669:9669"
-      - "19669:19669"
-    networks:
-      - backend
-    depends_on:
-      - nebula-metad
-      - nebula-storaged
-    command:
-      - --port=9669
-      - --ws_http_port=19669
-      - --log_dir=/data/graph/logs
-      - --v=0
-      - --minloglevel=0
-      - --max_log_size=100
-      - --log_reserve_hours=72
-      - --num_io_threads=1
-      - --num_worker_threads=1
-      - --meta_server_addrs=nebula-metad:9559
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -165,7 +109,7 @@ services:
           devices:
             - driver: nvidia
               count: ${GPU_DEVICE_COUNT:-0}
-              capabilities: [gpu]
+              capabilities: [ gpu ]
     environment:
       ASR_MODEL: ${STT_MODEL_NAME:-openai/whisper-small}
       ASR_ENGINE: faster_whisper
@@ -190,7 +134,7 @@ services:
           devices:
             - driver: nvidia
               count: ${GPU_DEVICE_COUNT:-0}
-              capabilities: [gpu]
+              capabilities: [ gpu ]
     environment:
       LARYNX_VOICE: ${TTS_VOICE:-en-us-blizzard_lessac}
       LARYNX_OUTPUT_DIR: /output
@@ -205,10 +149,9 @@ services:
       - backend
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.98.0
-    command: ["--config=/etc/otel-collector-config.yaml"]
-    volumes:
-      - ./infra/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    build:
+      context: ./infra
+      dockerfile: Dockerfile.otel
     ports:
       - "4317:4317"
       - "9464:9464"
@@ -233,13 +176,12 @@ services:
       - backend
 
 volumes:
-  nebula_graphd_data:
-  nebula_metad_data:
-  nebula_storaged_data:
+  neo4j_data:
   qdrant_data:
   api_data:
   voice_models:
   postgres_data:
+
 
 networks:
   backend:

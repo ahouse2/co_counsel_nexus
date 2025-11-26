@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 from backend.app.agents.context import AgentContext
-from backend.app.agents.tools import AgentTool, ToolInvocation
+from backend.app.agents.base_tools import AgentTool, ToolInvocation
 from backend.app.agents.types import AgentTurn
 from backend.ingestion.llama_index_factory import BaseLlmService
 from datetime import datetime, timezone

@@ -33,3 +33,25 @@ class ForensicAnalysisResult(BaseModel):
     font_object_analysis: Optional[FontObjectAnalysisResult] = None
     anti_scan_alter_rescan: Optional[AntiScanAlterRescanResult] = None
     overall_verdict: str = Field(..., description="Overall verdict on document authenticity.")
+
+class WalletAddress(BaseModel):
+    address: str
+    blockchain: str
+    currency: str
+    is_valid: bool = False # Added validation status
+
+class Transaction(BaseModel):
+    tx_id: str
+    sender: str
+    receiver: str
+    amount: float
+    currency: str
+    timestamp: str
+    blockchain: str
+    # Add more fields as needed for detailed transaction data
+
+class CryptoTracingResult(BaseModel):
+    wallets_found: List[WalletAddress] = Field(default_factory=list)
+    transactions_traced: List[Transaction] = Field(default_factory=list)
+    visual_graph_mermaid: Optional[str] = Field(None, description="Mermaid diagram definition for the transaction graph.")
+    details: str = Field(..., description="Summary of the crypto tracing analysis.")

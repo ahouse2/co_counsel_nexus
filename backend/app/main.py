@@ -14,6 +14,23 @@ settings = get_settings()
 setup_telemetry(settings)
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8088",
+        "http://localhost:8080",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:8088",
+        "http://127.0.0.1:8080",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # [dev] mTLS enabled (production would disable this in prod)
 import ssl
 

@@ -14,8 +14,6 @@ class CourtListenerClient:
         settings = get_settings()
         self.api_key = api_key or settings.courtlistener_token
         self.base_url = settings.courtlistener_endpoint
-        if not self.api_key:
-            raise ValueError("CourtListener API key is not configured.")
 
     async def search_opinions(self, query: str, **kwargs) -> Dict[str, Any]:
         """
@@ -25,6 +23,9 @@ class CourtListenerClient:
         :param kwargs: Additional search parameters as defined in the API docs.
         :return: The JSON response from the API.
         """
+        if not self.api_key:
+            raise ValueError("CourtListener API key is not configured.")
+
         headers = {"Authorization": f"Token {self.api_key}"}
         params = {"q": query, **kwargs}
 
@@ -52,8 +53,6 @@ class CaseLawClient:
         settings = get_settings()
         self.api_key = api_key or settings.caselaw_api_key
         self.base_url = settings.caselaw_endpoint
-        if not self.api_key:
-            raise ValueError("Case.law API key is not configured.")
 
     async def search_cases(self, query: str, **kwargs) -> Dict[str, Any]:
         """
@@ -63,6 +62,9 @@ class CaseLawClient:
         :param kwargs: Additional search parameters.
         :return: The JSON response from the API.
         """
+        if not self.api_key:
+            raise ValueError("Case.law API key is not configured.")
+
         headers = {"Authorization": f"Token {self.api_key}"}
         params = {"search": query, **kwargs}
 

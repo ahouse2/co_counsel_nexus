@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+from backend.app.config import get_settings
+
 
 class QAAgent:
     """Rubric-based QA adjudicator mirroring the TRD evaluation categories."""
-
-from backend.app.config import get_settings
-
 
     rubric_categories = [
         "Technical Accuracy",
@@ -27,7 +26,102 @@ from backend.app.config import get_settings
         "Enterprise Value",
     ]
 
+    def __init__(self, llm_service: Any | None = None) -> None:
+        self.llm_service = llm_service
+
     def evaluate(
+        self,
+        question: str,
+        retrieval: Dict[str, Any],
+        forensics_bundle: Dict[str, Any],
+        telemetry: Dict[str, Any],
+    ) -> Tuple[Dict[str, float], List[str], float]:
+        # Calculate heuristic/rule-based scores as a baseline or fallback
+        heuristic_scores, heuristic_notes, heuristic_average = self._evaluate_heuristic(
+            question, retrieval, forensics_bundle, telemetry
+        )
+
+        if not self.llm_service:
+            return heuristic_scores, heuristic_notes, heuristic_average
+
+        try:
+            return self._evaluate_with_llm(
+                question, retrieval, forensics_bundle, telemetry, heuristic_scores
+            )
+        except Exception as e:
+            print(f"QA LLM evaluation failed, falling back to heuristics: {e}")
+            return heuristic_scores, heuristic_notes, heuristic_average
+
+    def _evaluate_with_llm(
+        self,
+        question: str,
+        retrieval: Dict[str, Any],
+        forensics_bundle: Dict[str, Any],
+        telemetry: Dict[str, Any],
+        heuristic_scores: Dict[str, float],
+    ) -> Tuple[Dict[str, float], List[str], float]:
+        answer = retrieval.get("answer", "")
+        citations = retrieval.get("citations", [])
+        artifacts = forensics_bundle.get("artifacts", [])
+        
+        prompt = f"""
+        You are a QA Adjudicator for a legal AI system. Evaluate the following response based on the TRD rubric.
+        
+        Question: {question}
+        Response: {answer}
+        
+        Context:
+        - Citations: {len(citations)} provided.
+        - Forensics Artifacts: {len(artifacts)} attached.
+        - Execution Time: {telemetry.get('total_duration_ms', 0)} ms.
+        
+        Rubric Categories:
+        {', '.join(self.rubric_categories)}
+        
+        Heuristic Baseline Scores (for reference):
+        {heuristic_scores}
+        
+        Instructions:
+        1. Analyze the response for accuracy, clarity, and completeness.
+        2. Assign a score (1.0-10.0) for each category.
+        3. Provide concise notes explaining the assessment.
+        4. Return ONLY a JSON object with keys: "scores" (dict of category: score) and "notes" (list of strings).
+        """
+        
+        response_text = self.llm_service.generate_text(prompt)
+        return self._parse_llm_response(response_text, heuristic_scores)
+
+    def _parse_llm_response(
+        self, response_text: str, fallback_scores: Dict[str, float]
+    ) -> Tuple[Dict[str, float], List[str], float]:
+        import json
+        import re
+        
+        try:
+            # Extract JSON from potential markdown fences
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                json_str = response_text
+                
+            data = json.loads(json_str)
+            scores = data.get("scores", {})
+            notes = data.get("notes", [])
+            
+            # Ensure all categories are present, falling back to heuristics if needed
+            final_scores = {}
+            for cat in self.rubric_categories:
+                final_scores[cat] = float(scores.get(cat, fallback_scores.get(cat, 5.0)))
+                
+            average = round(sum(final_scores.values()) / len(final_scores), 2)
+            return final_scores, notes, average
+            
+        except Exception as e:
+            print(f"Failed to parse QA LLM response: {e}")
+            raise
+
+    def _evaluate_heuristic(
         self,
         question: str,
         retrieval: Dict[str, Any],

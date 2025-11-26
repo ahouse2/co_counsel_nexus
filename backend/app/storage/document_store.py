@@ -65,11 +65,38 @@ class DocumentStore:
             "tags": tags,
             "custom_metadata": custom_metadata,
             "created_at": current_time,
-            "relative_path": relative_path, # Include relative_path in metadata
+            "relative_path": relative_path,
+            "status": "queued", # Initialize status
         }
         storage_path.with_suffix(".meta").write_text(json.dumps(metadata))
 
         return current_time
+
+    def update_document_status(self, doc_type: str, case_id: str, doc_id: str, status: str, version: Optional[str] = None):
+        """
+        Updates the status of a document in its metadata.
+        """
+        if version is None:
+            # Find latest version
+            case_path = self._get_storage_path(doc_type, case_id, "").parent
+            versions = sorted([
+                f.name.replace(f"{doc_id}_v", "").replace(".encrypted", "")
+                for f in case_path.glob(f"{doc_id}_v*.encrypted")
+            ], reverse=True)
+            if not versions:
+                return
+            version = versions[0]
+        
+        meta_path = self._get_storage_path(doc_type, case_id, doc_id, version=version).with_suffix(".meta")
+        if meta_path.exists():
+            with open(meta_path, "r") as f:
+                metadata = json.load(f)
+            
+            metadata["status"] = status
+            metadata["updated_at"] = datetime.now().strftime("%Y%m%d%H%M%S")
+            
+            with open(meta_path, "w") as f:
+                json.dump(metadata, f)
 
     def get_document(self, doc_type: str, case_id: str, doc_id: str, version: Optional[str] = None) -> Optional[str]:
         """
@@ -164,17 +191,24 @@ class DocumentStore:
                     continue
                 latest_version = versions[0]
                 meta_path = self._get_storage_path(doc_type_dir.name, case_id, doc_id, version=latest_version).with_suffix(".meta")
+                
+                file_name = doc_id
+                status = "unknown"
+                
                 if meta_path.exists():
-                    with open(meta_path, "r") as f:
-                        metadata = json.load(f)
-                    file_name = metadata.get("file_name", doc_id)
-                else:
-                    file_name = doc_id
+                    try:
+                        with open(meta_path, "r") as f:
+                            metadata = json.load(f)
+                        file_name = metadata.get("file_name", doc_id)
+                        status = metadata.get("status", "unknown")
+                    except Exception:
+                        pass
 
                 documents.append({
                     "id": doc_id,
                     "name": file_name,
                     "type": doc_type_dir.name,
-                    "url": f"/api/{case_id}/{doc_type_dir.name}/{doc_id}"
+                    "url": f"/api/{case_id}/{doc_type_dir.name}/{doc_id}",
+                    "status": status # Return status
                 })
         return documents

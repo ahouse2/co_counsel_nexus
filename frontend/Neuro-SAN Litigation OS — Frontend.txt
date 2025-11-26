@@ -56,6 +56,8 @@ Mock Trial Arena
 
 Trial University
 
+Live Co-Counsel Chat
+
 Legal Research / Case Law Engine
 
 These must be arranged vertically but following the halo curvature.
@@ -168,8 +170,8 @@ Bottom-Left: Contact / About / App Diagnostics
 
 Minimal understated text link area (“CONTACT US”, logs, diagnostics).
 
-5. Chat & Multi-Agent Visualization
-5.1 Global Chat Viewer
+5. Chat, Multi-Agent Visualization & Live Co-Counsel
+5.1 Global Chat Viewer & Co-Counsel Avatar
 
 A module that visualizes:
 

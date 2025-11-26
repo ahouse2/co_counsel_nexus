@@ -1,55 +1,46 @@
-import { useId } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Layout } from '@/components/Layout';
-import DashboardPage from '@/pages/DashboardPage';
-import UploadEvidencePage from '@/pages/UploadEvidencePage';
-import GraphExplorerPage from '@/pages/GraphExplorerPage';
-import TrialUniversityPage from '@/pages/TrialUniversityPage';
-import MockTrialArenaPage from '@/pages/MockTrialArenaPage';
-import LiveCoCounselChatPage from '@/pages/LiveCoCounselChatPage';
-import DesignSystemPage from '@/pages/DesignSystemPage';
-import DevTeamPage from '@/pages/DevTeamPage';
-import ForensicsReportPage from '@/pages/ForensicsReportPage';
-import DocumentDraftingPage from '@/pages/DocumentDraftingPage';
-import ServiceOfProcessPage from '@/pages/ServiceOfProcessPage';
-import InCourtPresentationPage from '@/pages/InCourtPresentationPage';
-import TimelinePage from '@/pages/TimelinePage';
-import LegalTheoryPage from '@/pages/LegalTheoryPage';
-import { CaseProvider } from './context/CaseContext';
-import { HaloProvider } from './context/HaloContext';
-import AgentConsolePage from './pages/AgentConsolePage';
+import { HaloLayout } from './components/layout/HaloLayout';
+import { HaloGraph } from './components/visualizations/HaloGraph';
 
-export function App() {
-  const id = useId(); // Keep useId if it's used elsewhere in Layout or children
+import { ChatModule } from './components/modules/ChatModule';
+import { DocumentModule } from './components/modules/DocumentModule';
+import { TimelineModule } from './components/modules/TimelineModule';
+import { TrialUniversityModule } from './components/modules/TrialUniversityModule';
+import { MockTrialArenaModule } from './components/modules/MockTrialArenaModule';
+import { ContextEngineModule } from './components/modules/ContextEngineModule';
+import { LegalTheoryModule } from './components/modules/LegalTheoryModule';
+import { ForensicsModule } from './components/modules/ForensicsModule';
+import { TrialBinderModule } from './components/modules/TrialBinderModule';
+import { LegalResearchModule } from './components/modules/LegalResearchModule';
+import { useHalo } from './context/HaloContext';
 
-  return (
-    <Router>
-      <CaseProvider>
-        <HaloProvider>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<DashboardPage />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/login" element={<DashboardPage />} />
-              <Route path="/agents-console" element={<AgentConsolePage />} />
-              <Route path="/upload" element={<UploadEvidencePage />} />
-              <Route path="/graph" element={<GraphExplorerPage />} />
-              <Route path="/trial-university" element={<TrialUniversityPage />} />
-              <Route path="/mock-trial" element={<MockTrialArenaPage />} />
-              <Route path="/live-chat" element={<LiveCoCounselChatPage />} />
-              <Route path="/design-system" element={<DesignSystemPage />} />
-              <Route path="/dev-team" element={<DevTeamPage />} />
-              <Route path="/forensics/:caseId/:docType/:docId" element={<ForensicsReportPage />} />
-              <Route path="/drafting" element={<DocumentDraftingPage />} />
-              <Route path="/service-of-process" element={<ServiceOfProcessPage />} />
-              <Route path="/in-court-presentation" element={<InCourtPresentationPage />} />
-              <Route path="/timeline" element={<TimelinePage />} />
-              <Route path="/legal-theory" element={<LegalTheoryPage />} />
-              <Route path="*" element={<DashboardPage />} />
-            </Routes>
-          </Layout>
-        </HaloProvider>
-      </CaseProvider>
-    </Router>
-  );
+function App() {
+    const { activeModule } = useHalo();
+
+    return (
+        <HaloLayout>
+            {/* The content inside the Halo Viewport */}
+            <div className="w-full h-full relative flex items-center justify-center">
+
+                {/* Dynamic Module Content */}
+                <div className="w-full h-full p-8 overflow-auto custom-scrollbar">
+                    {activeModule === 'graph' && <HaloGraph />}
+                    {activeModule === 'chat' && <ChatModule />}
+                    {activeModule === 'documents' && <DocumentModule />}
+                    {activeModule === 'timeline' && <TimelineModule />}
+                    {activeModule === 'university' && <TrialUniversityModule />}
+                    {activeModule === 'arena' && <MockTrialArenaModule />}
+                    {activeModule === 'context' && <ContextEngineModule />}
+                    {activeModule === 'theory' && <LegalTheoryModule />}
+                    {activeModule === 'forensics' && <ForensicsModule />}
+                    {activeModule === 'binder' && <TrialBinderModule />}
+                    {activeModule === 'research' && <LegalResearchModule />}
+                </div>
+
+                {/* Optional: NodeDetails could be a floating overlay or integrated into specific modules */}
+                {/* <NodeDetails /> */}
+            </div>
+        </HaloLayout>
+    );
 }
+
+export default App;

@@ -1,32 +1,32 @@
-FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
+FROM python:3.11-slim
 
-# Install Python 3.11 and other necessary packages
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-venv \
-    python3-pip \
     ffmpeg \
     libsndfile1 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /src
 
 # Create a Python virtual environment and activate it
-RUN python3.11 -m venv /opt/venv
+RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements.txt /app/requirements.txt
+COPY requirements.txt /src/backend/requirements.txt
 RUN pip install uv
 ENV UV_HTTP_TIMEOUT=1200
-RUN uv pip install -r requirements.txt --prerelease=allow
+RUN uv pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
+RUN uv pip install -r /src/backend/requirements.txt
 
 ENV FASTER_WHISPER_CACHE=/models/whisper \
     COQUI_TTS_CACHE=/models/tts
 
 RUN mkdir -p "$FASTER_WHISPER_CACHE" "$COQUI_TTS_CACHE"
 
-COPY app /app/app
+COPY . /src/backend
+ENV PYTHONPATH=/src
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

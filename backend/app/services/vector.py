@@ -82,10 +82,14 @@ class VectorService:
             self.ensure_collection()
 
     def _create_client(self) -> QdrantClient:
+        print(f"Initializing QdrantClient. URL: {self.settings.qdrant_url}, Path: {self.settings.qdrant_path}")
         if self.settings.qdrant_url:
+            print(f"Connecting to Qdrant at {self.settings.qdrant_url}")
             return QdrantClient(url=self.settings.qdrant_url)
         if self.settings.qdrant_path and self.settings.qdrant_path != ":memory":
+            print(f"Connecting to local Qdrant at {self.settings.qdrant_path}")
             return QdrantClient(path=self.settings.qdrant_path)
+        print(f"Connecting to local Qdrant at default dir {self.settings.vector_dir}")
         return QdrantClient(path=str(self.settings.vector_dir))
 
     def ensure_collection(self) -> None:

@@ -53,16 +53,21 @@ class ResearchSummarizerTool:
     A tool to summarize research findings using an LLM.
     """
     def __init__(self):
-        # self.llm_service = get_llm_service()
-        pass
+        from backend.ingestion.llama_index_factory import create_llm_service
+        from backend.ingestion.settings import build_runtime_config
+        from backend.app.config import get_settings
+        
+        settings = get_settings()
+        runtime_config = build_runtime_config(settings)
+        self.llm_service = create_llm_service(runtime_config.llm)
 
     async def summarize(self, text: str, query: str) -> str:
         """
         Summarizes a block of text in the context of a query.
         """
-        # In a real implementation, this would call the LLM service.
-        # For now, we return a placeholder to show the tool is wired up.
         prompt = f"Please summarize the following text in the context of the query: '{query}'\n\nText: {text[:4000]}..."
-        # summary = await self.llm_service.generate_text(prompt)
-        # return summary
-        return f"LLM Summary for query '{query}': [This is where the AI-generated summary would go.]"
+        try:
+            summary = self.llm_service.generate_text(prompt)
+            return summary
+        except Exception as e:
+            return f"Error generating summary: {e}"

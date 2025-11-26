@@ -11,7 +11,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Runtime configuration for the Co-Counsel API."""
 
-    app_name: str = "Co-Counsel API"
     app_version: str = "0.1.0"
 
     model_providers_primary: str = Field(default="gemini")
@@ -21,6 +20,12 @@ class Settings(BaseSettings):
     default_chat_model: str = Field(default="gemini-2.5-flash")
     default_embedding_model: str = Field(default="text-embedding-004")
     default_vision_model: str = Field(default="gemini-2.5-flash")
+    
+    # Specialized Agent Models (2025)
+    strategy_model: str = Field(default="gemini-3.0")
+    analysis_model: str = Field(default="gemini-3.0")
+    drafting_model: str = Field(default="gemini-3.0")
+    cocounsel_voice_model: str = Field(default="gemini-3.0-multimodal-live") # For lifelike avatar chat
     provider_api_base_urls: Dict[str, str] = Field(
         default_factory=lambda: {
             "openai": "https://api.openai.com/v1",
@@ -41,7 +46,7 @@ class Settings(BaseSettings):
     neo4j_user: str = Field(default="neo4j")
     neo4j_password: str = Field(default="neo4j")
 
-    qdrant_url: Optional[str] = Field(default=None)
+    qdrant_url: Optional[str] = Field(default="http://qdrant:6333")
     qdrant_path: Optional[str] = Field(default=None)
 
     vector_backend: Literal["qdrant", "chroma", "memory"] = Field(default="qdrant")
@@ -88,7 +93,7 @@ class Settings(BaseSettings):
     scenario_library_path: Path | None = Field(default=None)
     scenario_default_top_k: int = Field(default=4, ge=1, le=20)
 
-    secret_key: str = Field(default="super-secret-jwt-key", min_length=32)
+    secret_key: str = Field(default="super-secret-jwt-key-change-in-production-min32chars", min_length=32)
 
     tts_enabled: bool = Field(default=True)
     tts_service_url: str | None = Field(default=None)

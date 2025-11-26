@@ -99,3 +99,29 @@ async def get_timeline_for_case(
         raise HTTPException(status_code=400, detail=f"Invalid case ID: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+
+class TimelineGenerateRequest(BaseModel):
+    prompt: str
+    case_id: str
+
+@router.post("/timeline/generate", response_model=list[TimelineEventModel])
+async def generate_timeline(
+    request: TimelineGenerateRequest,
+    _principal: Principal = Depends(authorize_timeline),
+    service: TimelineService = Depends(get_timeline_service),
+):
+    """
+    Generates a timeline based on a natural language prompt.
+    """
+    try:
+        events = service.generate_timeline_from_prompt(request.prompt, request.case_id)
+        return [
+            TimelineEventModel(
+                id=str(event.id),
+                event_date=event.ts.isoformat(),
+                description=event.summary, # Map summary to description
+                links=event.citations
+            ) for event in events
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate timeline: {e}")

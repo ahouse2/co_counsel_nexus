@@ -16,7 +16,9 @@ from .context import AgentContext
 from .definitions import AgentDefinition, build_agent_graph
 from .memory import CaseThreadMemory
 from .qa import QAAgent
-from .tools import (
+from backend.ingestion.llama_index_factory import create_llm_service
+from .factories import build_graph_rag_agent, build_qa_agent
+from .base_tools import (
     AgentTool,
     ForensicsTool,
     IngestionTool,
@@ -611,16 +613,49 @@ from backend.app.agents.teams.document_ingestion import DocumentPreprocessingToo
 from backend.app.agents.teams.litigation_support import KnowledgeGraphQueryTool, LLMDraftingTool, SimulationTool
 from backend.app.agents.teams.software_development import CodeGenerationTool, CodeModificationTool, TestExecutionTool
 from backend.app.agents.definitions.qa_agents import ValidatorQATool, CriticQATool, RefinementQATool
+from backend.app.services.retrieval import get_retrieval_service
+from fastapi import Depends
+
+# Dependency functions for services
+def get_llm_config_dep() -> LlmConfig:
+    """Dependency to get LLM configuration from settings."""
+    from backend.app.config import get_settings
+    settings = get_settings()
+    return LlmConfig(
+        model=settings.llm_model,
+        provider=settings.llm_provider,
+        temperature=settings.llm_temperature,
+    )
+
+def get_document_store_dep() -> DocumentStore:
+    """Dependency to get document store instance."""
+    return DocumentStore()
+
+def get_forensics_service_dep() -> ForensicAnalyzer:
+    """Dependency to get forensics analyzer instance."""
+    from backend.app.forensics.analyzer import ForensicAnalyzer
+    return ForensicAnalyzer()
+
+def get_knowledge_graph_service_dep() -> KnowledgeGraphService:
+    """Dependency to get knowledge graph service instance."""
+    from backend.app.services.knowledge_graph_service import get_knowledge_graph_service
+    return get_knowledge_graph_service()
+
+def get_memory_store_dep() -> AgentMemoryStore:
+    """Dependency to get agent memory store instance."""
+    return AgentMemoryStore()
 
 def get_orchestrator(
-    llm_config: LlmConfig,
-    document_store: DocumentStore,
-    forensics_service: ForensicAnalyzer,
-    knowledge_graph_service: KnowledgeGraphService,
-    memory_store: AgentMemoryStore,
+    llm_config: LlmConfig = Depends(get_llm_config_dep),
+    document_store: DocumentStore = Depends(get_document_store_dep),
+    forensics_service: ForensicAnalyzer = Depends(get_forensics_service_dep),
+    knowledge_graph_service: KnowledgeGraphService = Depends(get_knowledge_graph_service_dep),
+    memory_store: AgentMemoryStore = Depends(get_memory_store_dep),
+    retrieval_service: Any = Depends(get_retrieval_service),
 ) -> MicrosoftAgentsOrchestrator:
     """Get the default Microsoft Agents orchestrator."""
-    llm_service = build_llm_service(llm_config)
+    
+    llm_service = create_llm_service(llm_config)
     graph_agent = build_graph_rag_agent(llm_service, document_store)
     qa_agent = build_qa_agent(llm_service)
 
@@ -652,9 +687,9 @@ def get_orchestrator(
 
 
     return MicrosoftAgentsOrchestrator(
-        strategy_tool=StrategyTool(graph_agent=graph_agent),
+        strategy_tool=StrategyTool(llm_service=llm_service, graph_agent=graph_agent),
         ingestion_tool=IngestionTool(document_store=document_store),
-        research_tool=ResearchTool(graph_agent=graph_agent),
+        research_tool=ResearchTool(retrieval_service=retrieval_service, graph_agent=graph_agent),
         forensics_tool=ForensicsTool(
             document_store=document_store, forensics_service=forensics_service
         ),

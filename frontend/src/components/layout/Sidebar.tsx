@@ -1,50 +1,63 @@
+import React from 'react';
+import { useHalo, ModuleId } from '../../context/HaloContext';
+import {
+    Network,
+    MessageSquare,
+    Clock,
+    FileText,
+    GraduationCap,
+    Gavel,
+    BrainCircuit
+} from 'lucide-react';
+import { motion } from 'framer-motion';
+import clsx from 'clsx';
 
-import { useId } from 'react';
+const MENU_ITEMS: { id: ModuleId; label: string; icon: React.ElementType }[] = [
+    { id: 'graph', label: 'Graph Explorer', icon: Network },
+    { id: 'chat', label: 'Chat', icon: MessageSquare },
+    { id: 'timeline', label: 'Timeline', icon: Clock },
+    { id: 'documents', label: 'Document Viewer', icon: FileText },
+    { id: 'university', label: 'Trial University', icon: GraduationCap },
+    { id: 'arena', label: 'Mock Trial Arena', icon: Gavel },
+    { id: 'context', label: 'Context Engine', icon: BrainCircuit },
+];
 
-export const sections = [
-  { id: 'chat', label: 'Co-Counsel' },
-  { id: 'timeline', label: 'Timeline' },
-  { id: 'documents', label: 'Evidence' },
-  { id: 'trial-university', label: 'Trial University' },
-  { id: 'mock-court', label: 'Mock Trial' },
-  { id: 'design-system', label: 'Design System' },
-  { id: 'dev-team', label: 'Dev Team' },
-] as const;
+export function Sidebar() {
+    const { activeModule, setActiveModule } = useHalo();
 
-export type SectionId = (typeof sections)[number]['id'];
+    return (
+        <div className="w-20 lg:w-64 h-full border-r border-halo-border bg-halo-bg flex flex-col py-6 z-20 relative">
+            <div className="flex flex-col gap-2 px-2">
+                {MENU_ITEMS.map((item) => {
+                    const isActive = activeModule === item.id;
+                    return (
+                        <button
+                            key={item.id}
+                            onClick={() => setActiveModule(item.id)}
+                            className={clsx(
+                                "flex items-center gap-4 p-3 rounded-lg transition-all duration-300 group relative overflow-hidden",
+                                isActive ? "text-halo-cyan" : "text-halo-muted hover:text-halo-text"
+                            )}
+                        >
+                            {isActive && (
+                                <motion.div
+                                    layoutId="active-indicator"
+                                    className="absolute inset-0 bg-halo-cyan-dim border-l-2 border-halo-cyan"
+                                    initial={false}
+                                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                />
+                            )}
 
-type SidebarProps = {
-  activeSection: SectionId;
-  setActiveSection: (section: SectionId) => void;
-  panelId: string;
-};
-
-export function Sidebar({ activeSection, setActiveSection, panelId }: SidebarProps): JSX.Element {
-  const tabsId = useId();
-
-  return (
-    <aside className="cinematic-nav ds-nav-cinematic" role="navigation" aria-labelledby={tabsId}>
-      <h2 id={tabsId} className="sr-only">
-        Workspace sections
-      </h2>
-      <ul role="tablist" aria-controls={panelId}>
-        {sections.map((section) => (
-          <li key={section.id} role="presentation">
-            <button
-              type="button"
-              role="tab"
-              id={`${tabsId}-${section.id}`}
-              aria-controls={`${panelId}-${section.id}`}
-              aria-selected={activeSection === section.id}
-              className={`ds-btn-accent ${activeSection === section.id ? 'active' : ''}`}
-              onClick={() => setActiveSection(section.id)}
-            >
-              <span className="tab-glow" aria-hidden />
-              {section.label}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </aside>
-  );
+                            <div className="relative z-10 flex items-center gap-4">
+                                <item.icon className={clsx("w-6 h-6", isActive && "drop-shadow-[0_0_8px_rgba(0,240,255,0.5)]")} />
+                                <span className="hidden lg:block font-medium tracking-wide text-sm uppercase">
+                                    {item.label}
+                                </span>
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    );
 }

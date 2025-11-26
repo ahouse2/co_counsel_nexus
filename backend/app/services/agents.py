@@ -787,6 +787,36 @@ class AgentsService:
             metadata=metadata or {},
         )
         self._safe_audit(event)
+        
+        # Broadcast event to real-time stream
+        try:
+            from .event_bus import get_agent_event_broadcaster
+            broadcaster = get_agent_event_broadcaster()
+            # We need to schedule this on the loop since publish is async
+            # and this method is sync (or at least called from sync contexts often)
+            # However, AgentsService methods are generally async or run in async context.
+            # If this method is called synchronously, we might need a background task.
+            # Given the codebase uses asyncio, let's try to get the running loop.
+            
+            payload = {
+                "timestamp": _now().isoformat(),
+                "type": "agent_activity",
+                "agent": actor.get("id", "system"),
+                "action": action,
+                "target": subject.get("turn_role") or subject.get("case_id"),
+                "message": f"{action} - {outcome}",
+                "metadata": metadata
+            }
+            
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(broadcaster.publish(payload))
+            except RuntimeError:
+                # No running loop (e.g. during tests or sync execution), skip broadcast
+                pass
+        except Exception as e:
+            # Don't fail the main flow if broadcasting fails
+            logging.warning(f"Failed to broadcast agent event: {e}")
 
     def _audit_turn(self, thread: AgentThread, turn: AgentTurn, actor: Dict[str, Any]) -> None:
         metadata = {

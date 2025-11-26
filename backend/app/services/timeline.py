@@ -550,5 +550,84 @@ class TimelineService:
         return risk_score, risk_band, outcome_probabilities, recommended_actions, motion_deadline
 
 
+    def generate_timeline_from_prompt(self, prompt: str, case_id: str) -> List[TimelineEvent]:
+        """
+        Generates timeline events by querying the knowledge graph using the provided prompt.
+        """
+        # 1. Initialize LLM Service
+        from backend.ingestion.llama_index_factory import create_llm_service
+        from backend.ingestion.settings import build_runtime_config
+        
+        settings = get_settings()
+        runtime_config = build_runtime_config(settings)
+        llm_service = create_llm_service(runtime_config.llm)
+
+        # 2. Initialize GraphManagerAgent
+        from backend.app.agents.graph_manager import GraphManagerAgent
+        from backend.app.agents.context import AgentContext
+        from backend.app.agents.memory import CaseThreadMemory
+        from backend.app.agents.types import AgentThread
+        from backend.app.storage.agent_memory_store import AgentMemoryStore
+        from backend.app.services.graph import get_graph_service
+        from uuid import uuid4
+        
+        graph_service = get_graph_service()
+        agent = GraphManagerAgent(
+            graph_service=graph_service,
+            timeline_store=self.store,
+            llm_service=llm_service
+        )
+
+        # 3. Create a temporary AgentContext
+        # We need to construct a real-ish memory structure because the agent interacts with it.
+        # We'll use a temporary memory store location or just the default one but with a temp thread ID.
+        memory_store = AgentMemoryStore(settings.agent_threads_dir)
+        thread_id = f"timeline-gen-{uuid4()}"
+        
+        thread = AgentThread(
+            thread_id=thread_id,
+            case_id=case_id,
+            question=prompt,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        
+        memory = CaseThreadMemory(
+            thread=thread,
+            store=memory_store
+        )
+
+        context = AgentContext(
+            case_id=case_id,
+            question=prompt,
+            top_k=5, # Default
+            actor={"id": "timeline-api", "roles": ["user"]},
+            memory=memory,
+            telemetry={}
+        )
+
+        # 4. Generate Insight
+        try:
+            insight = agent.ensure_insight(context, question=prompt, reuse_existing=False)
+            
+            # 5. Retrieve the generated event
+            if insight.timeline_event_id:
+                return [TimelineEvent(
+                    id=insight.timeline_event_id,
+                    ts=datetime.now(timezone.utc),
+                    title=f"Graph Insight: {prompt}",
+                    summary=insight.execution.summary.get("text") or "Generated graph insight.",
+                    citations=list(insight.execution.documents),
+                    risk_score=0.0,
+                    risk_band="low"
+                )]
+            else:
+                return []
+
+        except Exception as e:
+            print(f"Error generating timeline from prompt: {e}")
+            raise e
+
+
 def get_timeline_service() -> TimelineService:
     return TimelineService()

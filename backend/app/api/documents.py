@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Header, BackgroundTasks, Form
 from typing import List, Optional
 
 from backend.app.services.document_service import DocumentService
@@ -10,26 +10,20 @@ from pathlib import Path
 
 router = APIRouter()
 
-# Dependency to get DocumentService
-async def get_document_service(
-    settings: Settings = Depends(get_settings)
-) -> DocumentService:
-    # This is a simplified dependency. In a real application, these would be
-    # managed by a proper dependency injection framework or application lifecycle.
-    encryption_key = settings.encryption_key # Assuming encryption_key is in settings
-    if not encryption_key:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Encryption key not configured.")
-
-    document_store = DocumentStore(base_dir=settings.document_storage_path, encryption_key=encryption_key)
-    loader_registry = LoaderRegistry() # Initialize with default loaders
+def get_document_service(settings: Settings = Depends(get_settings)) -> DocumentService:
+    """
+    Dependency to get DocumentService instance.
+    """
+    document_store = DocumentStore(base_dir=Path(settings.storage_dir))
+    loader_registry = LoaderRegistry()
     runtime_config = build_runtime_config(settings)
-    materialized_root = Path(settings.ingestion_workspace_dir) # Assuming this is where pipeline expects temp files
-
+    materialized_root = Path(settings.storage_dir) / "materialized"
+    materialized_root.mkdir(parents=True, exist_ok=True)
     return DocumentService(
         document_store=document_store,
         loader_registry=loader_registry,
         runtime_config=runtime_config,
-        materialized_root=materialized_root,
+        materialized_root=materialized_root
     )
 
 @router.post("/upload", summary="Upload a new document for a case")
@@ -37,17 +31,28 @@ async def upload_document(
     case_id: str,
     doc_type: str, # "my_documents" or "opposition_documents"
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None, # Add BackgroundTasks
     relative_path: Optional[str] = None, # New parameter for relative path
     author: Optional[str] = None,
     keywords: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
     custom_metadata: Optional[dict] = None,
+    x_gemini_api_key: Optional[str] = Header(None),
+    x_courtlistener_api_key: Optional[str] = Header(None),
     document_service: DocumentService = Depends(get_document_service)
 ):
     if doc_type not in ["my_documents", "opposition_documents"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document type.")
 
     file_content = await file.read()
+    
+    api_keys = {}
+    if x_gemini_api_key:
+        api_keys["gemini_api_key"] = x_gemini_api_key
+    if x_courtlistener_api_key:
+        api_keys["courtlistener_api_key"] = x_courtlistener_api_key
+
+    # Upload document but skip immediate pipeline execution
     result = await document_service.upload_document(
         case_id,
         doc_type,
@@ -57,9 +62,62 @@ async def upload_document(
         keywords,
         tags,
         custom_metadata,
-        relative_path # Pass relative_path to the service
+        relative_path, # Pass relative_path to the service
+        api_keys=api_keys, # Pass API keys
+        run_pipeline=False # Run pipeline in background
     )
-    return {"message": "Document uploaded and ingestion initiated successfully", "data": result}
+
+    # Schedule ingestion in background
+    if background_tasks:
+        background_tasks.add_task(
+            document_service.process_ingestion,
+            result["doc_id"],
+            result["ingestion_source"],
+            result["origin"],
+            result["api_keys"]
+        )
+
+    return {"message": "Document uploaded and ingestion queued successfully", "data": result}
+
+@router.post("/upload_directory", summary="Upload a directory of documents")
+async def upload_directory(
+    case_id: str,
+    file: UploadFile = File(...),
+    document_id: str = Form(...),
+    background_tasks: BackgroundTasks = None,
+    x_gemini_api_key: Optional[str] = Header(None),
+    x_courtlistener_api_key: Optional[str] = Header(None),
+    document_service: DocumentService = Depends(get_document_service)
+):
+    file_content = await file.read()
+    
+    api_keys = {}
+    if x_gemini_api_key:
+        api_keys["gemini_api_key"] = x_gemini_api_key
+    if x_courtlistener_api_key:
+        api_keys["courtlistener_api_key"] = x_courtlistener_api_key
+
+    try:
+        results = await document_service.upload_directory(
+            case_id=case_id,
+            zip_content=file_content,
+            api_keys=api_keys
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    # Schedule ingestion for all uploaded documents
+    if background_tasks:
+        for result in results:
+            background_tasks.add_task(
+                document_service.process_ingestion,
+                result["doc_id"],
+                result["ingestion_source"],
+                result["origin"],
+                result["api_keys"]
+            )
+
+    return {"message": f"Successfully uploaded {len(results)} documents from directory", "data": results}
 
 @router.get("/{case_id}/{doc_type}/{doc_id}", summary="Retrieve a document")
 async def get_document(

@@ -31,6 +31,7 @@ class EmbeddingProvider(str, Enum):
     HUGGINGFACE = "huggingface"
     OPENAI = "openai"
     AZURE_OPENAI = "azure_openai"
+    GEMINI = "gemini"
 
 
 class OcrProvider(str, Enum):
@@ -47,6 +48,7 @@ class LlmProvider(str, Enum):
     AZURE_OPENAI = "azure_openai"
     OLLAMA = "ollama"
     HUGGINGFACE = "huggingface"
+    GEMINI = "gemini"
 
 
 @dataclass(frozen=True)
@@ -117,109 +119,91 @@ class EmbeddingSecretEnvelope(BaseModel):
     endpoint: Optional[str] = None
 
 
-def resolve_cost_mode(raw: str | IngestionCostMode) -> IngestionCostMode:
-    if isinstance(raw, IngestionCostMode):
-        return raw
-    try:
-        return IngestionCostMode(raw.lower())
-    except ValueError as exc:  # pragma: no cover - defensive; validated upstream
-        raise ValueError(f"Unsupported ingestion cost mode: {raw}") from exc
-
-
 def build_embedding_config(settings: "Settings") -> EmbeddingConfig:
-    """Resolve the embedding configuration for the active cost mode."""
-
-    mode = resolve_cost_mode(settings.ingestion_cost_mode)
-    if mode is IngestionCostMode.COMMUNITY:
+    # Default to Azure OpenAI if available
+    if settings.ingestion_azure_openai_endpoint:
         return EmbeddingConfig(
-            provider=EmbeddingProvider.HUGGINGFACE,
-            model=settings.ingestion_hf_model,
-            dimensions=settings.ingestion_hf_dimensions or settings.qdrant_vector_size,
+            provider=EmbeddingProvider.AZURE_OPENAI,
+            model=settings.ingestion_enterprise_embedding_model,
+            dimensions=settings.ingestion_enterprise_embedding_dimensions,
+            api_key=settings.ingestion_enterprise_embedding_api_key or settings.ingestion_openai_api_key,
+            api_base=settings.ingestion_azure_openai_endpoint,
             extra={
-                "device": settings.ingestion_hf_device,
-                "cache_folder": str(settings.ingestion_hf_cache_dir) if settings.ingestion_hf_cache_dir else None,
+                "azure_deployment": settings.ingestion_azure_openai_deployment,
+                "api_version": settings.ingestion_azure_openai_api_version,
             },
         )
-    if mode is IngestionCostMode.PRO:
+    
+    # Fallback to OpenAI if key is present
+    if settings.ingestion_openai_api_key:
         return EmbeddingConfig(
             provider=EmbeddingProvider.OPENAI,
             model=settings.ingestion_openai_model,
-            dimensions=settings.ingestion_openai_dimensions or settings.qdrant_vector_size,
+            dimensions=settings.ingestion_openai_dimensions,
             api_key=settings.ingestion_openai_api_key,
             api_base=settings.ingestion_openai_base,
         )
+
+    # Fallback to HuggingFace (local)
     return EmbeddingConfig(
-        provider=EmbeddingProvider.AZURE_OPENAI
-        if settings.ingestion_azure_openai_endpoint
-        else EmbeddingProvider.OPENAI,
-        model=settings.ingestion_enterprise_embedding_model,
-        dimensions=settings.ingestion_enterprise_embedding_dimensions or settings.qdrant_vector_size,
-        api_key=settings.ingestion_enterprise_embedding_api_key
-        or settings.ingestion_openai_api_key,
-        api_base=settings.ingestion_azure_openai_endpoint or settings.ingestion_openai_base,
+        provider=EmbeddingProvider.HUGGINGFACE,
+        model=settings.ingestion_hf_model,
+        dimensions=settings.ingestion_hf_dimensions,
         extra={
-            "azure_deployment": settings.ingestion_azure_openai_deployment,
-            "api_version": settings.ingestion_azure_openai_api_version,
+            "device": settings.ingestion_hf_device,
+            "cache_folder": str(settings.ingestion_hf_cache_dir) if settings.ingestion_hf_cache_dir else None,
         },
     )
 
 
 def build_ocr_config(settings: "Settings") -> OcrConfig:
-    mode = resolve_cost_mode(settings.ingestion_cost_mode)
-    if mode is IngestionCostMode.COMMUNITY:
+    # Prefer Vision if configured
+    if settings.ingestion_vision_model:
         return OcrConfig(
-            provider=OcrProvider.TESSERACT,
+            provider=OcrProvider.VISION,
             languages=settings.ingestion_tesseract_languages,
             tessdata_path=settings.ingestion_tesseract_path,
+            vision_endpoint=settings.ingestion_vision_endpoint,
+            vision_model=settings.ingestion_vision_model,
+            api_key=settings.ingestion_vision_api_key or settings.gemini_api_key,
         )
-    if mode is IngestionCostMode.PRO:
-        return OcrConfig(
-            provider=OcrProvider.TESSERACT,
-            languages=settings.ingestion_tesseract_languages,
-            tessdata_path=settings.ingestion_tesseract_path,
-            extra={"vision_fallback": {
-                "endpoint": settings.ingestion_vision_endpoint,
-                "model": settings.ingestion_vision_model,
-                "api_key": settings.ingestion_vision_api_key,
-            }},
-        )
+    
+    # Fallback to Tesseract
     return OcrConfig(
-        provider=OcrProvider.VISION,
+        provider=OcrProvider.TESSERACT,
         languages=settings.ingestion_tesseract_languages,
         tessdata_path=settings.ingestion_tesseract_path,
-        vision_endpoint=settings.ingestion_vision_endpoint,
-        vision_model=settings.ingestion_vision_model,
-        api_key=settings.ingestion_vision_api_key,
     )
 
 
 def build_llm_config(settings: "Settings") -> LlmConfig:
-    mode = resolve_cost_mode(settings.ingestion_cost_mode)
-    if mode is IngestionCostMode.COMMUNITY:
+    # Default to Azure OpenAI if available
+    if settings.ingestion_azure_openai_endpoint:
         return LlmConfig(
-            provider=LlmProvider.OLLAMA, # Assuming Ollama for community tier
-            model=settings.ingestion_ollama_model,
-            api_base=settings.ingestion_ollama_base,
+            provider=LlmProvider.AZURE_OPENAI,
+            model=settings.ingestion_enterprise_llm_model,
+            api_key=settings.ingestion_enterprise_llm_api_key or settings.ingestion_openai_api_key,
+            api_base=settings.ingestion_azure_openai_endpoint,
+            extra={
+                "azure_deployment": settings.ingestion_azure_openai_deployment,
+                "api_version": settings.ingestion_azure_openai_api_version,
+            },
         )
-    if mode is IngestionCostMode.PRO:
+
+    # Fallback to OpenAI if key is present
+    if settings.ingestion_openai_api_key:
         return LlmConfig(
             provider=LlmProvider.OPENAI,
             model=settings.ingestion_openai_model,
             api_key=settings.ingestion_openai_api_key,
             api_base=settings.ingestion_openai_base,
         )
+
+    # Fallback to Ollama
     return LlmConfig(
-        provider=LlmProvider.AZURE_OPENAI
-        if settings.ingestion_azure_openai_endpoint
-        else LlmProvider.OPENAI,
-        model=settings.ingestion_enterprise_llm_model,
-        api_key=settings.ingestion_enterprise_llm_api_key
-        or settings.ingestion_openai_api_key,
-        api_base=settings.ingestion_azure_openai_endpoint or settings.ingestion_openai_base,
-        extra={
-            "azure_deployment": settings.ingestion_azure_openai_deployment,
-            "api_version": settings.ingestion_azure_openai_api_version,
-        },
+        provider=LlmProvider.OLLAMA,
+        model=settings.ingestion_ollama_model,
+        api_base=settings.ingestion_ollama_base,
     )
 
 
@@ -234,10 +218,10 @@ def build_pipeline_tuning(settings: "Settings") -> PipelineTuning:
 
 def build_runtime_config(settings: "Settings") -> LlamaIndexRuntimeConfig:
     return LlamaIndexRuntimeConfig(
-        cost_mode=resolve_cost_mode(settings.ingestion_cost_mode),
+        cost_mode=IngestionCostMode.PRO, # Deprecated but kept for type compatibility if needed, or remove if safe
         embedding=build_embedding_config(settings),
         ocr=build_ocr_config(settings),
-        llm=build_llm_config(settings), # Added LLM configuration
+        llm=build_llm_config(settings),
         tuning=build_pipeline_tuning(settings),
         workspace_dir=settings.ingestion_workspace_dir,
         llama_cache_dir=settings.ingestion_llama_cache_dir,
@@ -254,12 +238,12 @@ __all__ = [
     "LlamaIndexRuntimeConfig",
     "OcrConfig",
     "OcrProvider",
-    "LlmConfig", # Added
-    "LlmProvider", # Added
+    "LlmConfig",
+    "LlmProvider",
     "PipelineTuning",
     "build_embedding_config",
     "build_ocr_config",
-    "build_llm_config", # Added
+    "build_llm_config",
     "build_pipeline_tuning",
     "build_runtime_config",
     "resolve_cost_mode",

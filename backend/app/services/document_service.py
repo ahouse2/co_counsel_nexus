@@ -1,6 +1,7 @@
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 import uuid
+import dataclasses
 
 from backend.app.storage.document_store import DocumentStore
 from backend.app.models.api import IngestionSource, SourceType
@@ -34,8 +35,10 @@ class DocumentService:
         keywords: Optional[List[str]] = None,
         tags: Optional[List[str]] = None,
         custom_metadata: Optional[dict] = None,
-        relative_path: Optional[str] = None, # New parameter
+        relative_path: Optional[str] = None,
         origin: str = "upload",
+        api_keys: Optional[Dict[str, str]] = None,
+        run_pipeline: bool = True,
     ) -> dict:
         doc_id = str(uuid.uuid4())
         version = self.document_store.save_document(
@@ -43,20 +46,25 @@ class DocumentService:
             case_id,
             doc_id,
             file_content,
+            file_name,
             author,
             keywords,
             tags,
             custom_metadata,
-            relative_path # Pass relative_path to document_store
+            relative_path 
         )
 
-        # Trigger ingestion pipeline
-        # For simplicity, we're creating a basic IngestionSource here.
-        # In a real app, more metadata would be passed.
+        # Stage the file for ingestion in the materialized_root
+        job_dir = self.materialized_root / doc_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        
+        staged_file_path = job_dir / file_name
+        staged_file_path.write_bytes(file_content)
+
         ingestion_source = IngestionSource(
             source_id=doc_id,
             type=SourceType.FILE,
-            uri=str(self.document_store.get_document_path(doc_type, case_id, doc_id, version)),
+            uri=str(staged_file_path),
             metadata={
                 "case_id": case_id,
                 "doc_type": doc_type,
@@ -66,22 +74,13 @@ class DocumentService:
                 "keywords": keywords,
                 "tags": tags,
                 "custom_metadata": custom_metadata,
-                "relative_path": relative_path, # Include relative_path in metadata
+                "relative_path": relative_path,
             }
         )
 
-        # The run_ingestion_pipeline expects a Path for materialized_root
-        # We need to ensure the document is accessible by the pipeline.
-        # For now, we'll assume the pipeline can read from the encrypted path.
-        # A more robust solution might involve decrypting to a temp location for ingestion.
-        pipeline_result = run_ingestion_pipeline(
-            job_id=doc_id, # Use doc_id as job_id for now
-            materialized_root=self.materialized_root, # This needs to be the base path for ingestion
-            source=ingestion_source,
-            origin=origin,
-            registry=self.loader_registry,
-            runtime_config=self.runtime_config,
-        )
+        pipeline_result = None
+        if run_pipeline:
+            pipeline_result = self.process_ingestion(doc_id, ingestion_source, origin, api_keys)
 
         return {
             "doc_id": doc_id,
@@ -89,9 +88,87 @@ class DocumentService:
             "case_id": case_id,
             "doc_type": doc_type,
             "file_name": file_name,
-            "ingestion_status": "completed",
-            "pipeline_result": pipeline_result.documents[0].categories if pipeline_result.documents else [],
+            "ingestion_status": "completed" if run_pipeline else "queued",
+            "pipeline_result": pipeline_result.documents[0].categories if pipeline_result and pipeline_result.documents else [],
+            "ingestion_source": ingestion_source,
+            "origin": origin,
+            "api_keys": api_keys,
         }
+
+    def process_ingestion(
+        self,
+        doc_id: str,
+        source: IngestionSource,
+        origin: str,
+        api_keys: Optional[Dict[str, str]] = None
+    ):
+        # Update runtime config with API keys if provided
+        current_config = self.runtime_config
+        if api_keys:
+            key_to_use = api_keys.get("gemini_api_key") or api_keys.get("courtlistener_api_key")
+            
+            if key_to_use:
+                new_llm_config = dataclasses.replace(
+                    current_config.llm, 
+                    api_key=key_to_use
+                )
+                new_embedding_config = dataclasses.replace(
+                    current_config.embedding,
+                    api_key=key_to_use
+                )
+                new_ocr_config = dataclasses.replace(
+                    current_config.ocr,
+                    api_key=key_to_use,
+                    vision_model=current_config.default_vision_model
+                )
+                current_config = dataclasses.replace(
+                    current_config,
+                    llm=new_llm_config,
+                    embedding=new_embedding_config,
+                    ocr=new_ocr_config
+                )
+
+        job_dir = self.materialized_root / doc_id
+        
+        try:
+            # Update status to processing
+            self.document_store.update_document_status(
+                source.metadata.get("doc_type"),
+                source.metadata.get("case_id"),
+                doc_id,
+                "processing"
+            )
+
+            pipeline_result = run_ingestion_pipeline(
+                job_id=doc_id, 
+                materialized_root=job_dir, 
+                source=source,
+                origin=origin,
+                registry=self.loader_registry,
+                runtime_config=current_config,
+            )
+            
+            # Update status to completed
+            self.document_store.update_document_status(
+                source.metadata.get("doc_type"),
+                source.metadata.get("case_id"),
+                doc_id,
+                "completed"
+            )
+            
+            return pipeline_result
+        except Exception as e:
+            # Update status to failed
+            self.document_store.update_document_status(
+                source.metadata.get("doc_type"),
+                source.metadata.get("case_id"),
+                doc_id,
+                "failed"
+            )
+            raise e
+        finally:
+            # Cleanup staged file after ingestion (optional)
+            pass
 
     def get_document(self, case_id: str, doc_type: str, doc_id: str, version: Optional[str] = None) -> Optional[str]:
         return self.document_store.get_document(doc_type, case_id, doc_id, version)
@@ -107,3 +184,40 @@ class DocumentService:
         Lists all documents for a given case.
         """
         return self.document_store.list_all_documents(case_id)
+
+    async def upload_directory(
+        self,
+        case_id: str,
+        zip_content: bytes,
+        api_keys: Optional[Dict[str, str]] = None,
+    ) -> List[dict]:
+        import zipfile
+        import io
+        
+        results = []
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
+                for filename in z.namelist():
+                    if filename.endswith('/') or filename.startswith('__MACOSX') or filename.startswith('.'):
+                        continue
+                    
+                    file_content = z.read(filename)
+                    # Use the filename as the relative path if it contains directories
+                    relative_path = str(Path(filename).parent) if '/' in filename else None
+                    base_filename = Path(filename).name
+                    
+                    result = await self.upload_document(
+                        case_id=case_id,
+                        doc_type="my_documents",
+                        file_content=file_content,
+                        file_name=base_filename,
+                        relative_path=relative_path,
+                        origin="folder_upload",
+                        api_keys=api_keys,
+                        run_pipeline=False # Queue for background processing
+                    )
+                    results.append(result)
+        except zipfile.BadZipFile:
+            raise ValueError("Invalid zip file")
+            
+        return results

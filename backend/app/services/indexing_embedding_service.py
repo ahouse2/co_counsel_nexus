@@ -20,7 +20,10 @@ class IndexingEmbeddingService:
 
     def __init__(self):
         settings = get_settings()
-        self.qdrant_client = QdrantClient(path=str(settings.vector_dir)) # Local Qdrant instance
+        if settings.qdrant_url:
+            self.qdrant_client = QdrantClient(url=settings.qdrant_url)
+        else:
+            self.qdrant_client = QdrantClient(path=str(settings.vector_dir)) # Local Qdrant instance
         self.vector_store = QdrantVectorStore(
             client=self.qdrant_client,
             collection_name=settings.qdrant_collection,

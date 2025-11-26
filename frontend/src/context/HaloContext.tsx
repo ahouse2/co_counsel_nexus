@@ -1,65 +1,63 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useState, ReactNode } from 'react';
 
-export type HaloContextValue = {
-  activeModuleId: string;
-  setActiveModuleId: (id: string) => void;
-  activeSubmoduleId: string;
-  setActiveSubmoduleId: (id: string) => void;
-  viewportPayload?: any;
-  setViewportPayload?: (payload: any) => void;
-};
+export type ModuleId =
+    | 'graph'
+    | 'chat'
+    | 'timeline'
+    | 'documents'
+    | 'university'
+    | 'arena'
+    | 'context'
+    | 'theory'
+    | 'forensics'
+    | 'binder'
+    | 'research'
+    | 'drafting'
+    | 'presentation'
+    | 'process'
+    | 'agents';
 
-export const HaloContext = createContext<HaloContextValue | undefined>(undefined);
+export type SubmoduleId = string | null;
 
-export const HaloProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activeModuleId, setActiveModuleIdState] = useState<string>('graph');
-  const [activeSubmoduleId, setActiveSubmoduleIdState] = useState<string>('vector');
-  const [viewportPayload, setViewportPayloadState] = useState<any>(null);
+interface HaloContextType {
+    activeModule: ModuleId;
+    setActiveModule: (module: ModuleId) => void;
+    activeSubmodule: SubmoduleId;
+    setActiveSubmodule: (submodule: SubmoduleId) => void;
+    isMenuOpen: boolean;
+    setIsMenuOpen: (isOpen: boolean) => void;
+    isSettingsOpen: boolean;
+    setIsSettingsOpen: (isOpen: boolean) => void;
+}
 
-  // hydrate from localStorage
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('cc_halo_context');
-      if (raw) {
-        const p = JSON.parse(raw) as { activeModuleId?: string; activeSubmoduleId?: string; viewportPayload?: any };
-        if (p.activeModuleId) setActiveModuleIdState(p.activeModuleId);
-        if (p.activeSubmoduleId) setActiveSubmoduleIdState(p.activeSubmoduleId);
-        if (p.viewportPayload) setViewportPayloadState(p.viewportPayload);
-      }
-    } catch {
-      // ignore
+const HaloContext = createContext<HaloContextType | undefined>(undefined);
+
+export function HaloProvider({ children }: { children: ReactNode }) {
+    const [activeModule, setActiveModule] = useState<ModuleId>('graph');
+    const [activeSubmodule, setActiveSubmodule] = useState<SubmoduleId>(null);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+    return (
+        <HaloContext.Provider value={{
+            activeModule,
+            setActiveModule,
+            activeSubmodule,
+            setActiveSubmodule,
+            isMenuOpen,
+            setIsMenuOpen,
+            isSettingsOpen,
+            setIsSettingsOpen
+        }}>
+            {children}
+        </HaloContext.Provider>
+    );
+}
+
+export function useHalo() {
+    const context = useContext(HaloContext);
+    if (context === undefined) {
+        throw new Error('useHalo must be used within a HaloProvider');
     }
-  }, []);
-
-  // persist to localStorage
-  useEffect(() => {
-    const payload = { activeModuleId, activeSubmoduleId, viewportPayload };
-    localStorage.setItem('cc_halo_context', JSON.stringify(payload));
-  }, [activeModuleId, activeSubmoduleId, viewportPayload]);
-
-  const value: HaloContextValue = {
-    activeModuleId,
-    setActiveModuleId: setActiveModuleIdState,
-    activeSubmoduleId,
-    setActiveSubmoduleId: setActiveSubmoduleIdState,
-    viewportPayload,
-    setViewportPayload: setViewportPayloadState,
-  };
-
-  return <HaloContext.Provider value={value}>{children}</HaloContext.Provider>;
-};
-
-export const useHaloContext = (): HaloContextValue => {
-  const ctx = useContext(HaloContext);
-  if (!ctx) {
-    return {
-      activeModuleId: 'graph',
-      setActiveModuleId: () => {},
-      activeSubmoduleId: 'vector',
-      setActiveSubmoduleId: () => {},
-      viewportPayload: undefined,
-      setViewportPayload: () => {},
-    };
-  }
-  return ctx;
-};
+    return context;
+}

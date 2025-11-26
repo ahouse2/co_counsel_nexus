@@ -3,15 +3,21 @@ from pydantic import BaseModel
 from typing import List
 
 from backend.app.agents.runner import get_orchestrator, MicrosoftAgentsOrchestrator
-from backend.app.config import LlmConfig, get_llm_config
-from backend.app.storage.document_store import DocumentStore, get_document_store
-from backend.app.forensics.analyzer import ForensicAnalyzer, get_forensic_analyzer
+from backend.ingestion.settings import LlmConfig
+from backend.app.config import get_settings
 from backend.app.services.knowledge_graph_service import KnowledgeGraphService, get_knowledge_graph_service
-from backend.app.agents.memory import AgentMemoryStore, get_agent_memory_store
-from backend.app.agents.reasoning_engine import ReasoningEngine
-from backend.ingestion.llama_index_factory import build_llm_service
+from backend.ingestion.llama_index_factory import create_llm_service
 
 router = APIRouter()
+
+def get_llm_config() -> LlmConfig:
+    """Dependency to get LLM configuration from settings."""
+    settings = get_settings()
+    return LlmConfig(
+        model=settings.llm_model,
+        provider=settings.llm_provider,
+        temperature=settings.llm_temperature,
+    )
 
 class AgentInteractionRequest(BaseModel):
     session_id: str
@@ -59,9 +65,9 @@ async def analyze_case(
     Analyze a case and generate a summary.
     """
     from backend.app.agents.reasoning_engine import ReasoningEngine
-    from backend.ingestion.llama_index_factory import build_llm_service
+    from backend.ingestion.llama_index_factory import create_llm_service
 
-    llm_service = build_llm_service(llm_config)
+    llm_service = create_llm_service(llm_config)
     reasoning_engine = ReasoningEngine(
         llm_service=llm_service,
         knowledge_graph_service=knowledge_graph_service,
@@ -127,10 +133,10 @@ async def get_drafting_suggestions(
     """
     Get drafting suggestions from an LLM.
     """
-    from backend.ingestion.llama_index_factory import build_llm_service
+    from backend.ingestion.llama_index_factory import create_llm_service
     from typing import List
 
-    llm_service = build_llm_service(llm_config)
+    llm_service = create_llm_service(llm_config)
 
     # Get case-specific context from the knowledge graph
     case_summary = knowledge_graph_service.get_case_summary(request.case_id)

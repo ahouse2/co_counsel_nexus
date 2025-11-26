@@ -183,14 +183,26 @@ def create_embedding_model(config: EmbeddingConfig) -> Any:
     )
 
 
+class NullLlmService(BaseLlmService):
+    """No-op LLM service for fallback."""
+    def generate_text(self, prompt: str) -> str:
+        return ""
+
+
 def create_llm_service(config: LlmConfig) -> BaseLlmService:
     """Instantiate the LLM service for text generation."""
-    if config.provider is LlmProvider.OPENAI or config.provider is LlmProvider.AZURE_OPENAI:
-        return OpenAILlmService(config)
-    if config.provider is LlmProvider.OLLAMA:
-        return OllamaLlmService(config)
+    try:
+        if config.provider is LlmProvider.OPENAI or config.provider is LlmProvider.AZURE_OPENAI:
+            return OpenAILlmService(config)
+        if config.provider is LlmProvider.OLLAMA:
+            return OllamaLlmService(config)
+    except Exception as e:
+        print(f"Failed to initialize LLM provider {config.provider}: {e}")
+        return NullLlmService()
+        
     # Add other LLM providers here as needed
-    raise ValueError(f"Unsupported LLM provider: {config.provider}")
+    print(f"Unsupported or failed LLM provider: {config.provider}, using Null fallback.")
+    return NullLlmService()
 
 
 __all__ = [

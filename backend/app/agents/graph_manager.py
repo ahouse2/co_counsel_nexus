@@ -89,6 +89,31 @@ class HeuristicTextToCypherChain:
         return "MATCH (n) RETURN n"
 
 
+class LLMTextToCypherChain:
+    """LLM-based chain for converting natural language to Cypher queries."""
+
+    def __init__(self, llm_service: Any) -> None:
+        self.llm_service = llm_service
+
+    def generate(self, prompt: str, *, context: Dict[str, Any] | None = None) -> str:
+        # The prompt is already built by GraphService.build_text_to_cypher_prompt
+        # We just need to pass it to the LLM.
+        try:
+            return self.llm_service.generate_text(prompt)
+        except Exception as e:
+            # Fallback or re-raise depending on desired resilience
+            raise WorkflowAbort(
+                WorkflowError(
+                    component=WorkflowComponent.GRAPH,
+                    code="GRAPH_LLM_ERROR",
+                    message=f"LLM failed to generate Cypher: {e}",
+                    severity=WorkflowSeverity.ERROR,
+                    retryable=True,
+                ),
+                status_code=500,
+            )
+
+
 class GraphManagerAgent:
     """High-level coordinator generating and executing graph insights for a case."""
 
@@ -98,10 +123,16 @@ class GraphManagerAgent:
         graph_service: GraphService | None = None,
         timeline_store: TimelineStore | None = None,
         chain: TextToCypherChain | None = None,
+        llm_service: Any | None = None,
     ) -> None:
         self.graph_service = graph_service or get_graph_service()
         self.timeline_store = timeline_store
-        self.chain = chain or HeuristicTextToCypherChain()
+        if chain:
+            self.chain = chain
+        elif llm_service:
+            self.chain = LLMTextToCypherChain(llm_service)
+        else:
+            self.chain = HeuristicTextToCypherChain()
 
     def ensure_insight(
         self,

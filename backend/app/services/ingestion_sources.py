@@ -33,70 +33,7 @@ class MaterializedSource:
     origin: str | None = None
 
 
-class WebSourceConnector(BaseSourceConnector):
-    def preflight(self, source: IngestionSource) -> None:
-        self._validate_url(source)
-        self._ensure_httpx()
 
-    def materialize(self, job_id: str, index: int, source: IngestionSource) -> MaterializedSource:
-        httpx = self._ensure_httpx()
-        url = self._validate_url(source)
-
-        workspace = self._workspace(job_id, index, "web")
-        filename = self._build_filename(url)
-        target = workspace / filename
-
-        with httpx.Client(timeout=30.0) as client:
-            try:
-                response = client.get(url)
-            except httpx.RequestError as exc:  # type: ignore[attr-defined]
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Failed to fetch {url}: {exc}",
-                ) from exc
-            if response.status_code >= 400:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Failed to fetch {url}: HTTP {response.status_code}",
-                )
-            target.write_bytes(response.content)
-
-        self.logger.info("Fetched web source", extra={"url": url, "path": str(target)})
-        origin = f"web:{self._normalise_url_path(url)}"
-        return MaterializedSource(root=workspace, source=source, origin=origin)
-
-    def _ensure_httpx(self) -> ModuleType:
-        try:
-            import httpx
-        except ImportError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Web ingestion requires httpx optional dependency",
-            ) from exc
-        return httpx
-
-    def _validate_url(self, source: IngestionSource) -> str:
-        if not source.path:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Web source requires a URL in path")
-        url = source.path.strip()
-        if not url.lower().startswith(("http://", "https://")):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Web source path must be a HTTP(S) URL",
-            )
-        return url
-
-    def _build_filename(self, url: str) -> str:
-        parsed = urlparse(url)
-        name = Path(parsed.path).name or "index.html"
-        if "." not in name:
-            name = f"{name}.html"
-        return name
-
-    @staticmethod
-    def _normalise_url_path(url: str) -> str:
-        parsed = urlparse(url)
-        return parsed.path or "/"
 
 
 class DigestCache:
@@ -161,6 +98,72 @@ class BaseSourceConnector:
         workspace = self.settings.ingestion_workspace_dir / job_id / f"{index:02d}_{label}"
         workspace.mkdir(parents=True, exist_ok=True)
         return workspace
+
+
+class WebSourceConnector(BaseSourceConnector):
+    def preflight(self, source: IngestionSource) -> None:
+        self._validate_url(source)
+        self._ensure_httpx()
+
+    def materialize(self, job_id: str, index: int, source: IngestionSource) -> MaterializedSource:
+        httpx = self._ensure_httpx()
+        url = self._validate_url(source)
+
+        workspace = self._workspace(job_id, index, "web")
+        filename = self._build_filename(url)
+        target = workspace / filename
+
+        with httpx.Client(timeout=30.0) as client:
+            try:
+                response = client.get(url)
+            except httpx.RequestError as exc:  # type: ignore[attr-defined]
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Failed to fetch {url}: {exc}",
+                ) from exc
+            if response.status_code >= 400:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Failed to fetch {url}: HTTP {response.status_code}",
+                )
+            target.write_bytes(response.content)
+
+        self.logger.info("Fetched web source", extra={"url": url, "path": str(target)})
+        origin = f"web:{self._normalise_url_path(url)}"
+        return MaterializedSource(root=workspace, source=source, origin=origin)
+
+    def _ensure_httpx(self) -> ModuleType:
+        try:
+            import httpx
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Web ingestion requires httpx optional dependency",
+            ) from exc
+        return httpx
+
+    def _validate_url(self, source: IngestionSource) -> str:
+        if not source.path:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Web source requires a URL in path")
+        url = source.path.strip()
+        if not url.lower().startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Web source path must be a HTTP(S) URL",
+            )
+        return url
+
+    def _build_filename(self, url: str) -> str:
+        parsed = urlparse(url)
+        name = Path(parsed.path).name or "index.html"
+        if "." not in name:
+            name = f"{name}.html"
+        return name
+
+    @staticmethod
+    def _normalise_url_path(url: str) -> str:
+        parsed = urlparse(url)
+        return parsed.path or "/"
 
 
 class LocalSourceConnector(BaseSourceConnector):
@@ -1098,3 +1101,28 @@ class WebSourceConnector:
 
 
         return name
+
+
+def build_connector(source_type: str, settings, registry, logger):
+    """Factory function to build the appropriate source connector."""
+    source_type_lower = source_type.lower()
+    if source_type_lower == "local":
+        return LocalSourceConnector(settings, registry, logger)
+    elif source_type_lower == "file":
+        return FileSourceConnector(settings, registry, logger)
+    elif source_type_lower == "s3":
+        return S3SourceConnector(settings, registry, logger)
+    elif source_type_lower == "web":
+        return WebSourceConnector(settings, registry, logger)
+    elif source_type_lower == "courtlistener":
+        return CourtListenerSourceConnector(settings, registry, logger)
+    elif source_type_lower == "websearch":
+        return WebSearchSourceConnector(settings, registry, logger)
+    elif source_type_lower == "sharepoint":
+        return SharePointSourceConnector(settings, registry, logger)
+    elif source_type_lower == "onedrive":
+        return OneDriveSourceConnector(settings, registry, logger)
+    else:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown source type: {source_type}")
+
