@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 class ResearchAgent:
     """Base agent for legal research tasks"""
     
-    def __init__(self, llm_service, name: str):
+    def __init__(self, llm_service, name: str, kg_service=None):
         self.llm_service = llm_service
+        self.kg_service = kg_service
         self.name = name
     
     async def research(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -26,29 +27,38 @@ class ResearchAgent:
 class CourtListenerResearchAgent(ResearchAgent):
     """Agent that searches CourtListener for relevant case law"""
     
-    def __init__(self, llm_service):
-        super().__init__(llm_service, "CourtListenerAgent")
+    def __init__(self, llm_service, kg_service=None):
+        super().__init__(llm_service, "CourtListenerAgent", kg_service)
     
     async def research(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Search CourtListener for relevant cases"""
         from backend.app.services.autonomous_courtlistener_service import AutonomousCourtListenerService
         
         try:
-            cl_service = AutonomousCourtListenerService()
+            cl_service = AutonomousCourtListenerService(kg_service=self.kg_service)
             
             # Generate search queries from document context
             search_terms = await self._generate_search_terms(query, context)
             
             results = []
             for term in search_terms[:3]:  # Limit to 3 searches
-                cases = await cl_service.search_cases(term, limit=5)
-                results.extend(cases)
+                # Use monitor for persistent tracking
+                monitor = await cl_service.add_monitor(
+                    monitor_type='keyword',
+                    value=term,
+                    requested_by='research_swarm',
+                    check_interval_hours=24
+                )
+                # Execute immediate search
+                result = await cl_service.execute_monitor(monitor.monitor_id)
+                if result.get('success'):
+                    results.extend(result.get('results', []))
             
             logger.info(f"{self.name} found {len(results)} cases")
             return {
                 "agent": self.name,
                 "query": query,
-                "results": results[:10],  # Top 10
+                "results": results[:10],
                 "status": "success"
             }
         except Exception as e:
@@ -74,48 +84,108 @@ Return as JSON array of strings, e.g.: ["term 1", "term 2", "term 3"]
                     response = response[4:]
             return json.loads(response.strip())
         except:
-            # Fallback: use query directly
             return [query]
 
 
-class LegalNewsResearchAgent(ResearchAgent):
-    """Agent that searches for legal news and updates"""
+class CaliforniaCodesResearchAgent(ResearchAgent):
+    """Agent that searches California statutes and codes"""
     
-    def __init__(self, llm_service):
-        super().__init__(llm_service, "LegalNewsAgent")
+    def __init__(self, llm_service, kg_service=None):
+        super().__init__(llm_service, "CaliforniaCodesAgent", kg_service)
     
     async def research(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Search for legal news (simulated - would use real API)"""
-        # In production, this would hit a legal news API
-        logger.info(f"{self.name} searching for: {query}")
+        """Search California codes for relevant statutes"""
+        from backend.app.services.web_scrapers.california_codes_scraper import CaliforniaCodesScraper
         
-        # Placeholder results
-        return {
-            "agent": self.name,
-            "query": query,
-            "results": [],
-            "status": "success",
-            "note": "Legal news API integration pending"
-        }
+        try:
+            scraper = CaliforniaCodesScraper(kg_service=self.kg_service)
+            results = await scraper.search_codes(query)
+            
+            # If we found a code, try to get specific sections
+            case_id = context.get("case_id")
+            detailed_results = []
+            
+            for result in results[:3]:
+                if "lawCode" in str(result.get("url", "")):
+                    # Try to get specific sections related to query
+                    if case_id and self.kg_service:
+                        await scraper.upsert_to_knowledge_graph(result, case_id)
+                    detailed_results.append(result)
+            
+            logger.info(f"{self.name} found {len(detailed_results)} statutes")
+            return {
+                "agent": self.name,
+                "query": query,
+                "results": detailed_results,
+                "status": "success"
+            }
+        except Exception as e:
+            logger.error(f"{self.name} research failed: {e}")
+            return {"agent": self.name, "status": "error", "error": str(e)}
+
+
+class FederalCodesResearchAgent(ResearchAgent):
+    """Agent that searches Federal USC codes"""
+    
+    def __init__(self, llm_service, kg_service=None):
+        super().__init__(llm_service, "FederalCodesAgent", kg_service)
+    
+    async def research(self, query: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Search Federal codes (USC) for relevant statutes"""
+        from backend.app.services.web_scrapers.federal_codes_scraper import FederalCodesScraper
+        
+        try:
+            scraper = FederalCodesScraper(kg_service=self.kg_service)
+            results = await scraper.search_codes(query)
+            
+            case_id = context.get("case_id")
+            
+            # Upsert results to KG
+            for result in results[:5]:
+                if result.get("usc_title") and result.get("section") and case_id:
+                    section_data = await scraper.get_section(
+                        int(result["usc_title"]),
+                        result["section"]
+                    )
+                    if section_data:
+                        await scraper.upsert_to_knowledge_graph(section_data, case_id)
+            
+            logger.info(f"{self.name} found {len(results)} statutes")
+            return {
+                "agent": self.name,
+                "query": query,
+                "results": results[:10],
+                "status": "success"
+            }
+        except Exception as e:
+            logger.error(f"{self.name} research failed: {e}")
+            return {"agent": self.name, "status": "error", "error": str(e)}
 
 
 class ResearchSwarm:
     """
     Orchestrates multiple research agents to autonomously gather
     legal information after document ingestion.
+    
+    Agents:
+    - CourtListenerResearchAgent: Case law from CourtListener API
+    - CaliforniaCodesResearchAgent: CA statutes from leginfo.legislature.ca.gov
+    - FederalCodesResearchAgent: USC from Cornell LII
     """
     
     def __init__(self):
         self.llm_service = get_llm_service()
         self.kg_service = get_knowledge_graph_service()
         
-        # Initialize research agents
+        # Initialize research agents with KG integration
         self.agents = [
-            CourtListenerResearchAgent(self.llm_service),
-            LegalNewsResearchAgent(self.llm_service),
+            CourtListenerResearchAgent(self.llm_service, self.kg_service),
+            CaliforniaCodesResearchAgent(self.llm_service, self.kg_service),
+            FederalCodesResearchAgent(self.llm_service, self.kg_service),
         ]
         
-        logger.info(f"ResearchSwarm initialized with {len(self.agents)} agents")
+        logger.info(f"ResearchSwarm initialized with {len(self.agents)} agents: "
+                   f"{[a.name for a in self.agents]}")
     
     async def research_for_document(
         self, 

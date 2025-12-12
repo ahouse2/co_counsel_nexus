@@ -101,25 +101,52 @@ def _extract_legal_metadata(text: str, llm_service: BaseLlmService) -> Dict[str,
     if date_match:
         metadata["document_date"] = date_match.group(0)
 
-    # Example: Extract a case number (placeholder)
-    case_number_match = re.search(r'Case No\.\s*([A-Z0-9-]+)', text, re.IGNORECASE)
-    if case_number_match:
-        metadata["case_number"] = case_number_match.group(1)
+    # Extract a case number using regex patterns
+    case_number_patterns = [
+        r'Case No\.?\s*([A-Z0-9:-]+)',
+        r'Docket No\.?\s*([A-Z0-9:-]+)',
+        r'([0-9]{1,2}:[0-9]{2}-[a-z]{2}-[0-9]+)',  # Federal format like 1:23-cv-00123
+        r'([A-Z]{2}[0-9]{6})',  # State format like BC123456
+    ]
+    for pattern in case_number_patterns:
+        case_number_match = re.search(pattern, text, re.IGNORECASE)
+        if case_number_match:
+            metadata["case_number"] = case_number_match.group(1)
+            break
     
-    # Example: Extract parties (placeholder, highly complex in reality)
-    # This would typically require advanced NLP to identify plaintiffs, defendants, etc.
-    # For now, we'll just add a placeholder.
-    metadata["parties"] = ["Plaintiff (Placeholder)", "Defendant (Placeholder)"]
+    # Extract parties using regex patterns
+    parties = []
+    party_patterns = [
+        r'(?:Plaintiff|Petitioner)[:\s]+([A-Z][A-Za-z\s,\.]+?)(?:\s+v\.|\s+vs\.|\n)',
+        r'(?:Defendant|Respondent)[:\s]+([A-Z][A-Za-z\s,\.]+?)(?:\s+v\.|\s+vs\.|\n|$)',
+        r'([A-Z][A-Za-z\s,\.&]+)\s+v\.?\s+([A-Z][A-Za-z\s,\.&]+)',
+    ]
+    for pattern in party_patterns:
+        matches = re.findall(pattern, text[:2000], re.IGNORECASE)
+        if matches:
+            if isinstance(matches[0], tuple):
+                parties.extend([m.strip() for m in matches[0] if m and len(m.strip()) > 2])
+            else:
+                parties.extend([m.strip() for m in matches if m and len(m.strip()) > 2])
+            break
+    metadata["parties"] = parties[:10] if parties else []
 
-    # Example: Extract jurisdiction (placeholder)
-    metadata["jurisdiction"] = "Federal (Placeholder)"
-
-    # In a real application, you might use the LLM service here for more accurate extraction:
-    # try:
-    #     llm_response = llm_service.generate_text(f"Extract key legal metadata (date, parties, jurisdiction, case_name, case_number) from the following text:\n\n{text}")
-    #     # Parse llm_response to populate metadata
-    # except Exception as e:
-    #     print(f"LLM metadata extraction failed: {e}")
+    # Extract jurisdiction from common patterns
+    jurisdiction_patterns = [
+        (r'United States District Court', 'Federal'),
+        (r'Superior Court of California', 'California State'),
+        (r'Court of Appeals', 'Federal Appellate'),
+        (r'Supreme Court of (?:the )?United States', 'U.S. Supreme Court'),
+        (r'(\w+ County) (?:Superior|Circuit) Court', 'State Trial Court'),
+        (r'Ninth Circuit', 'Federal - 9th Circuit'),
+        (r'California Court of Appeal', 'California Appellate'),
+    ]
+    for pattern, jurisdiction in jurisdiction_patterns:
+        if re.search(pattern, text[:3000], re.IGNORECASE):
+            metadata["jurisdiction"] = jurisdiction
+            break
+    if "jurisdiction" not in metadata:
+        metadata["jurisdiction"] = "Unknown"
 
     return metadata
 
