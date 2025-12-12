@@ -98,6 +98,14 @@ class PipelineTuning:
 
 
 @dataclass(frozen=True)
+class VectorStoreConfig:
+    """Configuration for the vector store backend."""
+    url: Optional[str] = None
+    api_key: Optional[str] = None
+    collection_name: str = "cocounsel_documents"
+
+
+@dataclass(frozen=True)
 class LlamaIndexRuntimeConfig:
     """Aggregate ingestion configuration for downstream orchestration."""
 
@@ -106,6 +114,7 @@ class LlamaIndexRuntimeConfig:
     ocr: OcrConfig
     llm: LlmConfig # Added LLM configuration
     tuning: PipelineTuning
+    vector_store: VectorStoreConfig
     workspace_dir: Path
     llama_cache_dir: Path
     chroma_persist_dir: Path
@@ -129,7 +138,7 @@ def build_embedding_config(settings: "Settings") -> EmbeddingConfig:
             api_key=settings.ingestion_enterprise_embedding_api_key or settings.ingestion_openai_api_key,
             api_base=settings.ingestion_azure_openai_endpoint,
             extra={
-                "azure_deployment": settings.ingestion_azure_openai_deployment,
+                "azure_deployment": settings.ingestion_azure_openai_embedding_deployment or settings.ingestion_azure_openai_deployment,
                 "api_version": settings.ingestion_azure_openai_api_version,
             },
         )
@@ -177,6 +186,14 @@ def build_ocr_config(settings: "Settings") -> OcrConfig:
 
 
 def build_llm_config(settings: "Settings") -> LlmConfig:
+    # Check primary provider preference
+    if settings.model_providers_primary == "gemini":
+        return LlmConfig(
+            provider=LlmProvider.GEMINI,
+            model=settings.default_chat_model,
+            api_key=settings.gemini_api_key,
+        )
+
     # Default to Azure OpenAI if available
     if settings.ingestion_azure_openai_endpoint:
         return LlmConfig(
@@ -185,7 +202,7 @@ def build_llm_config(settings: "Settings") -> LlmConfig:
             api_key=settings.ingestion_enterprise_llm_api_key or settings.ingestion_openai_api_key,
             api_base=settings.ingestion_azure_openai_endpoint,
             extra={
-                "azure_deployment": settings.ingestion_azure_openai_deployment,
+                "azure_deployment": settings.ingestion_azure_openai_chat_deployment or settings.ingestion_azure_openai_deployment,
                 "api_version": settings.ingestion_azure_openai_api_version,
             },
         )
@@ -216,13 +233,23 @@ def build_pipeline_tuning(settings: "Settings") -> PipelineTuning:
     )
 
 
+def build_vector_store_config(settings: "Settings") -> VectorStoreConfig:
+    """Build vector store configuration from settings."""
+    return VectorStoreConfig(
+        url=settings.qdrant_url,
+        api_key=None,  # Qdrant API key if needed
+        collection_name=settings.qdrant_collection,
+    )
+
+
 def build_runtime_config(settings: "Settings") -> LlamaIndexRuntimeConfig:
     return LlamaIndexRuntimeConfig(
-        cost_mode=IngestionCostMode.PRO, # Deprecated but kept for type compatibility if needed, or remove if safe
+        cost_mode=settings.ingestion_cost_mode,
         embedding=build_embedding_config(settings),
         ocr=build_ocr_config(settings),
         llm=build_llm_config(settings),
         tuning=build_pipeline_tuning(settings),
+        vector_store=build_vector_store_config(settings),
         workspace_dir=settings.ingestion_workspace_dir,
         llama_cache_dir=settings.ingestion_llama_cache_dir,
         chroma_persist_dir=settings.ingestion_chroma_dir,
@@ -241,10 +268,12 @@ __all__ = [
     "LlmConfig",
     "LlmProvider",
     "PipelineTuning",
+    "VectorStoreConfig",
     "build_embedding_config",
     "build_ocr_config",
     "build_llm_config",
     "build_pipeline_tuning",
+    "build_vector_store_config",
     "build_runtime_config",
     "resolve_cost_mode",
 ]

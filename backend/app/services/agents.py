@@ -34,6 +34,9 @@ from .errors import (
 from .forensics import ForensicsService, get_forensics_service
 from .graph import GraphService, get_graph_service
 from .retrieval import RetrievalService, get_retrieval_service
+from .knowledge_graph_service import KnowledgeGraphService, get_knowledge_graph_service
+from backend.ingestion.settings import LlmConfig
+from ..agents.runner import get_llm_config_dep
 
 
 _tracer = trace.get_tracer(__name__)
@@ -339,26 +342,30 @@ class AgentsService:
         timeline_store: TimelineStore | None = None,
         graph_agent: GraphManagerAgent | None = None,
         policy_engine: AdaptivePolicyEngine | None = None,
+        knowledge_graph_service: KnowledgeGraphService | None = None,
     ) -> None:
         self.settings = get_settings()
         self.retrieval_service = retrieval_service or get_retrieval_service()
         self.forensics_service = forensics_service or get_forensics_service()
-        self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
+        self.document_store = document_store or DocumentStore(self.settings.document_storage_path, self.settings.encryption_key)
         self.memory_store = memory_store or AgentMemoryStore(self.settings.agent_threads_dir)
         self.qa_agent = qa_agent or QAAgent()
         self.graph_service = graph_service or get_graph_service()
+        self.knowledge_graph_service = knowledge_graph_service or get_knowledge_graph_service()
         self.timeline_store = timeline_store or TimelineStore(self.settings.timeline_path)
         self.graph_agent = graph_agent or GraphManagerAgent(
             graph_service=self.graph_service,
             timeline_store=self.timeline_store,
         )
+        
+        llm_config = get_llm_config_dep()
         self.orchestrator = orchestrator or get_orchestrator(
-            self.retrieval_service,
-            self.forensics_service,
-            self.document_store,
-            self.qa_agent,
-            self.memory_store,
-            self.graph_agent,
+            llm_config=llm_config,
+            document_store=self.document_store,
+            forensics_service=self.forensics_service,
+            knowledge_graph_service=self.knowledge_graph_service,
+            memory_store=self.memory_store,
+            retrieval_service=self.retrieval_service,
         )
         self.policy_engine = policy_engine or AdaptivePolicyEngine(self.settings)
         self.audit = get_audit_trail()

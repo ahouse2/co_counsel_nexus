@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List
 from uuid import uuid4
 
-from agents.toolkit.sandbox import SandboxExecutionHarness, SandboxExecutionResult
+# Import from our own services module where we have the stub implementation
+from ..services.dev_agent import SandboxExecutionHarness, SandboxExecutionResult
 
 from ..storage.agent_memory_store import (
     AgentMemoryStore,

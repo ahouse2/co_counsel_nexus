@@ -1,0 +1,43 @@
+frontend-1        | 2025/11/29 08:08:15 [error] 30#30: *1 connect() failed (111: Connection refused) while connecting to upstream, client: 172.18.0.1, server: localhost, request: "GET /api/graph/neighbors/1 HTTP/1.1", upstream: "http://172.18.0.9:8000/api/graph/neighbors/1", host: "localhost:8088", referrer: "http://localhost:8088/"
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:08:15 +0000] "GET /api/graph/neighbors/1 HTTP/1.1" 502 559 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+frontend-1        | 2025/11/29 08:08:22 [error] 29#29: *4 connect() failed (111: Connection refused) while connecting to upstream, client: 172.18.0.1, server: localhost, request: "GET /api/documents/default_case/documents HTTP/1.1", upstream: "http://172.18.0.9:8000/api/documents/default_case/documents", host: "localhost:8088", referrer: "http://localhost:8088/"
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:08:22 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 502 559 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+qdrant-1          | 2025-11-29T08:08:45.289354Z  INFO actix_web::middleware::logger: 172.18.0.9 "GET /collections/cocounsel_documents/exists HTTP/1.1" 200 60 "-" "python-client/1.16.1 python/3.11.14" 0.042315
+qdrant-1          | 2025-11-29T08:08:47.090642Z  INFO actix_web::middleware::logger: 172.18.0.9 "GET /collections/cocounsel_documents/exists HTTP/1.1" 200 60 "-" "python-client/1.16.1 python/3.11.14" 0.003429
+api-1             | /opt/venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:383: UserWarning: Valid config keys have changed in V2:
+api-1             | * 'orm_mode' has been renamed to 'from_attributes'
+api-1             |   warnings.warn(message, UserWarning)
+api-1             | INFO:     Started server process [1]
+api-1             | INFO:     Waiting for application startup.
+qdrant-1          | 2025-11-29T08:09:01.690661Z  INFO actix_web::middleware::logger: 172.18.0.9 "GET /collections/cocounsel_documents HTTP/1.1" 200 409 "-" "python-client/1.16.1 python/3.11.14" 0.060685
+
+
+api-1             | INFO:     Application startup complete.
+qdrant-1          | 2025-11-29T08:09:09.556919Z  INFO actix_web::middleware::logger: 172.18.0.9 "GET /collections/cocounsel_documents/exists HTTP/1.1" 200 60 "-" "python-client/1.16.1 python/3.11.14" 0.000484
+api-1             | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+api-1             | Failed to initialize LLM provider LlmProvider.GEMINI: Google Generative AI client not installed. Please install with 'pip install google-generativeai'
+api-1             | Initializing QdrantClient. URL: http://qdrant:6333, Path: None
+
+
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:09:16 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+api-1             | Connecting to Qdrant at http://qdrant:6333
+api-1             | Failed to initialize LLM provider LlmProvider.GEMINI: Google Generative AI client not installed. Please install with 'pip install google-generativeai'
+api-1             | Failed to initialize LLM provider LlmProvider.GEMINI: Google Generative AI client not installed. Please install with 'pip install google-generativeai'
+api-1             | INFO:     172.18.0.10:35498 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+api-1             | INFO:     172.18.0.10:47750 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:10:40 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+api-1             | INFO:     172.18.0.10:47758 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:10:41 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+api-1             | INFO:     172.18.0.10:47760 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:10:43 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+
+
+api-1             | INFO:     172.18.0.10:47764 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:10:44 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+api-1             | INFO:     172.18.0.10:41234 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:10:47 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+api-1             | INFO:     172.18.0.10:41238 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:10:50 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+api-1             | INFO:     172.18.0.10:41252 - "GET /api/documents/default_case/documents HTTP/1.0" 404 Not Found
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:08:10:53 +0000] "GET /api/documents/default_case/documents HTTP/1.1" 404 53 "http://localhost:8088/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"
+frontend-1        | 172.18.0.1 - - [29/Nov/2025:09:17:33 +0000] "GET / HTTP/1.1" 304 0 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0" "-"

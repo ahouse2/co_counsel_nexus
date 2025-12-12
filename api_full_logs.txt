@@ -1,0 +1,230 @@
+/opt/venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:383: UserWarning: Valid config keys have changed in V2:
+* 'orm_mode' has been renamed to 'from_attributes'
+  warnings.warn(message, UserWarning)
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "/opt/venv/lib/python3.11/site-packages/starlette/routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/usr/local/lib/python3.11/contextlib.py", line 210, in __aenter__
+Initializing QdrantClient. URL: http://qdrant:6333, Path: None
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/fastapi/routing.py", line 133, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+  File "/opt/venv/lib/python3.11/site-packages/starlette/routing.py", line 569, in __aenter__
+    await self._router.startup()
+  File "/opt/venv/lib/python3.11/site-packages/starlette/routing.py", line 672, in startup
+    handler()
+  File "/src/backend/app/events.py", line 11, in start_background_workers
+    get_agents_service()
+Connecting to Qdrant at http://qdrant:6333
+  File "/src/backend/app/services/agents.py", line 854, in get_agents_service
+    _AGENTS_SERVICE = AgentsService()
+                      ^^^^^^^^^^^^^^^
+  File "/src/backend/app/services/agents.py", line 344, in __init__
+    self.retrieval_service = retrieval_service or get_retrieval_service()
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/src/backend/app/services/retrieval.py", line 1829, in get_retrieval_service
+    return RetrievalService()
+           ^^^^^^^^^^^^^^^^^^
+  File "/src/backend/app/services/retrieval.py", line 496, in __init__
+    self.embedding_model = create_embedding_model(self.runtime_config.embedding)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/src/backend/ingestion/llama_index_factory.py", line 173, in create_embedding_model
+    return LocalHuggingFaceEmbedding(config.model, config.dimensions)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/src/backend/ingestion/llama_index_factory.py", line 109, in __init__
+    self.model_name = model_name
+    ^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.11/site-packages/pydantic/v1/main.py", line 411, in __setattr__
+    self.__fields_set__.add(name)
+    ^^^^^^^^^^^^^^^^^^^
+AttributeError: 'LocalHuggingFaceEmbedding' object has no attribute '__fields_set__'
+
+ERROR:    Application startup failed. Exiting.

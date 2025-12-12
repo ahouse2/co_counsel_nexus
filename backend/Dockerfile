@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     build-essential \
+    tesseract-ocr \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

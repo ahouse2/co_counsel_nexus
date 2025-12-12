@@ -31,3 +31,44 @@ def tag_document(text: str, llm_service: Any) -> List[str]:
     response = llm_service.generate_text(prompt)
     tags = [tag.strip() for tag in response.split(',') if tag.strip()]
     return tags
+
+def heuristic_categorize(text: str) -> List[str]:
+    """
+    Categorizes a document based on keywords/regex without using an LLM.
+    """
+    text_lower = text.lower()
+    categories = []
+    
+    # Define heuristics
+    heuristics = {
+        "Contract": ["agreement", "contract", "memorandum of understanding", "settlement agreement", "lease", "nda"],
+        "Pleading": ["complaint", "answer", "motion", "petition", "affidavit", "declaration", "plaintiff", "defendant"],
+        "Correspondence": ["email", "letter", "memorandum", "from:", "to:", "subject:"],
+        "Financial": ["invoice", "receipt", "balance sheet", "tax return", "ledger", "financial statement", "profit and loss"],
+        "Court Order": ["order", "judgment", "decree", "ruling", "opinion"],
+        "Discovery": ["interrogatories", "request for production", "deposition", "subpoena"],
+    }
+    
+    for category, keywords in heuristics.items():
+        for keyword in keywords:
+            if keyword in text_lower:
+                categories.append(category)
+                break # Found a match for this category, move to next
+                
+    return categories
+
+def heuristic_tag(text: str) -> List[str]:
+    """
+    Generates tags based on keywords/regex without using an LLM.
+    """
+    text_lower = text.lower()
+    tags = []
+    
+    # Simple keyword tagging
+    keywords = ["confidential", "privileged", "draft", "final", "executed", "urgent", "internal"]
+    
+    for keyword in keywords:
+        if keyword in text_lower:
+            tags.append(keyword.title())
+            
+    return tags

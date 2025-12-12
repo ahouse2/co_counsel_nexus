@@ -1,69 +1,122 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Optional
-
-from backend.app.services.document_service import DocumentService
-from backend.app.api.documents import get_document_service # Reuse dependency
-from backend.app.forensics.models import ForensicAnalysisResult, CryptoTracingResult
-from backend.app.forensics.analyzer import ForensicAnalyzer, get_forensic_analyzer
-from backend.app.forensics.crypto_tracer import CryptoTracer, get_crypto_tracer
+from fastapi import APIRouter, Depends, HTTPException
+from backend.app.config import Settings, get_settings
+from backend.app.storage.document_store import DocumentStore
+import json
 
 router = APIRouter()
 
-@router.get(
-    "/{case_id}/{doc_type}/{doc_id}/forensics",
-    response_model=ForensicAnalysisResult,
-    summary="Retrieve forensic analysis results for a document"
-)
-async def get_forensic_analysis_results(
-    case_id: str,
-    doc_type: str,
+def get_document_store(settings: Settings = Depends(get_settings)) -> DocumentStore:
+    return DocumentStore(base_dir=settings.document_storage_path, encryption_key=settings.encryption_key)
+
+@router.get("/{doc_id}", summary="Get forensic metadata for a document")
+async def get_forensic_metadata(
     doc_id: str,
-    version: Optional[str] = None,
-    document_service: DocumentService = Depends(get_document_service),
-    forensic_analyzer: ForensicAnalyzer = Depends(get_forensic_analyzer)
+    case_id: str = "default_case",
+    store: DocumentStore = Depends(get_document_store)
 ):
-    if doc_type != "opposition_documents":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Forensic analysis is only available for opposition documents.")
+    """
+    Retrieves the forensic metadata (hash, size, magic bytes) for a document.
+    """
+    # Try both doc types since we don't know which one it is
+    for doc_type in ["my_documents", "opposition_documents"]:
+        versions = store.list_document_versions(doc_type, case_id, doc_id)
+        if versions:
+            latest = versions[0]
+            # Access internal method to get path - pragmatic for now
+            path = store._get_storage_path(doc_type, case_id, doc_id, version=latest).with_suffix(".meta")
+            if path.exists():
+                with open(path, "r") as f:
+                    data = json.load(f)
+                    # Ensure we return the ID too
+                    data["id"] = doc_id
+                    return data
+                    
+    raise HTTPException(status_code=404, detail="Document not found")
 
-    # Retrieve document content
-    document_record = await document_service.get_document_content(case_id, doc_type, doc_id, version)
-    if not document_record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
-
-    # Perform forensic analysis
-    # Assuming document_record.content is bytes and document_record.metadata is a dict
-    forensic_results = forensic_analyzer.analyze_document(
-        document_id=doc_id,
-        document_content=document_record.content,
-        metadata=document_record.metadata # Pass metadata if available
-    )
-    return forensic_results
-
-@router.get(
-    "/{case_id}/{doc_type}/{doc_id}/crypto-tracing",
-    response_model=CryptoTracingResult,
-    summary="Retrieve cryptocurrency tracing results for a document"
-)
-async def get_crypto_tracing_results(
-    case_id: str,
-    doc_type: str,
+@router.get("/{doc_id}/hex", summary="Get hex view of document head/tail")
+async def get_hex_view(
     doc_id: str,
-    version: Optional[str] = None,
-    document_service: DocumentService = Depends(get_document_service),
-    crypto_tracer: CryptoTracer = Depends(get_crypto_tracer)
+    case_id: str = "default_case",
+    store: DocumentStore = Depends(get_document_store)
 ):
-    if doc_type != "opposition_documents":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Crypto tracing is only available for opposition documents.")
+    """
+    Returns the first 512 bytes and last 512 bytes of the document in hex format.
+    Used for the Hex Viewer UI.
+    """
+    for doc_type in ["my_documents", "opposition_documents"]:
+        try:
+            content = store.get_document(doc_type, case_id, doc_id)
+            if content:
+                # Return head and tail
+                head = content[:512].hex()
+                tail = content[-512:].hex() if len(content) > 512 else ""
+                return {
+                    "head": head, 
+                    "tail": tail, 
+                    "total_size": len(content),
+                    "doc_id": doc_id
+                }
+        except Exception as e:
+            print(f"Error reading document {doc_id}: {e}")
+            continue
+            
+    raise HTTPException(status_code=404, detail="Document not found")
 
-    # Retrieve document content
-    document_record = await document_service.get_document_content(case_id, doc_type, doc_id, version)
-    if not document_record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
-
-    # Perform crypto tracing
-    # Assuming document_record.content is bytes, decode to string for crypto_tracer
-    crypto_tracing_results = crypto_tracer.trace_document_for_crypto(
-        document_content=document_record.content.decode('utf-8', errors='ignore'),
-        document_id=doc_id
-    )
-    return crypto_tracing_results
+@router.post("/{doc_id}/analyze", summary="Trigger Deep Forensic Analysis")
+async def trigger_deep_analysis(
+    doc_id: str,
+    case_id: str = "default_case",
+    store: DocumentStore = Depends(get_document_store)
+):
+    """
+    Triggers the ForensicAnalysisCrew to perform deep analysis (ELA, Splicing, etc.).
+    """
+    from backend.app.agents.swarms_runner import get_swarms_runner
+    import asyncio
+    
+    runner = get_swarms_runner()
+    
+    # Check if document exists
+    doc_path = None
+    for doc_type in ["my_documents", "opposition_documents"]:
+        versions = store.list_document_versions(doc_type, case_id, doc_id)
+        if versions:
+            # Get the actual file path
+            # This is a bit hacky, accessing internal method, but needed for the tool
+            doc_path = str(store._get_storage_path(doc_type, case_id, doc_id, version=versions[0]))
+            break
+            
+    if not doc_path:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    prompt = f"""
+    Context: Forensic Analysis for Document {doc_id}.
+    File Path: {doc_path}
+    Role: You are the Forensics Lead.
+    
+    Task:
+    1. Analyze the document for authenticity (ELA, Metadata).
+    2. Check for splicing or manipulation.
+    3. Return a JSON report with:
+       - authenticity_score: float (0.0-1.0)
+       - flags: list of strings (Issues found)
+       - details: str (Detailed findings)
+    """
+    
+    loop = asyncio.get_event_loop()
+    try:
+        # Route to 'forensics'
+        response_text = await loop.run_in_executor(None, runner.route_and_run, prompt)
+        
+        # Parse JSON
+        import json
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0]
+            
+        return json.loads(response_text.strip())
+        
+    except Exception as e:
+        print(f"Swarms Execution Failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Forensic Analysis Failed: {e}")

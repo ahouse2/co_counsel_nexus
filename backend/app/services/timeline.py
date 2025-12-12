@@ -5,7 +5,8 @@ import binascii
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from math import exp
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Any
+import json
 
 from opentelemetry import metrics
 
@@ -70,6 +71,7 @@ class TimelineService:
     def list_events(
         self,
         *,
+        case_id: Optional[str] = None,
         cursor: Optional[str] = None,
         limit: int = 20,
         from_ts: Optional[datetime] = None,
@@ -79,6 +81,7 @@ class TimelineService:
         motion_due_before: Optional[datetime] = None,
         motion_due_after: Optional[datetime] = None,
     ) -> TimelineQueryResult:
+
         from_ts = self._ensure_naive_timestamp(from_ts, "from_ts")
         to_ts = self._ensure_naive_timestamp(to_ts, "to_ts")
         motion_due_before = self._ensure_naive_timestamp(motion_due_before, "motion_due_before")
@@ -102,6 +105,9 @@ class TimelineService:
         events = enriched_events
         if stats.mutated:
             self.store.write_all(events)
+
+        if case_id:
+            events = self._filter_by_case_id(events, case_id)
 
         events = self._filter_by_time(events, from_ts, to_ts)
         if entity:
@@ -138,6 +144,39 @@ class TimelineService:
             )
 
         return TimelineQueryResult(events=limited, next_cursor=next_cursor, limit=bounded_limit, has_more=has_more)
+
+    def create_event(self, text: str, case_id: str, event_type: str = "fact") -> TimelineEvent:
+        """
+        Creates a new timeline event from text.
+        """
+        from uuid import uuid4
+        
+        # Simple parsing or just use text as description/title
+        # In a real system, we might use an LLM here to extract date/title/summary
+        # For now, we'll create a basic event at current time
+        
+        event = TimelineEvent(
+            id=str(uuid4()),
+            case_id=case_id,
+            ts=datetime.now(timezone.utc),
+            title="Manual Event",
+            summary=text,
+            citations=[],
+            risk_score=0.0,
+            risk_band="low",
+            event_type=event_type,
+            related_event_ids=[]
+        )
+        
+        # Enrich the event immediately?
+        # For now just save it
+        self.store.append([event])
+        return event
+
+    @staticmethod
+    def _filter_by_case_id(events: Iterable[TimelineEvent], case_id: str) -> List[TimelineEvent]:
+        return [e for e in events if e.case_id == case_id]
+
 
     @staticmethod
     def _bounded_limit(limit: int) -> int:
@@ -627,6 +666,181 @@ class TimelineService:
         except Exception as e:
             print(f"Error generating timeline from prompt: {e}")
             raise e
+
+    def weave_narrative(self, case_id: str) -> List[TimelineEvent]:
+        """
+        Auto-generates a master timeline from all case documents using the Knowledge Graph.
+        """
+        # 1. Initialize LLM Service & Graph Agent
+        from backend.ingestion.llama_index_factory import create_llm_service
+        from backend.ingestion.settings import build_runtime_config
+        from backend.app.agents.graph_manager import GraphManagerAgent
+        from backend.app.agents.context import AgentContext
+        from backend.app.agents.memory import CaseThreadMemory
+        from backend.app.agents.types import AgentThread
+        from backend.app.storage.agent_memory_store import AgentMemoryStore
+        from backend.app.services.graph import get_graph_service
+        from uuid import uuid4
+        
+        settings = get_settings()
+        runtime_config = build_runtime_config(settings)
+        llm_service = create_llm_service(runtime_config.llm)
+        graph_service = get_graph_service()
+        
+        agent = GraphManagerAgent(
+            graph_service=graph_service,
+            timeline_store=self.store,
+            llm_service=llm_service
+        )
+
+        # 2. Create Context
+        memory_store = AgentMemoryStore(settings.agent_threads_dir)
+        thread_id = f"narrative-gen-{uuid4()}"
+        thread = AgentThread(
+            thread_id=thread_id,
+            case_id=case_id,
+            question="Weave narrative",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        memory = CaseThreadMemory(thread=thread, store=memory_store)
+        context = AgentContext(
+            case_id=case_id,
+            question="Weave narrative",
+            top_k=5,
+            actor={"id": "timeline-api", "roles": ["user"]},
+            memory=memory,
+            telemetry={}
+        )
+
+        # 3. Extract Key Events via Graph
+        # We ask the graph agent to find significant events first
+        prompt_events = "Find all significant events, meetings, and communications in this case, ordered chronologically."
+        try:
+            insight = agent.ensure_insight(context, question=prompt_events, reuse_existing=False)
+            # The insight execution might have records. We can use them.
+            # But for a narrative, we want the LLM to synthesize a story.
+        except Exception as e:
+            print(f"Graph extraction failed: {e}")
+            # Continue with empty context if graph fails
+
+        # 4. Generate Narrative Story
+        # We'll use the LLM to write a cohesive story based on the graph insight and timeline events
+        existing_events = self.list_events(case_id=case_id, limit=100).events
+        events_context = "\n".join([f"- {e.date}: {e.title} ({e.summary})" for e in existing_events])
+        
+        narrative_prompt = f"""
+        You are an expert legal storyteller. Based on the following timeline of events, write a cohesive, compelling narrative of the case.
+        
+        EVENTS:
+        {events_context}
+        
+        INSTRUCTIONS:
+        1. Write a chronological story that weaves these facts together.
+        2. Highlight the key themes (e.g., "Betrayal", "Negligence").
+        3. Identify any missing pieces or gaps in the story.
+        4. Return the result as a JSON object with:
+           - "narrative_text": The full story.
+           - "themes": List of themes.
+           - "gaps": List of identified gaps.
+        """
+        
+        try:
+            response = llm_service.complete(narrative_prompt)
+            text = response.text
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            data = json.loads(text.strip())
+            
+            # Create a special "Narrative Summary" event
+            narrative_event = TimelineEvent(
+                id=f"narrative::{uuid4()}",
+                case_id=case_id,
+                ts=datetime.now(timezone.utc),
+                title="Case Narrative",
+                summary=data.get("narrative_text", "Narrative generation failed."),
+                citations=[],
+                risk_score=0.0,
+                risk_band="low",
+                entity_highlights=[],  # Could add themes here
+                relation_tags=[]
+            )
+            
+            # We return this event, and maybe persist it?
+            # For now, let's just return it as part of the list
+            return [narrative_event]
+            
+        except Exception as e:
+            print(f"Narrative generation failed: {e}")
+            return []
+
+    def detect_contradictions(self, case_id: str) -> List[Dict[str, Any]]:
+        """
+        Analyzes the current timeline for contradictions using the LLM.
+        """
+        events = self.list_events(case_id=case_id).events
+        if not events:
+            return []
+            
+        # 1. Initialize LLM Service
+        from backend.ingestion.llama_index_factory import create_llm_service
+        from backend.ingestion.settings import build_runtime_config
+        
+        settings = get_settings()
+        runtime_config = build_runtime_config(settings)
+        llm_service = create_llm_service(runtime_config.llm)
+        
+        # 2. Format events for analysis
+        # Limit to last 50 events to fit in context for this prototype
+        recent_events = sorted(events, key=lambda e: e.ts)[-50:]
+        events_text = "\n".join([
+            f"ID: {e.id}\nTime: {e.ts}\nTitle: {e.title}\nSummary: {e.summary}\nSources: {e.citations}\n---" 
+            for e in recent_events
+        ])
+        
+        prompt = f"""
+        You are a meticulous legal analyst. Your job is to find CONTRADICTIONS in the case timeline.
+        
+        TIMELINE:
+        {events_text}
+        
+        TASK:
+        Identify any inconsistencies where:
+        1. Two events claim mutually exclusive facts (e.g., Person A was in two places at once).
+        2. A witness statement contradicts physical evidence (e.g., timestamps, logs).
+        3. The sequence of events is logically impossible.
+        
+        OUTPUT FORMAT (JSON):
+        {{
+            "contradictions": [
+                {{
+                    "title": "Short headline",
+                    "description": "Detailed explanation of the conflict.",
+                    "event_ids": ["id1", "id2"],
+                    "confidence": 0.9,
+                    "severity": "high" | "medium" | "low"
+                }}
+            ]
+        }}
+        
+        If no contradictions are found, return {{"contradictions": []}}.
+        """
+        
+        try:
+            response = llm_service.complete(prompt)
+            text = response.text
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+                
+            data = json.loads(text.strip())
+            return data.get("contradictions", [])
+        except Exception as e:
+            print(f"Error detecting contradictions: {e}")
+            return []
 
 
 def get_timeline_service() -> TimelineService:

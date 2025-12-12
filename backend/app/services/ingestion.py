@@ -23,7 +23,7 @@ from opentelemetry.trace import Status, StatusCode
 from ..config import get_settings
 import zipfile
 import shutil
-from ..models.api import IngestionRequest, IngestionSource
+from ..models.api import IngestionRequest, IngestionSource, IngestionResponse
 from ..security.authz import Principal
 from ..storage.document_store import DocumentStore
 from ..storage.job_store import JobStore
@@ -146,7 +146,7 @@ class IngestionService:
         self.graph_service = graph_service or get_graph_service()
         self.timeline_store = timeline_store or TimelineStore(self.settings.timeline_path)
         self.job_store = job_store or JobStore(self.settings.job_store_dir)
-        self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
+        self.document_store = document_store or DocumentStore(self.settings.document_storage_path, self.settings.encryption_key)
         self.forensics_service = forensics_service or ForensicsService()
         self.credential_registry = CredentialRegistry(self.settings.credentials_registry_path)
         self.executor = executor or _DEFAULT_EXECUTOR
@@ -239,6 +239,7 @@ class IngestionService:
             _ingestion_jobs_counter.add(1, attributes={"state": "enqueued"})
         return job_id
 
+
     def get_job(self, job_id: str) -> Dict[str, object]:
         record = self.job_store.read_job(job_id)
         record.setdefault("job_id", job_id)
@@ -285,11 +286,110 @@ class IngestionService:
         temp_zip_path = Path(self.settings.ingestion_temp_dir) / f"{document_id}.zip"
         temp_extract_dir = Path(self.settings.ingestion_temp_dir) / document_id
 
-        # Save the uploaded zip file
-        with open(temp_zip_path, "wb") as buffer:
-            while content := await file.read(1024):
-                buffer.write(content)
+        # Save the uploaded zip file with intelligent timeout handling
+        # No hard size limit, but timeout scales with file size
+        try:
+            import time
+            total_size = 0
+            start_time = time.time()
+            base_timeout = 30  # 30 seconds base timeout
+            
+            with open(temp_zip_path, "wb") as buffer:
+                while content := await file.read(65536):  # 64KB chunks
+                    total_size += len(content)
+                    elapsed = time.time() - start_time
+                    
+                    # Intelligent timeout: 60s base + 30s per 100MB
+                    # Very generous for enterprise-scale uploads
+                    # e.g., 1GB = 60s + 307s = 367s (~6 min)
+                    # e.g., 10GB = 60s + 3072s = 3132s (~52 min)
+                    size_mb = total_size / (1024 * 1024)
+                    dynamic_timeout = 60 + (size_mb / 100) * 30
+                    
+                    if elapsed > dynamic_timeout:
+                        # Upload is taking too long (network issue, not file size)
+                        temp_zip_path.unlink(missing_ok=True)
+                        self.logger.warning(
+                            f"Upload timeout: {elapsed:.1f}s elapsed for {size_mb:.1f}MB "
+                            f"(timeout: {dynamic_timeout:.1f}s)"
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_408_REQUEST_TIMEOUT,
+                            detail=f"Upload timed out after {elapsed:.1f}s. "
+                                   f"Please check your connection and try again."
+                        )
+                    
+                    buffer.write(content)
+            
+            # Log successful upload
+            final_size_mb = total_size / (1024 * 1024)
+            upload_time = time.time() - start_time
+            self.logger.info(
+                f"Successfully uploaded {final_size_mb:.2f}MB in {upload_time:.1f}s "
+                f"({final_size_mb/upload_time:.2f} MB/s)"
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as exc:
+            temp_zip_path.unlink(missing_ok=True)
+            self.logger.error(f"Error saving zip file: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to save uploaded file: {str(exc)}"
+            )
 
+        # Check zip file size and auto-batch if > 1GB
+        zip_size_mb = temp_zip_path.stat().st_size / (1024 * 1024)
+        
+        if zip_size_mb > 1024:  # > 1GB
+            self.logger.info(
+                f"Large zip detected ({zip_size_mb:.1f}MB), auto-batching into 1GB chunks"
+            )
+            
+            # Split into batches
+            batch_zips = await self._split_large_zip(temp_zip_path, max_size_mb=1024)
+            
+            # Process each batch
+            all_sources: List[IngestionSource] = []
+            
+            for batch_zip in batch_zips:
+                batch_extract_dir = Path(self.settings.ingestion_temp_dir) / f"{document_id}_{batch_zip.stem}"
+                batch_extract_dir.mkdir(parents=True, exist_ok=True)
+                
+                try:
+                    with zipfile.ZipFile(batch_zip, "r") as zip_ref:
+                        zip_ref.extractall(batch_extract_dir)
+                except zipfile.BadZipFile as exc:
+                    self.logger.error(f"Invalid batch zip: {batch_zip.name}")
+                    continue
+                finally:
+                    batch_zip.unlink()  # Clean up batch zip
+                
+                # Collect sources from this batch
+                for path in batch_extract_dir.rglob("*"):
+                    if path.is_file():
+                        all_sources.append(IngestionSource(type="file", path=str(path)))
+            
+            # Clean up original zip
+            temp_zip_path.unlink(missing_ok=True)
+            
+            if not all_sources:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No files found in the uploaded directory (after batching)",
+                )
+            
+            request = IngestionRequest(sources=all_sources)
+            job_id = self.ingest(request, principal)
+            
+            return IngestionResponse(
+                job_id=job_id, 
+                status="queued",
+                message=f"Large zip auto-batched: {len(batch_zips)} batches, {len(all_sources)} files"
+            )
+        
+        # Standard processing for files < 1GB
         # Unzip the file
         try:
             with zipfile.ZipFile(temp_zip_path, "r") as zip_ref:
@@ -316,11 +416,198 @@ class IngestionService:
         request = IngestionRequest(sources=sources)
         job_id = self.ingest(request, principal)
 
-        # Clean up the extracted directory after ingestion is queued
-        # The actual processing happens asynchronously, so we can clean up now.
-        shutil.rmtree(temp_extract_dir)
+        # Note: We cannot clean up the extracted directory here because the ingestion job
+        # runs asynchronously and needs access to these files.
+        # The cleanup should ideally be handled by a periodic task or the worker itself
+        # after processing is complete.
+        # shutil.rmtree(temp_extract_dir)
 
         return IngestionResponse(job_id=job_id, status="queued")
+
+    async def ingest_local_path(
+        self, principal: Principal, document_id: str, source_path: str, recursive: bool = True, sync: bool = False
+    ) -> IngestionResponse:
+        """
+        Ingest files from local file system or network share.
+        No upload required - direct access!
+        
+        Args:
+            sync: If True, skips files that have already been ingested (matching path and hash).
+        """
+        path = Path(source_path)
+        
+        if not path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Path not found: {source_path}"
+            )
+        
+        sources: List[IngestionSource] = []
+        
+        if path.is_file():
+            sources.append(IngestionSource(
+                source_id=path.name,
+                type="file", 
+                path=str(path)
+            ))
+        elif path.is_dir():
+            if recursive:
+                for file_path in path.rglob("*"):
+                    if file_path.is_file():
+                        sources.append(IngestionSource(
+                            source_id=file_path.name,
+                            type="file", 
+                            path=str(file_path)
+                        ))
+            else:
+                for file_path in path.glob("*"):
+                    if file_path.is_file():
+                        sources.append(IngestionSource(
+                            source_id=file_path.name,
+                            type="file", 
+                            path=str(file_path)
+                        ))
+        
+        if not sources:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No files found at specified path"
+            )
+            
+        # Sync Logic
+        if sync:
+            from backend.app.database import SessionLocal
+            from backend.app.models.document import Document
+            
+            self.logger.info(f"Sync mode enabled. Checking {len(sources)} files against database...")
+            
+            # We need to calculate hashes for local files to compare
+            # This can be slow for many large files, but it's necessary for true sync
+            # Optimization: Check by path first? 
+            # If we check by path, we might miss updates. 
+            # Let's check by path AND hash if possible, or just path if hash is too expensive.
+            # For now, let's do a quick check by path first to filter candidates, then hash?
+            # Actually, the requirement is usually "don't re-ingest if unchanged".
+            
+            # Let's get all document paths for this case (or all docs if case unknown)
+            # Since we don't have case_id here easily without looking it up, 
+            # we might have to query by path.
+            
+            db = SessionLocal()
+            try:
+                # Get all existing paths
+                existing_docs = db.query(Document.path, Document.hash_sha256).all()
+                existing_map = {doc.path: doc.hash_sha256 for doc in existing_docs if doc.path}
+                
+                filtered_sources = []
+                skipped_count = 0
+                
+                for source in sources:
+                    file_path = str(source.path)
+                    if file_path in existing_map:
+                        # File exists in DB. Check hash.
+                        # Calculate hash of local file
+                        try:
+                            with open(file_path, "rb") as f:
+                                file_hash = sha256(f.read()).hexdigest()
+                            
+                            if existing_map[file_path] == file_hash:
+                                # Match! Skip.
+                                skipped_count += 1
+                                continue
+                        except Exception as e:
+                            self.logger.warning(f"Could not hash file {file_path}: {e}")
+                            # If we can't hash, maybe re-ingest to be safe? Or skip?
+                            # Let's re-ingest.
+                            pass
+                    
+                    filtered_sources.append(source)
+                
+                self.logger.info(f"Sync complete. Skipped {skipped_count} unchanged files. Queuing {len(filtered_sources)} files.")
+                sources = filtered_sources
+                
+            finally:
+                db.close()
+        
+        if not sources:
+             return IngestionResponse(
+                job_id="skipped", 
+                status="completed",
+                message="All files were skipped (sync mode)"
+            )
+
+        total_size = sum(Path(s.path).stat().st_size for s in sources)
+        self.logger.info(
+            f"Direct FS ingestion: {len(sources)} files, "
+            f"{total_size / (1024*1024):.2f}MB from {source_path}"
+        )
+        
+        request = IngestionRequest(sources=sources)
+        job_id = self.ingest(request, principal)
+        
+        return IngestionResponse(job_id=job_id, status="queued")
+
+    async def _split_large_zip(self, zip_path: Path, max_size_mb: int = 1024) -> List[Path]:
+        """Split large zip into smaller batches."""
+        import zipfile
+        
+        max_size = max_size_mb * 1024 * 1024
+        batch_zips = []
+        
+        with zipfile.ZipFile(zip_path, 'r') as source_zip:
+            file_list = source_zip.namelist()
+            current_batch = []
+            current_size = 0
+            batch_num = 0
+            
+            for filename in file_list:
+                file_info = source_zip.getinfo(filename)
+                file_size = file_info.file_size
+                
+                if file_size > max_size:
+                    # Single large file batch
+                    if current_batch:
+                        batch_path = self._create_batch_zip(source_zip, current_batch, zip_path, batch_num)
+                        batch_zips.append(batch_path)
+                        batch_num += 1
+                        current_batch = []
+                        current_size = 0
+                    
+                    batch_path = self._create_batch_zip(source_zip, [filename], zip_path, batch_num)
+                    batch_zips.append(batch_path)
+                    batch_num += 1
+                    continue
+                
+                if current_size + file_size > max_size and current_batch:
+                    batch_path = self._create_batch_zip(source_zip, current_batch, zip_path, batch_num)
+                    batch_zips.append(batch_path)
+                    batch_num += 1
+                    current_batch = []
+                    current_size = 0
+                
+                current_batch.append(filename)
+                current_size += file_size
+            
+            if current_batch:
+                batch_path = self._create_batch_zip(source_zip, current_batch, zip_path, batch_num)
+                batch_zips.append(batch_path)
+        
+        self.logger.info(f"Split {zip_path.name} into {len(batch_zips)} batches (max {max_size_mb}MB each)")
+        return batch_zips
+
+    def _create_batch_zip(self, source_zip: zipfile.ZipFile, filenames: List[str], 
+                          original_path: Path, batch_num: int) -> Path:
+        """Create batch zip from selected files."""
+        import zipfile
+        
+        batch_path = original_path.parent / f"{original_path.stem}_batch_{batch_num:03d}.zip"
+        
+        with zipfile.ZipFile(batch_path, 'w', zipfile.ZIP_DEFLATED) as batch_zip:
+            for filename in filenames:
+                data = source_zip.read(filename)
+                batch_zip.writestr(filename, data)
+        
+        return batch_path
 
     # region async execution
 
@@ -623,6 +910,9 @@ class IngestionService:
             },
             actor=self._job_actor(job_record),
         )
+        
+        # Cleanup temporary directories created during ingestion
+        self._cleanup_temp_directories(job_id, job_record)
 
     def _ensure_job_defaults(
         self, job_record: Dict[str, object], sources: List[IngestionSource]
@@ -728,6 +1018,24 @@ class IngestionService:
                 "Failed to append audit event",
                 extra={"category": event.category, "action": event.action},
             )
+
+    def _cleanup_temp_directories(self, job_id: str, job_record: Dict[str, object]) -> None:
+        """Clean up temporary directories created during folder upload ingestion."""
+        temp_dir = Path(self.settings.ingestion_temp_dir) / job_id
+        
+        if temp_dir.exists():
+            try:
+                shutil.rmtree(temp_dir)
+                self.logger.info(
+                    "Cleaned up temporary ingestion directory",
+                    extra={"job_id": job_id, "path": str(temp_dir)}
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                # Don't fail the job if cleanup fails, just log it
+                self.logger.warning(
+                    "Failed to cleanup temporary directory",
+                    extra={"job_id": job_id, "path": str(temp_dir), "error": str(exc)}
+                )
 
     # endregion
 

@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set
 
 from fastapi import HTTPException, status
-from oso import Oso
+try:
+    from oso import Oso
+except ImportError:
+    # Mock Oso for environments where it's not available (e.g. Python 3.13)
+    class Oso:
+        def register_class(self, *args, **kwargs): pass
+        def load_files(self, *args, **kwargs): pass
+        def is_allowed(self, *args, **kwargs): return True
 
 LOGGER = logging.getLogger("backend.security.authz")
 

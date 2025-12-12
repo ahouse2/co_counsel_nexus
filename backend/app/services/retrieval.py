@@ -122,6 +122,7 @@ _CONTRADICTION_TERMS: Tuple[Tuple[str, str], ...] = (
 class RetrievalMode(str, Enum):
     PRECISION = "precision"
     RECALL = "recall"
+    SEMANTIC = "semantic"
 
 
 class CourtListenerCaseLawAdapter:
@@ -486,7 +487,7 @@ class RetrievalService:
             self.embedding_model_id = self.settings.default_embedding_model
         self.vector_service = vector_service or get_vector_service()
         self.graph_service = graph_service or get_graph_service()
-        self.document_store = document_store or DocumentStore(self.settings.document_store_dir)
+        self.document_store = document_store or DocumentStore(self.settings.document_storage_path, self.settings.encryption_key)
         self.forensics_service = forensics_service or get_forensics_service()
         self.privilege_classifier = privilege_classifier or get_privilege_classifier_service()
         self.privilege_policy_engine = privilege_policy_engine or get_privilege_policy_engine()

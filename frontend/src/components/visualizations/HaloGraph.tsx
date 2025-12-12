@@ -38,12 +38,33 @@ export function HaloGraph() {
     const containerRef = useRef<HTMLDivElement>(null);
     const visitedNodes = useRef<Set<string>>(new Set());
 
-    // Effect to handle submodule changes
+    // Effect to handle submodule changes & camera zoom
     useEffect(() => {
         if (activeSubmodule === 'query') {
             setAutonomousMode(true);
         } else {
             setAutonomousMode(false);
+        }
+
+        // Camera Zoom Effect
+        if (fgRef.current) {
+            if (activeSubmodule) {
+                // Zoom in/focus when a module is active
+                // We can't easily "zoom out then in" without complex timeout/state, 
+                // but we can ensure it's zoomed in to a specific distance to feel "inside"
+                fgRef.current.cameraPosition(
+                    { x: 0, y: 0, z: 150 }, // Closer zoom
+                    { x: 0, y: 0, z: 0 },   // Look at center
+                    2000                    // Transition time
+                );
+            } else {
+                // Zoom out when in Graph Explorer mode (default)
+                fgRef.current.cameraPosition(
+                    { x: 0, y: 0, z: 400 }, // Further out
+                    { x: 0, y: 0, z: 0 },
+                    2000
+                );
+            }
         }
     }, [activeSubmodule]);
 

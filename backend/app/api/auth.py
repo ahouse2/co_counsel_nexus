@@ -334,7 +334,7 @@ async def read_users_me(current_user: Annotated[User, Depends(RoleChecker(["user
     return current_user
 
 @router.post("/users/", response_model=User)
-async def create_user(user_data: UserCreate, db: Session = Depends(get_db), current_user: Annotated[User, Depends(RoleChecker(["admin"]))]):
+async def create_user(user_data: UserCreate, current_user: Annotated[User, Depends(RoleChecker(["admin"]))], db: Session = Depends(get_db)):
     db_user = db.query(DBUser).filter(DBUser.email == user_data.email).first()
     if db_user:
         logger.warning(f"Admin user {current_user.email} attempted to create user with existing email: {user_data.email}")

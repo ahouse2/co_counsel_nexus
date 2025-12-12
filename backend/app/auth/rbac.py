@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, status
 from backend.app.auth.jwt import get_current_user
-from backend.app.models.user import User as UserModel
+from backend.app.models.sql import User as UserModel
 
 def check_permissions(required_permissions: list[str]):
     def _check_permissions(current_user: UserModel = Depends(get_current_user)):

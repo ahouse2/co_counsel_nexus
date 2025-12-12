@@ -81,7 +81,10 @@ class BaseSourceConnector:
         self.logger = logger
 
     def materialize(self, job_id: str, index: int, source: IngestionSource) -> MaterializedSource:
-        raise NotImplementedError
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement materialize(). "
+            "This is an abstract base class."
+        )
 
     def preflight(self, source: IngestionSource) -> None:
         """Perform lightweight validation prior to enqueueing."""
@@ -921,186 +924,8 @@ class OneDriveSourceConnector(BaseSourceConnector):
         assert last_response is not None
         detail = last_response.text or f"HTTP {last_response.status_code}"
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"OneDrive request to {url} failed: {detail}",
+        detail=f"OneDrive request to {url} failed: {detail}",
         )
-
-
-class WebSourceConnector:
-
-
-    def preflight(self, source: IngestionSource) -> None:
-
-
-        self._validate_url(source)
-
-
-        self._ensure_httpx()
-
-
-
-
-
-    def materialize(self, job_id: str, index: int, source: IngestionSource) -> MaterializedSource:
-
-
-        httpx = self._ensure_httpx()
-
-
-        url = self._validate_url(source)
-
-
-
-
-
-        workspace = self._workspace(job_id, index, "web")
-
-
-        filename = self._build_filename(url)
-
-
-        target = workspace / filename
-
-
-
-
-
-        with httpx.Client(timeout=30.0) as client:
-
-
-            try:
-
-
-                response = client.get(url)
-
-
-            except httpx.RequestError as exc:  # type: ignore[attr-defined]
-
-
-                raise HTTPException(
-
-
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-
-
-                    detail=f"Failed to fetch {url}: {exc}",
-
-
-                ) from exc
-
-
-            if response.status_code >= 400:
-
-
-                raise HTTPException(
-
-
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-
-
-                    detail=f"Failed to fetch {url}: HTTP {response.status_code}",
-
-
-                )
-
-
-            target.write_bytes(response.content)
-
-
-
-
-
-        self.logger.info("Fetched web source", extra={"url": url, "path": str(target)})
-
-
-        origin = f"web:{_normalise_url_path(url)}"
-
-
-        return MaterializedSource(root=workspace, source=source, origin=origin)
-
-
-
-
-
-    def _ensure_httpx(self) -> ModuleType:
-
-
-        try:
-
-
-            import httpx
-
-
-        except ImportError as exc:
-
-
-            raise HTTPException(
-
-
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-
-
-                detail="Web ingestion requires httpx optional dependency",
-
-
-            ) from exc
-
-
-        return httpx
-
-
-
-
-
-    def _validate_url(self, source: IngestionSource) -> str:
-
-
-        if not source.path:
-
-
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Web source requires a URL in path")
-
-
-        url = source.path.strip()
-
-
-        if not url.lower().startswith(("http://", "https://")):
-
-
-            raise HTTPException(
-
-
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-
-
-                detail="Web source path must be a HTTP(S) URL",
-
-
-            )
-
-
-        return url
-
-
-
-
-
-    def _build_filename(self, url: str) -> str:
-
-
-        parsed = urlparse(url)
-
-
-        name = Path(parsed.path).name or "index.html"
-
-
-        if "." not in name:
-
-
-            name = f"{name}.html"
-
-
-        return name
 
 
 def build_connector(source_type: str, settings, registry, logger):

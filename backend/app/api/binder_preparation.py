@@ -6,7 +6,7 @@ import os
 import shutil
 from datetime import datetime
 
-from toolsnteams_previous.binder_preparer import BinderPreparer
+from ..services.document_generation import get_document_generation_service
 
 router = APIRouter()
 
@@ -27,7 +27,7 @@ async def prepare_binder_endpoint(request: PrepareBinderRequest):
     Prepares a trial binder document from a list of evidence items.
     Returns the drafted document as a downloadable Word file.
     """
-    binder_preparer = BinderPreparer()
+    service = get_document_generation_service()
     
     # Create a temporary directory to save the document
     temp_dir = "temp_binders"
@@ -41,7 +41,7 @@ async def prepare_binder_endpoint(request: PrepareBinderRequest):
         # Convert Pydantic models to dictionaries for the tool
         evidence_list_dicts = [item.dict() for item in request.evidence_list]
 
-        binder_preparer.prepare_binder(
+        service.prepare_binder(
             filepath=file_path,
             evidence_list=evidence_list_dicts,
             case_name=request.case_name

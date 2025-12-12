@@ -10,7 +10,7 @@ class EncryptionService:
         Initializes the EncryptionService with a Fernet key.
         The key must be a URL-safe base64-encoded 32-byte key.
         """
-        self.fernet = Fernet(key.encode('utf-8'))
+        self.fernet = Fernet(key.encode())
 
     def encrypt(self, data: Union[str, bytes]) -> bytes:
         """

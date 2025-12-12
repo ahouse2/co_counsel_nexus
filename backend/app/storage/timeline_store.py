@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 
 @dataclass(order=True)
@@ -13,6 +13,7 @@ class TimelineEvent:
     id: str = field(compare=False)
     title: str = field(compare=False)
     summary: str = field(compare=False)
+    case_id: Optional[str] = field(default=None, compare=False)
     citations: List[str] = field(default_factory=list, compare=False)
     entity_highlights: List[Dict[str, str]] = field(default_factory=list, compare=False)
     relation_tags: List[Dict[str, str]] = field(default_factory=list, compare=False)
@@ -24,10 +25,13 @@ class TimelineEvent:
     )
     recommended_actions: List[str] = field(default_factory=list, compare=False)
     motion_deadline: datetime | None = field(default=None, compare=False)
+    event_type: str = field(default="fact", compare=False)
+    related_event_ids: List[str] = field(default_factory=list, compare=False)
 
     def to_record(self) -> Dict[str, object]:
         return {
             "id": self.id,
+            "case_id": self.case_id,
             "ts": self.ts.isoformat(),
             "title": self.title,
             "summary": self.summary,
@@ -42,12 +46,15 @@ class TimelineEvent:
             "motion_deadline": self.motion_deadline.isoformat()
             if self.motion_deadline
             else None,
+            "event_type": self.event_type,
+            "related_event_ids": list(self.related_event_ids),
         }
 
     @classmethod
     def from_record(cls, record: Dict[str, object]) -> "TimelineEvent":
         return cls(
             id=str(record["id"]),
+            case_id=str(record.get("case_id")) if record.get("case_id") else None,
             ts=datetime.fromisoformat(str(record["ts"])),
             title=str(record["title"]),
             summary=str(record["summary"]),
@@ -64,6 +71,8 @@ class TimelineEvent:
             motion_deadline=datetime.fromisoformat(str(record["motion_deadline"]))
             if record.get("motion_deadline")
             else None,
+            event_type=str(record.get("event_type", "fact")),
+            related_event_ids=list(record.get("related_event_ids", [])),
         )
 
 
@@ -101,4 +110,3 @@ class TimelineStore:
             except (KeyError, ValueError):
                 continue
         return sorted(records)
-

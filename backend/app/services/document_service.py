@@ -1,5 +1,6 @@
 from pathlib import Path
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Union, Dict, BinaryIO
+import asyncio
 import uuid
 import dataclasses
 
@@ -40,6 +41,18 @@ class DocumentService:
         api_keys: Optional[Dict[str, str]] = None,
         run_pipeline: bool = True,
     ) -> dict:
+        import hashlib
+        
+        # Calculate SHA-256 hash
+        sha256_hash = hashlib.sha256(file_content).hexdigest()
+        
+        # Extract basic forensic metadata
+        forensic_metadata = {
+            "size_bytes": len(file_content),
+            "sha256": sha256_hash,
+            "magic_bytes": file_content[:16].hex(), # First 16 bytes for file type verification
+        }
+
         doc_id = str(uuid.uuid4())
         version = self.document_store.save_document(
             doc_type,
@@ -51,7 +64,9 @@ class DocumentService:
             keywords,
             tags,
             custom_metadata,
-            relative_path 
+            relative_path,
+            hash_sha256=sha256_hash,
+            forensic_metadata=forensic_metadata
         )
 
         # Stage the file for ingestion in the materialized_root
@@ -75,12 +90,14 @@ class DocumentService:
                 "tags": tags,
                 "custom_metadata": custom_metadata,
                 "relative_path": relative_path,
+                "hash_sha256": sha256_hash,
+                "forensic_metadata": forensic_metadata,
             }
         )
 
         pipeline_result = None
         if run_pipeline:
-            pipeline_result = self.process_ingestion(doc_id, ingestion_source, origin, api_keys)
+            pipeline_result = await self.process_ingestion(doc_id, ingestion_source, origin, api_keys)
 
         return {
             "doc_id": doc_id,
@@ -95,19 +112,25 @@ class DocumentService:
             "api_keys": api_keys,
         }
 
-    def process_ingestion(
+    async def process_ingestion(
         self,
         doc_id: str,
         source: IngestionSource,
         origin: str,
         api_keys: Optional[Dict[str, str]] = None
     ):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"Starting ingestion for doc_id={doc_id}, origin={origin}")
+        
         # Update runtime config with API keys if provided
         current_config = self.runtime_config
         if api_keys:
             key_to_use = api_keys.get("gemini_api_key") or api_keys.get("courtlistener_api_key")
             
             if key_to_use:
+                logger.debug(f"Using API key for doc_id={doc_id}")
                 new_llm_config = dataclasses.replace(
                     current_config.llm, 
                     api_key=key_to_use
@@ -132,6 +155,7 @@ class DocumentService:
         
         try:
             # Update status to processing
+            logger.info(f"Updating status to 'processing' for doc_id={doc_id}")
             self.document_store.update_document_status(
                 source.metadata.get("doc_type"),
                 source.metadata.get("case_id"),
@@ -139,7 +163,12 @@ class DocumentService:
                 "processing"
             )
 
-            pipeline_result = run_ingestion_pipeline(
+            logger.info(f"Running ingestion pipeline for doc_id={doc_id}, file={source.uri}")
+            
+            # Run the synchronous pipeline in a separate thread to avoid blocking the event loop
+            import asyncio
+            pipeline_result = await asyncio.to_thread(
+                run_ingestion_pipeline,
                 job_id=doc_id, 
                 materialized_root=job_dir, 
                 source=source,
@@ -148,7 +177,31 @@ class DocumentService:
                 runtime_config=current_config,
             )
             
+            # Check for suspicious documents and trigger deep forensics
+            if pipeline_result and pipeline_result.documents:
+                for doc_result in pipeline_result.documents:
+                    if doc_result.screening_result and doc_result.screening_result.is_suspicious:
+                        logger.warning(f"Document {doc_id} flagged as suspicious. Triggering deep forensics.")
+                        # We need to trigger this asynchronously.
+                        # Since `process_ingestion` is already async/background, we can just call it?
+                        # Or better, spawn another task to not block this one if we want "fire and forget".
+                        # But `process_ingestion` is the background task.
+                        # Let's instantiate ForensicsService and run it.
+                        
+                        from backend.app.services.forensics_service import ForensicsService
+                        forensics_service = ForensicsService(self.settings, self.document_store)
+                        
+                        # We can await it here, effectively making it part of the ingestion flow for flagged docs.
+                        # Or we can use `asyncio.create_task` to let it run in parallel/background.
+                        # User said "separate, asynch 'branch'".
+                        import asyncio
+                        asyncio.create_task(forensics_service.run_deep_forensics(
+                            doc_id=doc_id, 
+                            case_id=source.metadata.get("case_id")
+                        ))
+
             # Update status to completed
+            logger.info(f"Ingestion completed successfully for doc_id={doc_id}")
             self.document_store.update_document_status(
                 source.metadata.get("doc_type"),
                 source.metadata.get("case_id"),
@@ -156,9 +209,33 @@ class DocumentService:
                 "completed"
             )
             
+            # Trigger Intelligence Service
+            try:
+                from backend.app.services.intelligence_service import IntelligenceService
+                intelligence_service = IntelligenceService()
+                
+                # Extract text from pipeline result
+                doc_text = ""
+                if pipeline_result and pipeline_result.documents:
+                    doc_text = pipeline_result.documents[0].loaded.text
+                
+                if doc_text:
+                    # Run in background to not block response if this was awaited directly (though process_ingestion is usually background)
+                    # Since process_ingestion is already a background task, we can await it or spawn another task.
+                    # Spawning another task is safer to isolate failures and speed up this function's return if it was awaited.
+                    asyncio.create_task(intelligence_service.on_document_ingested(
+                        case_id=source.metadata.get("case_id"),
+                        doc_id=doc_id,
+                        doc_text=doc_text,
+                        metadata=source.metadata
+                    ))
+            except Exception as e:
+                logger.error(f"Failed to trigger intelligence service for {doc_id}: {e}", exc_info=True)
+            
             return pipeline_result
         except Exception as e:
             # Update status to failed
+            logger.error(f"Ingestion failed for doc_id={doc_id}: {str(e)}", exc_info=True)
             self.document_store.update_document_status(
                 source.metadata.get("doc_type"),
                 source.metadata.get("case_id"),
@@ -188,36 +265,124 @@ class DocumentService:
     async def upload_directory(
         self,
         case_id: str,
-        zip_content: bytes,
+        zip_content: Union[bytes, BinaryIO],
         api_keys: Optional[Dict[str, str]] = None,
     ) -> List[dict]:
         import zipfile
         import io
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"Starting directory upload for case_id={case_id}")
         
         results = []
         try:
-            with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
-                for filename in z.namelist():
+            if isinstance(zip_content, bytes):
+                f = io.BytesIO(zip_content)
+            else:
+                f = zip_content
+
+            with zipfile.ZipFile(f) as z:
+                file_list = z.namelist()
+                logger.info(f"Zip contains {len(file_list)} entries")
+                
+                for idx, filename in enumerate(file_list):
+                    # Yield control to event loop to prevent blocking
+                    await asyncio.sleep(0)
+                    
+                    # Skip directories and system files
                     if filename.endswith('/') or filename.startswith('__MACOSX') or filename.startswith('.'):
+                        logger.debug(f"Skipping {filename} (directory or system file)")
                         continue
                     
-                    file_content = z.read(filename)
-                    # Use the filename as the relative path if it contains directories
-                    relative_path = str(Path(filename).parent) if '/' in filename else None
-                    base_filename = Path(filename).name
+                    try:
+                        file_content = z.read(filename)
+                        # Use the filename as the relative path if it contains directories
+                        relative_path = str(Path(filename).parent) if '/' in filename else None
+                        base_filename = Path(filename).name
+                        
+                        logger.info(f"Processing file {idx+1}/{len(file_list)}: {filename} ({len(file_content)} bytes)")
+                        
+                        result = await self.upload_document(
+                            case_id=case_id,
+                            doc_type="my_documents",
+                            file_content=file_content,
+                            file_name=base_filename,
+                            relative_path=relative_path,
+                            origin="folder_upload",
+                            api_keys=api_keys,
+                            run_pipeline=False # Queue for background processing
+                        )
+                        results.append(result)
+                        logger.debug(f"Successfully queued {base_filename} for ingestion (doc_id={result['doc_id']})")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to process file {filename}: {str(e)}", exc_info=True)
+                        # Continue processing other files even if one fails
+                        continue
+                        
+        except zipfile.BadZipFile as e:
+            logger.error(f"Invalid zip file received for case_id={case_id}: {str(e)}")
+            raise ValueError("Invalid zip file")
+        except Exception as e:
+            logger.error(f"Unexpected error during directory upload: {str(e)}", exc_info=True)
+            raise
+            
+        logger.info(f"Directory upload completed: {len(results)} files queued for ingestion")
+        return results
+    async def ingest_local_directory(
+        self,
+        case_id: str,
+        directory_path: str,
+        api_keys: Optional[Dict[str, str]] = None,
+    ) -> List[dict]:
+        import os
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        # Ensure path is within /data for security (basic check)
+        base_path = Path("/data")
+        target_path = base_path / directory_path
+        
+        if not str(target_path).startswith(str(base_path)):
+             raise ValueError("Access denied: Path must be within /data")
+             
+        if not target_path.exists() or not target_path.is_dir():
+            raise ValueError(f"Directory not found: {directory_path}")
+
+        logger.info(f"Starting local directory ingestion for case_id={case_id}, path={target_path}")
+        
+        results = []
+        for root, dirs, files in os.walk(target_path):
+            for filename in files:
+                # Skip system files
+                if filename.startswith('.'):
+                    continue
+                    
+                file_path = Path(root) / filename
+                relative_path = file_path.relative_to(target_path).parent
+                
+                try:
+                    file_content = file_path.read_bytes()
+                    
+                    logger.info(f"Processing local file: {filename} ({len(file_content)} bytes)")
                     
                     result = await self.upload_document(
                         case_id=case_id,
                         doc_type="my_documents",
                         file_content=file_content,
-                        file_name=base_filename,
-                        relative_path=relative_path,
-                        origin="folder_upload",
+                        file_name=filename,
+                        relative_path=str(relative_path) if str(relative_path) != "." else None,
+                        origin="local_ingestion",
                         api_keys=api_keys,
                         run_pipeline=False # Queue for background processing
                     )
                     results.append(result)
-        except zipfile.BadZipFile:
-            raise ValueError("Invalid zip file")
-            
+                    logger.debug(f"Successfully queued {filename} for ingestion (doc_id={result['doc_id']})")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process file {filename}: {str(e)}", exc_info=True)
+                    continue
+        
+        logger.info(f"Local directory ingestion completed: {len(results)} files queued")
         return results

@@ -57,7 +57,7 @@ export function LegalTheoryModule() {
     const handleExtractFacts = async () => {
         setLoadingFacts(true);
         try {
-            const response = await endpoints.context.query("Extract the key fact patterns from the available evidence, focusing on timeline, causality, and inconsistencies.");
+            const response = await endpoints.context.query("Extract the key fact patterns from the available evidence, focusing on timeline, causality, and inconsistencies.", "default_case");
             const answer = response.data.response || response.data.answer || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
             setFacts(answer);
         } catch (error) {
@@ -71,7 +71,7 @@ export function LegalTheoryModule() {
     const handleGenerateStrategy = async () => {
         setLoadingStrategy(true);
         try {
-            const response = await endpoints.context.query("Based on the known facts, outline 3 potential legal strategies for the defense, citing relevant legal principles where possible.");
+            const response = await endpoints.context.query("Based on the known facts, outline 3 potential legal strategies for the defense, citing relevant legal principles where possible.", "default_case");
             const answer = response.data.response || response.data.answer || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
             setStrategies(answer);
         } catch (error) {
@@ -85,7 +85,7 @@ export function LegalTheoryModule() {
     const handleAnalyzeElements = async () => {
         setLoadingElements(true);
         try {
-            const response = await endpoints.context.query("Break down the case into key legal elements (e.g., Duty, Breach, Causation, Damages) and map the available evidence to each element. Identify any missing elements.");
+            const response = await endpoints.context.query("Break down the case into key legal elements (e.g., Duty, Breach, Causation, Damages) and map the available evidence to each element. Identify any missing elements.", "default_case");
             const answer = response.data.response || response.data.answer || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
             setElements(answer);
         } catch (error) {
@@ -103,7 +103,7 @@ export function LegalTheoryModule() {
         setAutonomousMode(false); // Pause auto mode
         setLoadingCustom(true);
         try {
-            const response = await endpoints.context.query(customQuery);
+            const response = await endpoints.context.query(customQuery, "default_case");
             const answer = response.data.response || response.data.answer || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
             setCustomResponse(answer);
         } catch (error) {

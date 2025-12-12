@@ -58,8 +58,61 @@ GitHub Repository Creation and Code Push
 - Pushed all local tags to 'github_origin'.
 - The codebase is now hosted on GitHub at https://github.com/ahouse2/co-counsel_final.
 
+/newline
+@2025/12/03 09:38:57 AM
+Enhanced Folder Uploads & UI Integration
+- Implemented `POST /api/documents/upload_chunk` for robust large folder uploads (10 files/chunk).
+- Created `useUploadManager` hook with auto-retry (exponential backoff), pause/resume/cancel, and progress tracking.
+- Integrated upload manager into `DocumentModule.tsx` with new UI controls (Play/Pause/Cancel buttons).
+- Fixed "Array buffer allocation failed" error by removing client-side JSZip compression.
+- Brainstormed next-gen features (Narrative Weaver, Devil's Advocate) in `feature_brainstorm.md`.
+- Cleared `HANDOFFS.md`.
+
+/newline
+@2025/12/04 09:10:44 PM
+Docker Container Startup Fixes
+- Fixed Docker volume mount error in `docker-compose.yml` by commenting out `./backend:/src/backend` mount (line 58) that was causing "mkdir /run/desktop/mnt/host/i: file exists" error on Windows.
+- Resolved `ModuleNotFoundError` in `backend/app/services/jury_sentiment.py` by correcting import from `..services.llm` to `..services.llm_service`.
+- Fixed function name mismatch in `jury_sentiment.py` and `backend/app/agents/jury_analyst.py` by changing `create_llm_service()` calls to `get_llm_service()`.
+- Rebuilt and verified API container successfully starts with health endpoint responding at `http://localhost:8001/health`.
+- Verified frontend container serving correctly at `http://localhost:8088`.
+- Both `api` and `frontend` containers now running successfully alongside Neo4j, Qdrant, Postgres, STT, and TTS services.
+- Stack is fully operational and ready for Phase 2 feature testing.
 
 
 
 
 
+/newline
+@2025/12/08 01:50:25 AM
+Configured Pro Plan LLM
+- Updated `backend/app/config.py` to allow extra environment variables (set `extra="ignore"`), resolving Pydantic validation errors during startup.
+- Refactored `backend/app/services/llm_service.py` to use `backend.ingestion.llama_index_factory.create_llm_service` instead of the broken `ProviderRegistry` metadata-only implementation.
+- Installed missing `google-generativeai` package via pip.
+- Verified LLM connectivity and text generation using a manual test script (`backend/test_llm_manual.py`), confirming successful response from Gemini API.
+- Enabled real LLM capabilities for dependent services like `JurySentimentService`.
+- Cleared `HANDOFFS.md` (was already empty).
+
+/newline
+@2025/12/08 02:45:00 AM
+Fixed Ingestion Pipeline & Enabled Pro Mode
+- Resolved 502 Bad Gateway error by rebuilding and restarting the API container.
+- Fixed `NameError: name 'runtime_config' is not defined` in `backend/ingestion/pipeline.py` by passing `runtime_config` to `_process_loaded_document`.
+- Configured "Pro" ingestion mode by adding `INGESTION_COST_MODE: ${INGESTION_COST_MODE:-community}` to `docker-compose.yml`, enabling Gemini-powered categorization.
+- Verified successful local file ingestion from `test_ingest` directory with `Cost mode: pro` logged.
+- Created `scripts/wait_and_trigger.py` to automate API health checks and ingestion triggering.
+
+/newline
+@2025/12/08 03:00:00 AM
+Fixed Silent Failure in Document Listing
+- Investigated user report of "nothing happening" after ingestion.
+- Discovered bug in `backend/app/storage/document_store.py` where `_get_storage_path(...).parent` was incorrectly used, causing the system to look for documents in the parent directory instead of the case directory.
+- Patched 6 occurrences of this bug in `DocumentStore`.
+- Verified fix using a custom debug script (`debug_store.py`) inside the container, confirming that 4000+ documents are now correctly listed.
+- Restarted API container to apply fixes.
+
+/newline
+@2025/12/08 03:05:00 AM
+UI Improvements
+- Increased module viewport size in `DashboardHub.tsx` to `w-[99.5vw]` and `h-[99vh]` to push the Halo to the absolute edge.
+- Implemented dynamic camera zoom in `HaloGraph.tsx`: zooms in (z=150) when a module is active and zooms out (z=400) when returning to the graph view.

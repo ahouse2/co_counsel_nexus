@@ -1,4 +1,4 @@
-from agents.toolkit.sandbox import SandboxExecutionResult
+from ..services.dev_agent import SandboxExecutionResult
 from ..models.api import (
     DevAgentProposalModel,
     DevAgentTaskModel,

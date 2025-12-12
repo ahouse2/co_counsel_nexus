@@ -11,8 +11,10 @@ extract-msg==0.44.0
 fastapi==0.115.0
 python-multipart==0.0.9
 faster-whisper==1.2.1
+google-generativeai
 httpx==0.28.1
 jsonschema==4.23.0
+langchain-google-genai
 
 llama-index-core==0.10.50
 llama-index-vector-stores-qdrant
@@ -22,6 +24,8 @@ llama-index-readers-file
 mail-parser==4.1.4
 msal==1.29.0
 PyJWT
+python-jose[cryptography]
+passlib[bcrypt]
 neo4j==5.23.1
 numpy
 opencv-python==4.10.0.84
@@ -42,6 +46,9 @@ pytesseract==0.3.10
 PyYAML==6.0.2
 qdrant-client>=1.11.0
 scikit-learn==1.5.2
+scipy>=1.11.0
+PyMuPDF>=1.23.0
+APScheduler>=3.10.0
 soundfile==0.12.1
 
 transformers>=4.52.1
@@ -49,8 +56,13 @@ uvicorn[standard]
 psycopg2-binary==2.9.9
 pybreaker>=1.0.0
 locust
-web3==6.20.0 # Added for Ethereum blockchain interaction
+eth-typing>=4.2.0
+web3>=6.20.0 # Added for Ethereum blockchain interaction
 
 beautifulsoup4==4.12.3 # Added for web scraping
 lxml==5.2.2 # Added for parsing HTML and XML
 agent-framework # Added for Microsoft Agent Framework integration
+ollama
+slowapi>=0.1.9  # Rate limiting
+structlog>=24.1.0  # Structured logging
+psutil>=5.9.0  # System monitoring for health checks

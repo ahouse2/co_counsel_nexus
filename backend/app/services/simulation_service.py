@@ -14,22 +14,15 @@ class SimulationService:
     async def run_mock_court_simulation(self, scenario: Dict[str, Any]) -> Dict[str, Any]:
         """
         Simulates a mock court scenario based on the provided scenario definition.
-
-        :param scenario: A dictionary defining the simulation scenario (e.g., roles, facts, objectives).
-        :return: A dictionary containing the simulation results and evaluation.
         """
-        # Example scenario structure:
-        # {
-        #   "case_brief": "...",
-        #   "roles": {"judge": "...", "opposing_counsel": "...", "witness": "..."},
-        #   "agent_role": "prosecutor",
-        #   "objectives": ["win the case", "prove X"],
-        #   "initial_statement": "..."
-        # }
-
+        from backend.app.agents.opposing_counsel import OpposingCounselAgent
+        from backend.app.agents.context import AgentContext
+        
+        opposing_counsel = OpposingCounselAgent(self.llm_service)
+        
         simulation_log = []
         current_state = {"turn": 0, "agent_statement": scenario.get("initial_statement", "")}
-
+        
         # Simulate interaction turns
         for i in range(scenario.get("max_turns", 3)):
             current_state["turn"] = i + 1
@@ -39,13 +32,47 @@ class SimulationService:
             agent_response = await self.llm_service.generate_text(agent_prompt)
             simulation_log.append({"role": scenario['agent_role'], "statement": agent_response})
             current_state["agent_statement"] = agent_response
-
-            # Opposing counsel's turn
-            opposing_counsel_prompt = f"You are the opposing counsel. The case brief is: {scenario['case_brief']}. The {scenario['agent_role']} just said: '{agent_response}'. How do you respond?"
+            
+            # Opposing counsel's turn using the specialized agent
+            # We create a dummy context for now
+            context = AgentContext(
+                case_id="simulation",
+                question=agent_response,
+                actor={"id": "simulation", "roles": ["user"]},
+                memory=None, # type: ignore
+                telemetry={}
+            )
+            
+            # Use generate_counter_arguments to formulate a response strategy
+            counter_args = opposing_counsel.generate_counter_arguments(
+                argument=agent_response,
+                context=context,
+                evidence_context=scenario.get("case_brief", "")
+            )
+            
+            # Synthesize the counter-arguments into a spoken response
+            strategy = "\n".join([f"- {ca.counter_point} (Risk: {ca.risk_score})" for ca in counter_args])
+            opposing_counsel_prompt = f"""
+            You are the opposing counsel. 
+            Based on the following counter-argument strategy, formulate your response to the court.
+            
+            STRATEGY:
+            {strategy}
+            
+            PREVIOUS STATEMENT:
+            "{agent_response}"
+            
+            Respond as if you are speaking in court.
+            """
             opposing_counsel_response = await self.llm_service.generate_text(opposing_counsel_prompt)
-            simulation_log.append({"role": "opposing_counsel", "statement": opposing_counsel_response})
+            
+            simulation_log.append({
+                "role": "opposing_counsel", 
+                "statement": opposing_counsel_response,
+                "internal_strategy": [ca.__dict__ for ca in counter_args]
+            })
             current_state["opposing_counsel_statement"] = opposing_counsel_response
-
+            
             # Judge's intervention (optional)
             if i % 2 == 0: # Every other turn, judge might intervene
                 judge_prompt = f"You are the judge. The current exchange is: {agent_response} vs {opposing_counsel_response}. Do you have any questions or rulings?"
@@ -53,11 +80,11 @@ class SimulationService:
                 if "ruling" in judge_response.lower() or "question" in judge_response.lower():
                     simulation_log.append({"role": "judge", "statement": judge_response})
                     current_state["judge_statement"] = judge_response
-
+                    
         # Final evaluation by LLM
-        evaluation_prompt = f"Based on the following mock court simulation log, evaluate if the {scenario['agent_role']} achieved its objectives: {', '.join(scenario['objectives'])}. Provide a detailed evaluation and a score out of 100.\n\nSimulation Log: {json.dumps(simulation_log, indent=2)}"
+        evaluation_prompt = f"Based on the following mock court simulation log, evaluate if the {scenario['agent_role']} achieved its objectives: {', '.join(scenario['objectives'])}. Provide a detailed evaluation and a score out of 100.\n\nSimulation Log: {json.dumps(simulation_log, indent=2, default=str)}"
         final_evaluation = await self.llm_service.generate_text(evaluation_prompt)
-
+        
         return {
             "simulation_log": simulation_log,
             "final_evaluation": final_evaluation,

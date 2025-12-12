@@ -37,7 +37,7 @@ export function ContextEngineModule() {
             try {
                 // In a real agent loop, we'd ask the agent "What should I search for?" then search it.
                 // For speed, we use the pre-selected topics but hit the REAL context API.
-                const response = await endpoints.context.query(autoQuery);
+                const response = await endpoints.context.query(autoQuery, 'default_case');
 
                 const answer = response.data.answer || response.data.response || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
                 const sources = response.data.sources || [];
@@ -89,8 +89,8 @@ export function ContextEngineModule() {
         setAutoInsightMode(false); // Pause auto mode on manual search
         setSearching(true);
         try {
-            const response = await endpoints.context.query(query);
-            console.log("RAG Response:", response.data);
+            const response = await endpoints.context.query(query, 'default_case');
+            // RAG query successful
 
             const answer = response.data.answer || response.data.response || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
             const sources = response.data.sources || [];

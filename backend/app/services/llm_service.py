@@ -1,39 +1,30 @@
 from __future__ import annotations
+import asyncio
 from typing import Any, Dict, Optional
 
 from .. import ProviderCapability, get_provider_registry
 from ..config import get_settings
+from backend.ingestion.llama_index_factory import create_llm_service
+from backend.ingestion.settings import build_llm_config
 
 class LLMService:
     def __init__(self):
         self.settings = get_settings()
+        # We still keep provider registry for metadata if needed, but use factory for actual service
         self.provider_registry = get_provider_registry()
         self._chat_resolution = self.provider_registry.resolve(ProviderCapability.CHAT)
-        self.provider = self._chat_resolution.provider
-        self.model = self._chat_resolution.model
+        
+        # Initialize the actual LLM service using the ingestion factory
+        llm_config = build_llm_config(self.settings)
+        self.real_service = create_llm_service(llm_config)
 
     async def generate_text(self, prompt: str, **kwargs) -> str:
         """
         Generates text using the configured default chat model.
         """
-        # This is a simplified implementation. 
-        # In a real scenario, we'd map the generic request to the provider's specific API.
-        # For now, we'll assume the provider has a 'chat' or 'generate' method 
-        # or we use the provider adapter directly.
-        
-        # The provider adapter (e.g., GeminiProviderAdapter) should have a method to handle this.
-        # However, looking at the registry, it returns a resolution object.
-        
-        # Let's try to use the provider's chat interface if available.
-        # If not, we might need to instantiate a client.
-        
-        # For the purpose of fixing the immediate error and assuming standard usage:
-        response = await self.provider.chat(
-            model_id=self.model.model_id,
-            messages=[{"role": "user", "content": prompt}],
-            **kwargs
-        )
-        return response.content
+        # Run the synchronous generate_text in a thread pool to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.real_service.generate_text, prompt)
 
 _llm_service: Optional[LLMService] = None
 

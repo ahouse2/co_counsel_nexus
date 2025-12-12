@@ -85,3 +85,7 @@ class ECFRScraper:
                 return [{"error": "API request failed", "status_code": e.response.status_code, "details": e.response.text}]
             except Exception as e:
                 return [{"error": "An unexpected error occurred", "details": str(e)}]
+    
+    async def search_regulations(self, query: str) -> list[dict]:
+        """Alias for search method for consistency."""
+        return await self.search(query)

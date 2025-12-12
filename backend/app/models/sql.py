@@ -21,6 +21,7 @@ class User(Base):
     verification_token = Column(String, nullable=True)
 
     sessions = relationship("Session", back_populates="owner")
+    roles = relationship("Role", secondary="user_role_association", back_populates="users")
 
 class Session(Base):
     __tablename__ = "sessions"

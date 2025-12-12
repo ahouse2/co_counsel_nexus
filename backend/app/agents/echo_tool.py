@@ -7,9 +7,16 @@ from backend.app.agents.types import AgentTurn
 from backend.ingestion.llama_index_factory import BaseLlmService
 from datetime import datetime, timezone
 
-@dataclass(slots=True)
+from backend.app.services.errors import WorkflowComponent
+
 class EchoTool(AgentTool):
-    llm_service: BaseLlmService
+    def __init__(self, llm_service: BaseLlmService):
+        super().__init__(
+            name="echo",
+            description="Echoes the user input using an LLM.",
+            component=WorkflowComponent.ECHO,
+        )
+        self.llm_service = llm_service
 
     def invoke(self, context: AgentContext) -> ToolInvocation:
         started = datetime.now(timezone.utc)

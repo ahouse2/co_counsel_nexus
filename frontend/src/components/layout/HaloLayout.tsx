@@ -13,6 +13,9 @@ const PRIMARY_MODULES: { id: ModuleId; label: string }[] = [
     { id: 'timeline', label: 'Timeline Builder' },
     { id: 'binder', label: 'Exhibit / Trial Binder Creator' },
     { id: 'arena', label: 'Mock Trial Arena' },
+    { id: 'mootcourt', label: 'Moot Court / Devil\'s Advocate' },
+    { id: 'evidencemap', label: 'Evidence Map' },
+    { id: 'jurysentiment', label: 'Jury Sentiment Predictor' },
     { id: 'university', label: 'Trial University' },
     { id: 'chat', label: 'Live Co-Counsel Chat' },
     { id: 'research', label: 'Legal Research / Case Law Engine' },
@@ -85,6 +88,22 @@ const SUBMODULES: Record<ModuleId, { id: string; label: string }[]> = {
     agents: [
         { id: 'monitor', label: 'Agent Monitor' },
         { id: 'logs', label: 'Activity Logs' },
+    ],
+    mootcourt: [
+        { id: 'warroom', label: 'War Room' },
+        { id: 'simulation', label: 'Simulation History' },
+    ],
+    evidencemap: [
+        { id: 'network', label: 'Evidence Network' },
+        { id: 'analysis', label: 'Gap Analysis' },
+    ],
+    jurysentiment: [
+        { id: 'analysis', label: 'Sentiment Analysis' },
+        { id: 'simulation', label: 'Jury Simulation' },
+    ],
+    classification: [
+        { id: 'review', label: 'Review Queue' },
+        { id: 'history', label: 'History' },
     ],
 };
 

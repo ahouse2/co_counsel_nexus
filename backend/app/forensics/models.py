@@ -6,6 +6,11 @@ class TamperScoreResult(BaseModel):
     details: str = Field(..., description="Detailed explanation of the tamper score.")
     flags: List[str] = Field(default_factory=list, description="List of specific tampering indicators found.")
 
+class ScreeningResult(BaseModel):
+    is_suspicious: bool = Field(..., description="True if the document is flagged as suspicious.")
+    reason: str = Field(..., description="Reason for flagging the document.")
+    score: float = Field(..., description="Screening score (0.0 to 1.0).")
+
 class ElaResult(BaseModel):
     ela_score: float = Field(..., description="Error Level Analysis score.")
     ela_heatmap_url: Optional[str] = Field(None, description="URL to the ELA heatmap image.")

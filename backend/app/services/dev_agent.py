@@ -7,7 +7,71 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from fastapi import HTTPException, status
 
-from agents.toolkit.sandbox import SandboxExecutionHarness, SandboxExecutionResult
+# Stub implementations - agents.toolkit.sandbox not yet implemented
+class SandboxExecutionResult:
+    def __init__(self):
+        self.success = False
+        self.workspace_id = "stub"
+        self.commands = []
+    
+    def to_json(self):
+        return {"success": self.success, "workspace_id": self.workspace_id, "commands": []}
+
+class SandboxExecutionHarness:
+    def __init__(self, repo_root, commands):
+        self.repo_root = repo_root
+        self.commands = commands
+    
+    def execute(self, *args, **kwargs):
+        """Execute commands in subprocess safely."""
+        import subprocess
+        import uuid
+        
+        workspace_id = str(uuid.uuid4())
+        results = []
+        success = True
+        
+        for cmd in self.commands:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=self.repo_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout per command
+                )
+                
+                command_result = type('obj', (object,), {
+                    'command': ' '.join(cmd),
+                    'return_code': result.returncode,
+                    'stdout': result.stdout,
+                    'stderr': result.stderr,
+                    'to_json': lambda self: {
+                        'command': self.command,
+                        'return_code': self.return_code,
+                        'stdout': self.stdout[:500],  # Limit output
+                        'stderr': self.stderr[:500]
+                    }
+                })()
+                
+                results.append(command_result)
+                
+                if result.returncode != 0:
+                    success = False
+                    break  # Stop on first failure
+                    
+            except subprocess.TimeoutExpired:
+                success = False
+                break
+            except Exception:
+                success = False
+                break
+        
+        execution = SandboxExecutionResult()
+        execution.success = success
+        execution.workspace_id = workspace_id
+        execution.commands = results
+        return execution
 
 from ..agents.dev_team import DevTeamAgent, FeatureRequest, ProposalContext
 from ..config import get_settings

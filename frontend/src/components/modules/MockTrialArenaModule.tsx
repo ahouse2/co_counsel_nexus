@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Gavel, Users, Activity, Play, Shield, Sword, Brain, Terminal } from 'lucide-react';
+import { Gavel, Users, Play, Brain, Sword, Shield } from 'lucide-react';
 import { endpoints } from '../../services/api';
 
 interface SimulationStep {
@@ -16,11 +16,17 @@ export function MockTrialArenaModule() {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [caseContext, setCaseContext] = useState<string>('');
 
+    // Configuration State
+    const [showJuryConfig, setShowJuryConfig] = useState(false);
+    const [showOpposingConfig, setShowOpposingConfig] = useState(false);
+    const [juryDemographics, setJuryDemographics] = useState({ education: 'Mixed', age: '30-50', bias: 'Neutral' });
+    const [opposingStyle, setOpposingStyle] = useState('Aggressive');
+
     useEffect(() => {
         // Fetch case context on mount
         const fetchContext = async () => {
             try {
-                const res = await endpoints.context.query("Provide a detailed factual summary and list of contested issues for a mock trial debate.");
+                const res = await endpoints.context.query("Provide a detailed factual summary and list of contested issues for a mock trial debate.", "default_case");
                 setCaseContext(res.data?.response || "Standard mock trial scenario.");
             } catch (e) {
                 console.error("Failed to fetch context", e);
@@ -39,7 +45,6 @@ export function MockTrialArenaModule() {
             // Initial delay
             await new Promise(r => setTimeout(r, 1000));
 
-            // const scenario = "Current Case Simulation";
             let history: SimulationStep[] = [];
 
             const steps = [
@@ -105,7 +110,7 @@ export function MockTrialArenaModule() {
 
     if (!activeSimulation) {
         return (
-            <div className="flex-1 flex items-center justify-center p-6 h-full">
+            <div className="flex-1 flex items-center justify-center p-6 h-full relative">
                 <div className="text-center max-w-2xl w-full">
                     <div className="w-32 h-32 rounded-full bg-halo-cyan/5 border border-halo-cyan flex items-center justify-center mx-auto mb-8 animate-pulse-slow shadow-[0_0_30px_rgba(0,240,255,0.2)]">
                         <Gavel size={64} className="text-halo-cyan" />
@@ -116,14 +121,20 @@ export function MockTrialArenaModule() {
                     </p>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <button className="halo-card hover:bg-halo-cyan/10 transition-all group py-8 flex flex-col items-center gap-4">
+                        <button
+                            onClick={() => setShowJuryConfig(true)}
+                            className="halo-card hover:bg-halo-cyan/10 transition-all group py-8 flex flex-col items-center gap-4"
+                        >
                             <Users className="text-halo-cyan group-hover:scale-110 transition-transform" size={32} />
                             <div className="text-center">
                                 <span className="block text-sm uppercase tracking-wider font-bold text-halo-text">Jury Selection</span>
                                 <span className="text-xs text-halo-muted mt-1">Configure Demographics</span>
                             </div>
                         </button>
-                        <button className="halo-card hover:bg-halo-cyan/10 transition-all group py-8 flex flex-col items-center gap-4">
+                        <button
+                            onClick={() => setShowOpposingConfig(true)}
+                            className="halo-card hover:bg-halo-cyan/10 transition-all group py-8 flex flex-col items-center gap-4"
+                        >
                             <Brain className="text-halo-cyan group-hover:scale-110 transition-transform" size={32} />
                             <div className="text-center">
                                 <span className="block text-sm uppercase tracking-wider font-bold text-halo-text">Opposing Counsel</span>
@@ -142,88 +153,132 @@ export function MockTrialArenaModule() {
                         </button>
                     </div>
                 </div>
+
+                {/* Jury Config Modal */}
+                {showJuryConfig && (
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50">
+                        <div className="bg-halo-bg border border-halo-cyan p-8 rounded-xl max-w-md w-full shadow-[0_0_50px_rgba(0,240,255,0.2)]">
+                            <h3 className="text-xl font-bold text-halo-cyan mb-6 uppercase tracking-widest flex items-center gap-2">
+                                <Users /> Jury Configuration
+                            </h3>
+                            <div className="space-y-4 mb-8">
+                                <div>
+                                    <label className="block text-xs text-halo-muted mb-1 uppercase">Education Level</label>
+                                    <select
+                                        value={juryDemographics.education}
+                                        onChange={(e) => setJuryDemographics(prev => ({ ...prev, education: e.target.value }))}
+                                        className="w-full bg-black border border-halo-border rounded p-2 text-halo-text focus:border-halo-cyan outline-none"
+                                    >
+                                        <option>High School</option>
+                                        <option>College Graduate</option>
+                                        <option>Post-Graduate</option>
+                                        <option>Mixed</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-halo-muted mb-1 uppercase">Age Range</label>
+                                    <select
+                                        value={juryDemographics.age}
+                                        onChange={(e) => setJuryDemographics(prev => ({ ...prev, age: e.target.value }))}
+                                        className="w-full bg-black border border-halo-border rounded p-2 text-halo-text focus:border-halo-cyan outline-none"
+                                    >
+                                        <option>18-30</option>
+                                        <option>30-50</option>
+                                        <option>50+</option>
+                                        <option>Mixed</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-4">
+                                <button onClick={() => setShowJuryConfig(false)} className="px-4 py-2 text-halo-muted hover:text-white">Cancel</button>
+                                <button onClick={() => setShowJuryConfig(false)} className="px-4 py-2 bg-halo-cyan text-black font-bold rounded hover:bg-white transition-colors">Save Configuration</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Opposing Counsel Config Modal */}
+                {showOpposingConfig && (
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50">
+                        <div className="bg-halo-bg border border-halo-cyan p-8 rounded-xl max-w-md w-full shadow-[0_0_50px_rgba(0,240,255,0.2)]">
+                            <h3 className="text-xl font-bold text-halo-cyan mb-6 uppercase tracking-widest flex items-center gap-2">
+                                <Brain /> Opposing Counsel
+                            </h3>
+                            <div className="space-y-4 mb-8">
+                                <div>
+                                    <label className="block text-xs text-halo-muted mb-1 uppercase">Personality / Strategy</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {['Aggressive', 'Logical', 'Emotional', 'Procedural'].map(style => (
+                                            <button
+                                                key={style}
+                                                onClick={() => setOpposingStyle(style)}
+                                                className={`p-3 rounded border text-sm transition-all ${opposingStyle === style
+                                                    ? 'bg-halo-cyan text-black border-halo-cyan font-bold'
+                                                    : 'bg-black border-halo-border text-halo-muted hover:border-halo-cyan'}`}
+                                            >
+                                                {style}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-4">
+                                <button onClick={() => setShowOpposingConfig(false)} className="px-4 py-2 text-halo-muted hover:text-white">Cancel</button>
+                                <button onClick={() => setShowOpposingConfig(false)} className="px-4 py-2 bg-halo-cyan text-black font-bold rounded hover:bg-white transition-colors">Confirm Agent</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }
 
     return (
-        <div className="flex-1 flex flex-col h-full p-6 overflow-hidden">
+        <div className="flex-1 flex flex-col h-full overflow-hidden relative">
             {/* Header */}
-            <div className="flex justify-between items-center mb-6 border-b border-halo-border pb-4">
-                <div>
-                    <h2 className="text-xl font-light text-halo-text uppercase tracking-widest flex items-center gap-3">
-                        <Activity className="text-halo-cyan animate-pulse" size={20} />
-                        Live Simulation
-                    </h2>
-                    <div className="text-xs text-halo-muted mt-1 font-mono">SCENARIO_ID: SIM-8842-ALPHA // STATE V. MILLER</div>
+            <div className="p-4 border-b border-halo-border bg-halo-bg/50 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <span className="font-mono text-sm uppercase tracking-wider text-halo-text">Live Simulation</span>
                 </div>
                 <button
-                    onClick={() => { setActiveSimulation(false); setSimulationSteps([]); }}
-                    className="px-4 py-2 border border-halo-border rounded hover:border-halo-cyan text-halo-muted hover:text-halo-cyan transition-colors text-sm uppercase tracking-wider"
+                    onClick={() => setActiveSimulation(false)}
+                    className="text-xs text-halo-muted hover:text-white uppercase tracking-wider"
                 >
-                    Abort Simulation
+                    End Session
                 </button>
             </div>
 
-            {/* Arena */}
-            <div className="flex-1 flex gap-6 overflow-hidden">
-                {/* Left: Prosecution */}
-                <div className="w-1/4 hidden md:flex flex-col gap-4 opacity-50">
-                    <div className="halo-card h-full flex flex-col items-center justify-center border-red-500/30 bg-red-500/5">
-                        <Sword size={48} className="text-red-500 mb-4" />
-                        <h3 className="text-red-500 font-mono uppercase tracking-widest">Prosecution</h3>
-                        <div className="mt-4 text-xs text-red-400/70 font-mono">AGENT: ARES-V4</div>
-                    </div>
-                </div>
-
-                {/* Center: Transcript */}
-                <div className="flex-1 halo-card bg-black/40 flex flex-col overflow-hidden relative">
-                    <div className="absolute inset-0 bg-[url('/grid.png')] opacity-5 pointer-events-none" />
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar" ref={scrollRef}>
-                        {simulationSteps.map((step) => (
-                            <div
-                                key={step.id}
-                                className={`flex flex-col ${step.role === 'prosecution' ? 'items-start' :
-                                    step.role === 'defense' ? 'items-end' : 'items-center'
-                                    }`}
-                            >
-                                <div className={`max-w-[80%] rounded-lg p-4 border ${step.role === 'prosecution' ? 'bg-red-950/20 border-red-500/30 text-red-100 rounded-tl-none' :
-                                    step.role === 'defense' ? 'bg-blue-950/20 border-blue-500/30 text-blue-100 rounded-tr-none' :
-                                        'bg-halo-bg border-halo-border text-halo-text text-center italic'
-                                    }`}>
-                                    <div className="flex justify-between items-center mb-2 gap-4">
-                                        <span className={`text-xs font-bold uppercase tracking-wider ${step.role === 'prosecution' ? 'text-red-400' :
-                                            step.role === 'defense' ? 'text-blue-400' : 'text-halo-muted'
-                                            }`}>
-                                            {step.role}
-                                        </span>
-                                        {step.tool && (
-                                            <span className="flex items-center gap-1 text-[10px] font-mono bg-black/30 px-2 py-0.5 rounded text-halo-cyan border border-halo-cyan/20">
-                                                <Terminal size={10} />
-                                                TOOL: {step.tool}
-                                            </span>
-                                        )}
-                                    </div>
-                                    <p className="leading-relaxed">{step.content}</p>
-                                </div>
-                            </div>
-                        ))}
-                        {simulationSteps.length === 0 && (
-                            <div className="text-center text-halo-muted mt-20 animate-pulse">
-                                Initializing agents...
+            {/* Simulation Stream */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar" ref={scrollRef}>
+                {simulationSteps.map((step) => (
+                    <div key={step.id} className={`flex gap-4 ${step.role === 'judge' ? 'justify-center' : ''} animate-in fade-in slide-in-from-bottom-2`}>
+                        {step.role !== 'judge' && (
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 
+                                ${step.role === 'prosecution' ? 'bg-red-500/10 text-red-500 border border-red-500/30' : 'bg-blue-500/10 text-blue-500 border border-blue-500/30'}`}>
+                                {step.role === 'prosecution' ? <Sword size={20} /> : <Shield size={20} />}
                             </div>
                         )}
-                    </div>
-                </div>
 
-                {/* Right: Defense */}
-                <div className="w-1/4 hidden md:flex flex-col gap-4 opacity-50">
-                    <div className="halo-card h-full flex flex-col items-center justify-center border-blue-500/30 bg-blue-500/5">
-                        <Shield size={48} className="text-blue-500 mb-4" />
-                        <h3 className="text-blue-500 font-mono uppercase tracking-widest">Defense</h3>
-                        <div className="mt-4 text-xs text-blue-400/70 font-mono">AGENT: ATHENA-V9</div>
+                        <div className={`max-w-3xl ${step.role === 'judge' ? 'w-full' : ''}`}>
+                            <div className={`mb-1 flex items-center gap-2 ${step.role === 'judge' ? 'justify-center' : ''}`}>
+                                <span className={`text-xs font-bold uppercase tracking-wider 
+                                    ${step.role === 'prosecution' ? 'text-red-500' :
+                                        step.role === 'defense' ? 'text-blue-500' : 'text-yellow-500'}`}>
+                                    {step.role}
+                                </span>
+                                <span className="text-[10px] text-halo-muted">{new Date(step.timestamp).toLocaleTimeString()}</span>
+                            </div>
+
+                            <div className={`p-4 rounded border ${step.role === 'judge'
+                                ? 'bg-yellow-500/5 border-yellow-500/20 text-center'
+                                : 'bg-halo-card border-halo-border'}`}>
+                                {step.role === 'judge' && <Gavel className="mx-auto mb-2 text-yellow-500" size={24} />}
+                                <p className="text-halo-text leading-relaxed">{step.content}</p>
+                            </div>
+                        </div>
                     </div>
-                </div>
+                ))}
             </div>
         </div>
     );

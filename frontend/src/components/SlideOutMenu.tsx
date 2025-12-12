@@ -13,7 +13,8 @@ import {
     BrainCircuit,
     Swords,
     GraduationCap,
-    FolderOpen
+    FolderOpen,
+    Tag
 } from 'lucide-react';
 
 const NAV_LINKS = [
@@ -31,6 +32,7 @@ const NAV_LINKS = [
     { id: 'arena', label: 'Mock Trial', icon: Swords },
     { id: 'university', label: 'Trial University', icon: GraduationCap },
     { id: 'binder', label: 'Evidence Binder', icon: FileStack },
+    { id: 'classification', label: 'Classification', icon: Tag },
 ];
 
 export function SlideOutMenu() {

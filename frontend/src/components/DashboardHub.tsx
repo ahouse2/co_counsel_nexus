@@ -14,6 +14,7 @@ import { ContextEngineModule } from './modules/ContextEngineModule';
 import { MockTrialArenaModule } from './modules/MockTrialArenaModule';
 import { TrialUniversityModule } from './modules/TrialUniversityModule';
 import { TrialBinderModule } from './modules/TrialBinderModule';
+import { ClassificationStationModule } from './modules/ClassificationStationModule';
 import { AnimatePresence, motion } from 'framer-motion';
 
 export function DashboardHub() {
@@ -49,6 +50,8 @@ export function DashboardHub() {
                 return <TrialUniversityModule />;
             case 'binder':
                 return <TrialBinderModule />;
+            case 'classification':
+                return <ClassificationStationModule />;
             default:
                 return null;
         }
@@ -69,7 +72,7 @@ export function DashboardHub() {
                 </div>
 
                 {/* Center/Right Module Area */}
-                <main className="flex-1 relative p-6 flex items-center justify-center pointer-events-none">
+                <main className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
                     <AnimatePresence mode="wait">
                         {activeModule !== 'graph' && (
                             <motion.div
@@ -78,7 +81,7 @@ export function DashboardHub() {
                                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                                 exit={{ opacity: 0, scale: 1.05, filter: 'blur(10px)' }}
                                 transition={{ duration: 0.3, ease: "circOut" }}
-                                className="w-full max-w-7xl h-[85vh] bg-black/80 backdrop-blur-xl border border-halo-border/50 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col relative"
+                                className="w-[96vw] h-[94vh] bg-black/95 backdrop-blur-xl border border-halo-border/50 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col relative"
                             >
                                 <div className="flex-1 overflow-hidden relative">
                                     {renderModule()}

@@ -19,3 +19,16 @@ def query_retrieval_data(
     mode: RetrievalMode = Query(RetrievalMode.PRECISION, description="Retrieval mode"),
 ) -> QueryResponse:
     return service.query(query, mode)
+
+
+class RetrievalRequest(QueryResponse):
+    query: str
+    mode: RetrievalMode = RetrievalMode.PRECISION
+
+@router.post("/retrieval", response_model=QueryResponse)
+def query_retrieval_post(
+    request: RetrievalRequest,
+    _principal: Principal = Depends(authorize_query),
+    service: RetrievalService = Depends(get_retrieval_service),
+) -> QueryResponse:
+    return service.query(request.query, request.mode)

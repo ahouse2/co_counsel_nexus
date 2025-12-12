@@ -12,11 +12,13 @@ from ..services.errors import (
     WorkflowException,
 )
 from ..storage.agent_memory_store import AgentMemoryStore
+from backend.app.storage.document_store import DocumentStore
 from .context import AgentContext
 from .definitions import AgentDefinition, build_agent_graph
 from .memory import CaseThreadMemory
 from .qa import QAAgent
 from backend.ingestion.llama_index_factory import create_llm_service
+from backend.ingestion.settings import LlmConfig
 from .factories import build_graph_rag_agent, build_qa_agent
 from .base_tools import (
     AgentTool,
@@ -458,12 +460,22 @@ class MicrosoftAgentsOrchestrator:
             # Add all new tools here as they are instantiated in get_orchestrator
         }
         self.base_definitions = build_agent_graph(self.tools)
-        self.forensics_team = build_forensic_analysis_team(list(self.tools.values())) # Pass all available tools
-        self.dev_team = build_software_development_team(list(self.tools.values())) # Pass all available tools
-        self.document_ingestion_team = build_document_ingestion_team(list(self.tools.values()))
-        self.legal_research_team = build_legal_research_team(list(self.tools.values()))
-        self.litigation_support_team = build_litigation_support_team(list(self.tools.values()))
-        self.ai_qa_oversight_committee = build_ai_qa_oversight_committee(list(self.tools.values()))
+        
+        # Build teams and extract agent definitions
+        forensics_team_dict = build_forensic_analysis_team(list(self.tools.values()))
+        dev_team_dict = build_software_development_team(list(self.tools.values()))
+        document_ingestion_team_dict = build_document_ingestion_team(list(self.tools.values()))
+        legal_research_team_dict = build_legal_research_team(list(self.tools.values()))
+        litigation_support_team_dict = build_litigation_support_team(list(self.tools.values()))
+        ai_qa_oversight_committee_dict = build_ai_qa_oversight_committee(list(self.tools.values()))
+        
+        # Extract agent lists from team dictionaries
+        self.forensics_team = list(forensics_team_dict["agents"].values())
+        self.dev_team = list(dev_team_dict["agents"].values())
+        self.document_ingestion_team = list(document_ingestion_team_dict["agents"].values())
+        self.legal_research_team = list(legal_research_team_dict["agents"].values())
+        self.litigation_support_team = list(litigation_support_team_dict["agents"].values())
+        self.ai_qa_oversight_committee = list(ai_qa_oversight_committee_dict["agents"].values())
 
         all_definitions = (
             self.base_definitions
@@ -620,16 +632,15 @@ from fastapi import Depends
 def get_llm_config_dep() -> LlmConfig:
     """Dependency to get LLM configuration from settings."""
     from backend.app.config import get_settings
+    from backend.ingestion.settings import build_llm_config
     settings = get_settings()
-    return LlmConfig(
-        model=settings.llm_model,
-        provider=settings.llm_provider,
-        temperature=settings.llm_temperature,
-    )
+    return build_llm_config(settings)
 
 def get_document_store_dep() -> DocumentStore:
     """Dependency to get document store instance."""
-    return DocumentStore()
+    from backend.app.config import get_settings
+    settings = get_settings()
+    return DocumentStore(settings.document_storage_path, settings.encryption_key)
 
 def get_forensics_service_dep() -> ForensicAnalyzer:
     """Dependency to get forensics analyzer instance."""

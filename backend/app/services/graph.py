@@ -503,7 +503,7 @@ class GraphService:
         if KnowledgeGraphIndex is not None and StorageContext is not None:
             try:
                 self.ensure_knowledge_index()
-            except RuntimeError:  # pragma: no cover - dependencies missing at runtime
+            except (RuntimeError, ValueError):  # pragma: no cover - dependencies missing or API key issues
                 pass
 
     # region Schema management
@@ -818,11 +818,23 @@ class GraphService:
                 "llama-index core packages are not installed; knowledge index is unavailable"
             )
         if self._knowledge_index is None:
+            # Configure LLM for knowledge graph - use OpenAI if API key is available
+            llm = None
+            try:
+                import os
+                from llama_index.llms.openai import OpenAI
+                openai_key = os.getenv("OPENAI_API_KEY") or self.settings.gemini_api_key
+                if openai_key:
+                    llm = OpenAI(api_key=openai_key, model="gpt-3.5-turbo")
+            except Exception:
+                pass  # Fall back to no LLM if configuration fails
+            
             storage_context = StorageContext.from_defaults(graph_store=self._property_graph)
             self._knowledge_index = KnowledgeGraphIndex(
                 nodes=list(nodes) if nodes else None,
                 storage_context=storage_context,
                 include_embeddings=True,
+                llm=llm,
             )
         elif nodes:
             try:

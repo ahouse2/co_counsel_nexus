@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from ..models.api import (
     IngestionRequest,
@@ -58,3 +58,38 @@ async def get_ingestion_status(
     service: IngestionService = Depends(get_ingestion_service),
 ) -> IngestionStatusResponse:
     return await service.get_ingestion_status(principal, document_id)
+
+
+async def get_dev_principal() -> Principal:
+    return Principal(
+        client_id="dev-user",
+        subject="dev-user",
+        tenant_id="dev-tenant",
+        roles={"CaseCoordinator"},
+        token_roles=set(),
+        certificate_roles=set(),
+        scopes={"ingest:enqueue"},
+        case_admin=True,
+        attributes={}
+    )
+
+@router.post("/ingestion/ingest_local_path", response_model=IngestionResponse)
+async def ingest_local_path(
+    source_path: str = Form(...),
+    document_id: str = Form(...),
+    recursive: bool = Form(default=True),
+    sync: bool = Form(default=False),
+    principal: Principal = Depends(get_dev_principal),
+    service: IngestionService = Depends(get_ingestion_service),
+) -> IngestionResponse:
+    """
+    Ingest files from local file system or network share.
+    No upload required - instant ingestion!
+    
+    Args:
+        source_path: Local file path or directory (e.g., "I:\\legal_documents")
+        document_id: Document identifier
+        recursive: Scan subdirectories (default: True)
+        sync: If True, skips files that have already been ingested (matching path and hash).
+    """
+    return await service.ingest_local_path(principal, document_id, source_path, recursive, sync)

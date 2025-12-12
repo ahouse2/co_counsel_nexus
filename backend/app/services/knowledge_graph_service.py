@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import json
+import os
 from neo4j import AsyncGraphDatabase, AsyncSession
 from fastapi import Depends
 
@@ -243,6 +245,288 @@ class KnowledgeGraphService:
             context["precedents"] = [record.data() for record in await precedents_result.data()]
 
             return context
+
+    async def run_cypher_query(self, query: str, params: Optional[Dict[str, Any]] = None, cache: bool = True) -> List[Dict[str, Any]]:
+        """
+        Executes a raw Cypher query.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            result = await session.run(query, params)
+            return [record.data() for record in await result.data()]
+
+    async def query_graph(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """
+        Alias for run_cypher_query.
+        """
+        return await self.run_cypher_query(query, params)
+
+    async def search_legal_references(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Searches for legal references (LegalTheory, Precedent) matching the query.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            cypher = """
+                MATCH (n)
+                WHERE (n:LegalTheory OR n:Precedent) AND 
+                      (toLower(n.name) CONTAINS toLower($query) OR 
+                       toLower(n.description) CONTAINS toLower($query) OR
+                       toLower(n.title) CONTAINS toLower($query) OR
+                       toLower(n.citation) CONTAINS toLower($query))
+                RETURN n.id AS id, labels(n) AS type, properties(n) AS properties
+            """
+            result = await session.run(cypher, query=query)
+            return [record.data() for record in await result.data()]
+
+    async def get_node(self, node_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a node by its internal ID (or property ID if that's what's intended).
+        Assuming 'id' property for now as per other methods.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            # Try matching by property 'id' first (string/int), then internal id() if needed.
+            # Based on other methods, 'id' is a property.
+            cypher = "MATCH (n {id: $node_id}) RETURN properties(n) as properties, labels(n) as labels"
+            result = await session.run(cypher, node_id=node_id)
+            record = await result.single()
+            if record:
+                data = dict(record["properties"])
+                data["labels"] = record["labels"]
+                return data
+            return None
+
+    async def get_relationships(self, node_id: int) -> List[Dict[str, Any]]:
+        """
+        Retrieves all relationships for a given node ID.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            cypher = """
+                MATCH (n {id: $node_id})-[r]-(m)
+                RETURN type(r) as type, properties(r) as properties, 
+                       startNode(r).id as start_node, endNode(r).id as end_node,
+                       labels(m) as other_node_labels, m.id as other_node_id
+            """
+            result = await session.run(cypher, node_id=node_id)
+            return [record.data() for record in await result.data()]
+
+    async def export_graph(self, output_path: str) -> str:
+        """
+        Exports the entire graph to a JSON file.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            cypher_nodes = "MATCH (n) RETURN n"
+            cypher_rels = "MATCH ()-[r]->() RETURN r"
+            
+            nodes_result = await session.run(cypher_nodes)
+            rels_result = await session.run(cypher_rels)
+            
+            nodes = [record["n"].data() for record in await nodes_result.data()]
+            # Relationships in neo4j driver result might need processing
+            rels_data = await rels_result.data()
+            rels = []
+            for r in rels_data:
+                rel = r['r']
+                # rel is a Relationship object
+                rels.append({
+                    "id": rel.id,
+                    "type": rel.type,
+                    "start_node": rel.start_node.id, # Internal ID, might need property id mapping if consistent
+                    "end_node": rel.end_node.id,
+                    "properties": dict(rel)
+                })
+            
+            export_data = {"nodes": nodes, "relationships": rels}
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            
+            with open(output_path, 'w') as f:
+                json.dump(export_data, f, indent=2)
+                
+            return os.path.abspath(output_path)
+
+    async def get_cause_subgraph(self, cause: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Retrieves the subgraph related to a specific cause of action.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            # Assuming 'CauseOfAction' label or property. Adjusting to search for a node with that name/type.
+            cypher = """
+                MATCH (c:CauseOfAction {name: $cause})
+                CALL apoc.path.subgraphAll(c, {maxLevel: 2})
+                YIELD nodes, relationships
+                RETURN nodes, relationships
+            """
+            # Fallback if APOC is not available: simple 1-hop or 2-hop expansion
+            # Using standard Cypher for broader compatibility if APOC isn't guaranteed
+            cypher_fallback = """
+                MATCH (c:CauseOfAction {name: $cause})-[r*1..2]-(m)
+                RETURN c, r, m
+            """
+            
+            # Let's try a standard expansion that returns paths and we parse them
+            cypher_standard = """
+                MATCH p=(c:CauseOfAction {name: $cause})-[*1..2]-(m)
+                RETURN nodes(p) as nodes, relationships(p) as rels
+            """
+            
+            result = await session.run(cypher_standard, cause=cause)
+            
+            nodes_map = {}
+            rels_map = {}
+            
+            for record in await result.data():
+                for node in record['nodes']:
+                    # node is a Node object
+                    # We need to handle if it uses internal IDs or property IDs. 
+                    # The schema seems to use 'id' property.
+                    n_props = dict(node)
+                    n_id = n_props.get('id', node.id) # Fallback to internal ID if 'id' prop missing
+                    nodes_map[n_id] = {"id": n_id, "labels": list(node.labels), "properties": n_props}
+                    
+                for rel in record['rels']:
+                    r_props = dict(rel)
+                    r_id = rel.id
+                    rels_map[r_id] = {
+                        "id": r_id, 
+                        "type": rel.type, 
+                        "start": rel.start_node.get('id', rel.start_node.id),
+                        "end": rel.end_node.get('id', rel.end_node.id),
+                        "properties": r_props
+                    }
+                    
+            return list(nodes_map.values()), list(rels_map.values())
+
+    async def cause_support_scores(self) -> List[Dict[str, Any]]:
+        """
+        Calculates support scores for causes of action based on evidence/facts.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            # Hypothetical scoring: count of supporting Evidence nodes linked to CauseOfAction
+            cypher = """
+                MATCH (c:CauseOfAction)
+                OPTIONAL MATCH (c)<-[:SUPPORTS]-(e:Evidence)
+                RETURN c.name as cause, count(e) as support_score, collect(e.id) as evidence_ids
+            """
+            result = await session.run(cypher)
+            return [record.data() for record in await result.data()]
+
+    async def get_subgraph(self, label: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Retrieves all nodes with a given label and their relationships.
+        """
+        driver = await self._get_driver()
+        async with driver.session() as session:
+            cypher = f"""
+                MATCH (n:{label})-[r]-(m)
+                RETURN n, r, m
+            """
+            # Note: This could be large. Limiting might be wise, but following spec.
+            result = await session.run(cypher)
+            
+            nodes_map = {}
+            rels_map = {}
+            
+            for record in await result.data():
+                n = record['n']
+                m = record['m']
+                r = record['r']
+                
+                for node in [n, m]:
+                    n_props = dict(node)
+                    n_id = n_props.get('id', node.id)
+                    nodes_map[n_id] = {"id": n_id, "labels": list(node.labels), "properties": n_props}
+                
+                r_props = dict(r)
+                r_id = r.id
+                rels_map[r_id] = {
+                    "id": r_id,
+                    "type": r.type,
+                    "start": r.start_node.get('id', r.start_node.id),
+                    "end": r.end_node.get('id', r.end_node.id),
+                    "properties": r_props
+                }
+                
+            return list(nodes_map.values()), list(rels_map.values())
+
+    def build_graph_index(self, documents: List[Any], case_id: str):
+        """
+        Builds a Knowledge Graph index from documents using LlamaIndex.
+        This is a synchronous method as LlamaIndex construction is typically sync.
+        """
+        try:
+            from llama_index.graph_stores.neo4j import Neo4jGraphStore
+            from llama_index.core import StorageContext, KnowledgeGraphIndex
+            from backend.ingestion.llama_index_factory import create_llm_service, create_embedding_model
+            from backend.app.config import get_settings
+            
+            settings = get_settings()
+            
+            # Initialize LlamaIndex components
+            # We need to recreate the LLM and Embedding models here or pass them in.
+            # Using factory for consistency.
+            llm_service = create_llm_service(settings.llm)
+            # We need the underlying LlamaIndex LLM object
+            # Re-using the logic from classification_service/llama_index_factory
+            # Ideally this should be a shared utility.
+            from backend.app.services.classification_service import ClassificationService
+            # Hack: instantiate ClassificationService just to get the LLM if we don't want to duplicate code
+            # Or just duplicate the small snippet for now.
+            # Let's duplicate for safety and independence.
+            
+            llm = None
+            from backend.app.models.settings import LlmProvider
+            config = settings.llm
+            if config.provider == LlmProvider.OPENAI:
+                from llama_index.llms.openai import OpenAI
+                llm = OpenAI(model=config.model, api_key=config.api_key, api_base=config.api_base)
+            elif config.provider == LlmProvider.GEMINI:
+                from llama_index.llms.gemini import Gemini
+                llm = Gemini(model=config.model, api_key=config.api_key)
+            # ... add others as needed
+            
+            if not llm:
+                print("Warning: No valid LLM found for Graph Indexing.")
+                return
+
+            embed_model = create_embedding_model(settings.embedding)
+
+            graph_store = Neo4jGraphStore(
+                username=self.user,
+                password=self.password,
+                url=self.uri,
+                database="neo4j", # Default
+            )
+            
+            storage_context = StorageContext.from_defaults(graph_store=graph_store)
+            
+            # Filter documents for this case if needed, or assume passed documents are relevant.
+            # The `documents` arg should be a list of LlamaIndex Document objects.
+            
+            # Create the index
+            # This extracts triplets and stores them in Neo4j
+            index = KnowledgeGraphIndex.from_documents(
+                documents,
+                storage_context=storage_context,
+                max_triplets_per_chunk=2,
+                llm=llm,
+                embed_model=embed_model,
+                include_embeddings=True, # Useful for GraphRAG
+            )
+            
+            print(f"Successfully built Knowledge Graph index for {len(documents)} documents.")
+            return index
+            
+        except Exception as e:
+            print(f"Failed to build graph index: {e}")
+            raise e
+
 
 def get_knowledge_graph_service() -> KnowledgeGraphService:
     """

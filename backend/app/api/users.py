@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List
 from sqlalchemy.orm import Session
 from backend.app.database import get_db
-from backend.app.models.user import User as UserModel
+from backend.app.models.sql import User as UserModel
 from backend.app.models.role import Role as RoleModel
 from backend.app.models.permission import Permission as PermissionModel
 from backend.app.auth.jwt import get_current_user
@@ -18,7 +18,7 @@ class User(BaseModel):
     roles: List[str] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserCreate(BaseModel):
     username: str
@@ -31,7 +31,7 @@ class Role(BaseModel):
     permissions: List[str] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class RoleCreate(BaseModel):
     name: str
@@ -42,7 +42,7 @@ class Permission(BaseModel):
     name: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class PermissionCreate(BaseModel):
     name: str

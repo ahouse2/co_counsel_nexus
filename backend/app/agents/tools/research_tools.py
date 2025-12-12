@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List
 
+from backend.app.agents.definitions.qa_agents import AgentTool
 from backend.app.services.api_clients.courtlistener_client import CourtListenerClient, CaseLawClient
 from backend.app.services.api_clients.govinfo_client import GovInfoClient
 from backend.app.services.web_scrapers.california_codes_scraper import CaliforniaCodesScraper
@@ -8,11 +9,16 @@ from backend.app.services.web_scrapers.ecfr_scraper import ECFRScraper
 from backend.app.services.web_scraper_service import WebScraperService
 # from backend.app.services.llm_service import get_llm_service # This would be the proper way to get the LLM service
 
-class LegalResearchTool:
+class LegalResearchTool(AgentTool):
     """
     A tool that orchestrates various legal research clients and scrapers.
     """
     def __init__(self):
+        super().__init__(
+            name="LegalResearchTool",
+            description="Orchestrates various legal research clients and scrapers for case law, statutes, and regulations.",
+            func=self.search_case_law
+        )
         self.courtlistener_client = CourtListenerClient()
         self.caselaw_client = CaseLawClient()
         self.govinfo_client = GovInfoClient()
@@ -37,22 +43,32 @@ class LegalResearchTool:
         """Searches the Electronic Code of Federal Regulations."""
         return await self.ecfr_scraper.search(query)
 
-class WebScraperTool:
+class WebScraperTool(AgentTool):
     """
     A general-purpose tool for scraping web pages.
     """
     def __init__(self):
+        super().__init__(
+            name="WebScraperTool",
+            description="General-purpose web scraper for extracting content from web pages.",
+            func=self.scrape_url
+        )
         self.scraper = WebScraperService()
 
     async def scrape_url(self, url: str) -> str:
         """Scrapes the main content from a given URL."""
         return await self.scraper.scrape_page(url)
 
-class ResearchSummarizerTool:
+class ResearchSummarizerTool(AgentTool):
     """
     A tool to summarize research findings using an LLM.
     """
     def __init__(self):
+        super().__init__(
+            name="ResearchSummarizerTool",
+            description="Summarizes research findings using an LLM to provide concise, contextual summaries.",
+            func=self.summarize
+        )
         from backend.ingestion.llama_index_factory import create_llm_service
         from backend.ingestion.settings import build_runtime_config
         from backend.app.config import get_settings

@@ -26,13 +26,17 @@ export const endpoints = {
         query: (cypher: string) => api.post('/api/graph/query', { query: cypher }),
     },
     // Chat / Agents
+    // Chat / Agents
     agents: {
         list: () => api.get('/agents/'),
         chat: (message: string) => api.post('/agents/chat', { message }),
+        run: (task: string, caseId: string) => api.post('/api/agents/run', { task, case_id: caseId }),
     },
     // Documents
     documents: {
-        list: (caseId: string) => api.get(`/api/documents/${caseId}/documents`),
+        list: (caseId: string) => api.get(`/api/documents/${caseId}/documents`, {
+            timeout: 0 // No timeout - allows unlimited time for heavy processing
+        }),
         upload: (caseId: string, formData: FormData, relativePath?: string, apiKeys?: { gemini?: string, courtListener?: string }) => {
             let url = `/api/documents/upload?case_id=${caseId}&doc_type=my_documents`;
             if (relativePath) {
@@ -51,21 +55,99 @@ export const endpoints = {
                 }
             });
         },
+        uploadChunk: (caseId: string, formData: FormData, onUploadProgress?: (progressEvent: any) => void) => {
+            return api.post(`/api/documents/upload_chunk?case_id=${caseId}`, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                },
+                timeout: 3600000, // 1 hour for large chunks
+                onUploadProgress
+            });
+        },
+        pendingReview: (caseId: string) => api.get(`/api/documents/pending_review?case_id=${caseId}`),
+        approveClassification: (docId: string) => api.post(`/api/documents/${docId}/approve`),
+        updateMetadata: (docId: string, metadata: any) => api.post(`/api/documents/${docId}/update_metadata`, metadata),
     },
     // Timeline
     timeline: {
-        get: (caseId: string) => api.get(`/timeline/${caseId}`),
-        list: (page = 1, pageSize = 10) => api.get(`/timeline?page=${page}&page_size=${pageSize}`),
-        generate: (prompt: string, caseId: string) => api.post('/timeline/generate', { prompt, case_id: caseId }),
+        get: (caseId: string) => api.get(`/api/timeline/${caseId}`),
+        list: (page = 1, pageSize = 10) => api.get(`/api/timeline?page=${page}&page_size=${pageSize}`),
+        generate: (prompt: string, caseId: string) => api.post('/api/timeline/generate', { prompt, case_id: caseId }),
+        weave: (caseId: string) => api.post(`/api/timeline/${caseId}/weave`),
+        contradictions: (caseId: string) => api.get(`/api/timeline/${caseId}/contradictions`),
     },
     // Context
     context: {
-        query: (q: string) => api.post('/query', { query: q }),
+        query: (query: string, caseId: string) => api.post('/api/context/query', { query, case_id: caseId }),
     },
     // Halo
     halo: {
         bootstrap: () => api.get('/api/halo/bootstrap'),
     },
+    // Forensics
+    forensics: {
+        getMetadata: (docId: string) => api.get(`/api/forensics/${docId}`),
+        getHexView: (docId: string) => api.get(`/api/forensics/${docId}/hex`),
+        analyze: (docId: string, caseId: string) => api.post(`/api/forensics/${docId}/analyze?case_id=${caseId}`),
+    },
+    // Legal Theory
+    legalTheory: {
+        suggestions: (caseId: string) => api.get(`/api/legal_theory/suggestions?case_id=${caseId}`),
+        subgraph: (cause: string) => api.get(`/api/legal_theory/${cause}/subgraph`),
+    },
+    // Simulation
+    simulation: {
+        mootCourt: (data: any) => api.post('/api/simulation/moot_court', data),
+    },
+    // Jury
+    jury: {
+        analyze: (text: string) => api.post('/api/jury-sentiment/analyze-argument', { text }),
+        simulate: (argument: string, juryProfile: any) => api.post('/api/jury-sentiment/simulate-jury', { argument, jury_profile: juryProfile }),
+        simulateIndividuals: (argument: string, jurors: any[]) => api.post('/api/jury-sentiment/simulate-individuals', { argument, jurors }),
+        scoreCredibility: (witnessId: string, testimony: string) => api.post('/api/jury-sentiment/score-credibility', { witness_id: witnessId, testimony }),
+    },
+    // Evidence Map
+    evidenceMap: {
+        get: (caseId: string) => api.get(`/api/evidence-map/${caseId}`),
+        analyze: (caseId: string, data: any) => api.post(`/api/evidence-map/${caseId}/analyze`, data),
+    },
+    // Jury Sentiment
+    jurySentiment: {
+        analyzeArgument: (data: any) => api.post('/api/jury-sentiment/analyze-argument', data),
+        simulateJury: (data: any) => api.post('/api/jury-sentiment/simulate-jury', data),
+        getReport: (caseId: string) => api.get(`/api/jury-sentiment/${caseId}/report`),
+    },
+    // Case Management
+    cases: {
+        list: (skip = 0, limit = 100) => api.get(`/api/cases/?skip=${skip}&limit=${limit}`),
+        create: (data: { name: string; description?: string }) => api.post('/api/cases/', data),
+        get: (caseId: string) => api.get(`/api/cases/${caseId}`),
+        update: (caseId: string, data: { name?: string; description?: string }) => api.put(`/api/cases/${caseId}`, data),
+        delete: (caseId: string) => api.delete(`/api/cases/${caseId}`),
+        export: (caseId: string) => api.get(`/api/cases/${caseId}/export`, { responseType: 'blob' }),
+        import: (file: File) => {
+            const formData = new FormData();
+            formData.append('file', file);
+            return api.post('/api/cases/import', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+        },
+        getCurrent: () => api.get('/api/cases/current'),
+        setCurrent: (caseId: string) => api.post(`/api/cases/current?case_id=${caseId}`),
+    },
+    // Ingestion
+    ingestion: {
+        ingestLocal: (data: { source_path: string; document_id: string; recursive?: boolean; sync?: boolean }) => {
+            const formData = new FormData();
+            formData.append('source_path', data.source_path);
+            formData.append('document_id', data.document_id);
+            if (data.recursive !== undefined) formData.append('recursive', String(data.recursive));
+            if (data.sync !== undefined) formData.append('sync', String(data.sync));
+            return api.post('/api/ingestion/ingest_local_path', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' } // Although it's form data, the endpoint expects Form(...) params
+            });
+        }
+    }
 };
 
 export default api;

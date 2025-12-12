@@ -247,6 +247,58 @@ def _dependency(
     allowed_roles: Iterable[str],
 ):
     async def wrapper(request: Request) -> Principal:
+        settings = get_settings()
+        if not settings.security_enabled:
+            # Return a default development principal
+            return Principal(
+                client_id="dev-client",
+                subject="dev-user",
+                tenant_id="dev-tenant",
+                roles={"Developer", "CaseCoordinator", "PlatformEngineer", "ResearchAnalyst", "ForensicsOperator", "ComplianceAuditor"},
+                token_roles=set(),
+                certificate_roles=set(),
+                scopes=set(required_scopes),
+                case_admin=True,
+                attributes={"dev_mode": True},
+            )
+
+        return _authorize(
+            request,
+            resource_name=resource_name,
+            action=action,
+            audience=audience,
+            required_scopes=required_scopes,
+            allowed_roles=allowed_roles,
+        )
+
+    return wrapper
+
+
+def _optional_dependency(
+    *,
+    resource_name: str,
+    action: str,
+    audience: str,
+    required_scopes: Iterable[str],
+    allowed_roles: Iterable[str],
+):
+    """Create an optional auth dependency that bypasses auth when security_enabled=False."""
+    async def wrapper(request: Request) -> Principal:
+        settings = get_settings()
+        if not settings.security_enabled:
+            # Return a default development principal
+            LOGGER.debug(f"Security disabled - bypassing auth for {resource_name}")
+            return Principal(
+                client_id="dev-client",
+                subject="dev-user",
+                tenant_id="dev-tenant",
+                roles={"Developer", "CaseCoordinator", "PlatformEngineer"},
+                token_roles=set(),
+                certificate_roles=set(),
+                scopes=set(required_scopes),
+                case_admin=True,
+                attributes={"dev_mode": True},
+            )
         return _authorize(
             request,
             resource_name=resource_name,
@@ -306,7 +358,7 @@ authorize_timeline = _dependency(
     allowed_roles=["ResearchAnalyst", "CaseCoordinator", "ComplianceAuditor"],
 )
 
-authorize_graph_read = _dependency(
+authorize_graph_read = _optional_dependency(
     resource_name="graph.read",
     action="graph:read",
     audience=settings.security_audience_graph,
@@ -406,6 +458,22 @@ authorize_settings_write = _dependency(
     audience=settings.security_audience_settings,
     required_scopes=["settings:write"],
     allowed_roles=["PlatformEngineer"],
+)
+
+authorize_research_access = _dependency(
+    resource_name="research.access",
+    action="research:access",
+    audience=settings.security_audience_query,
+    required_scopes=["query:read"],
+    allowed_roles=["ResearchAnalyst", "CaseCoordinator", "PlatformEngineer"],
+)
+
+authorize_content_access = _dependency(
+    resource_name="content.access",
+    action="content:access",
+    audience=settings.security_audience_query,
+    required_scopes=["query:read"],
+    allowed_roles=["ResearchAnalyst", "CaseCoordinator", "PlatformEngineer", "AutomationService"],
 )
 
 

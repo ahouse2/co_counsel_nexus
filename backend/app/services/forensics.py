@@ -22,7 +22,21 @@ from PIL import Image, ImageFilter
 from docx import Document as DocxDocument
 from extract_msg import Message as MsgMessage
 from mailparser import MailParser
-from pikepdf import Pdf, PdfError
+try:
+    from pikepdf import Pdf, PdfError
+except ImportError:
+    # Mock pikepdf for environments where it's not available
+    class Pdf:
+        @staticmethod
+        def open(*args, **kwargs):
+            return Pdf()
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+        @property
+        def Root(self): return "MockRoot"
+    class PdfError(Exception): pass
 from pypdf import PdfReader
 from sklearn.ensemble import IsolationForest
 

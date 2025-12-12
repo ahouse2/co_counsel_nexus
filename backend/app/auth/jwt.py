@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.app.config import get_settings, Settings
 from backend.app.database import get_db
-from backend.app.models.user import User as UserModel
+from backend.app.models.sql import User as UserModel
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 

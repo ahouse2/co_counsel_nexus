@@ -14,7 +14,7 @@ from backend.app.agents.tools.research_tools import LegalResearchTool
 timeline_tool = TimelineTool()
 legal_research_tool = LegalResearchTool()
 
-# Placeholder Tools for Litigation Support
+# Tools for Litigation Support
 from backend.app.services.knowledge_graph_service import KnowledgeGraphService
 
 class KnowledgeGraphQueryTool(AgentTool):

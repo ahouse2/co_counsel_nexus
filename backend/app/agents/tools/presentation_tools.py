@@ -7,6 +7,8 @@ class TimelineTool:
     """
     A tool for agents to interact with the case timeline.
     """
+    name = "timeline_tool"
+
     def __init__(self):
         self.service = TimelineService()
 

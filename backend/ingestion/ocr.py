@@ -161,15 +161,69 @@ class OcrEngine:
         endpoint = (override or {}).get("endpoint") or self.config.vision_endpoint
         model = (override or {}).get("model") or self.config.vision_model
         api_key = (override or {}).get("api_key") or self.config.api_key
+
+        # Special handling for Gemini models
+        if model and "gemini" in model.lower():
+            if not api_key:
+                raise RuntimeError("Gemini API key not configured for Vision OCR")
+            
+            # Default to Google API if no endpoint provided
+            if not endpoint:
+                endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            
+            # Append API key to URL if using standard Google endpoint
+            if "generativelanguage.googleapis.com" in endpoint and "key=" not in endpoint:
+                endpoint = f"{endpoint}?key={api_key}"
+
+            headers = {"Content-Type": "application/json"}
+            
+            # Gemini JSON payload
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": "Transcribe the text in this image exactly as it appears. Output only the text."},
+                            {
+                                "inline_data": {
+                                    "mime_type": "image/jpeg", # Assuming JPEG or generic image handling
+                                    "data": base64.b64encode(image_bytes).decode("ascii")
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+
+            with httpx.Client(timeout=60.0) as client:
+                response = client.post(endpoint, headers=headers, content=json.dumps(payload))
+                response.raise_for_status()
+                data = response.json()
+                
+                # Parse Gemini response
+                try:
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    return {
+                        "text": text,
+                        "tokens": [], # Gemini doesn't return token-level confidence easily via this API
+                        "confidence": 0.95 # Placeholder high confidence for successful generation
+                    }
+                except (KeyError, IndexError) as e:
+                    self.logger.error(f"Failed to parse Gemini response: {data}")
+                    raise RuntimeError(f"Invalid response from Gemini Vision: {str(e)}")
+
+        # Standard/Generic Vision API (e.g. internal proxy)
         if not endpoint:
             raise RuntimeError("Vision OCR endpoint not configured")
+        
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        
         payload = {
             "model": model or "vision-large",
             "image": base64.b64encode(image_bytes).decode("ascii"),
         }
+        
         with httpx.Client(timeout=30.0) as client:
             response = client.post(endpoint, headers=headers, content=json.dumps(payload))
             response.raise_for_status()

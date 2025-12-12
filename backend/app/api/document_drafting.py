@@ -5,7 +5,7 @@ import os
 import shutil
 from datetime import datetime
 
-from toolsnteams_previous.document_drafter import DocumentDrafter
+from ..services.document_generation import get_document_generation_service
 
 router = APIRouter()
 
@@ -16,11 +16,7 @@ class DraftDocumentRequest(BaseModel):
 
 @router.post("/draft-document", response_class=FileResponse)
 async def draft_document_endpoint(request: DraftDocumentRequest):
-    """
-    Drafts a legal document based on the specified motion type and provided data.
-    Returns the drafted document as a downloadable Word file.
-    """
-    drafter = DocumentDrafter()
+    service = get_document_generation_service()
     
     # Create a temporary file to save the document
     temp_dir = "temp_documents"
@@ -31,7 +27,7 @@ async def draft_document_endpoint(request: DraftDocumentRequest):
     file_path = os.path.join(temp_dir, file_name)
 
     try:
-        drafter.draft_legal_document(
+        service.draft_legal_document(
             filepath=file_path,
             motion_type=request.motion_type,
             data=request.data

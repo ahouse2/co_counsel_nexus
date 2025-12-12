@@ -35,9 +35,25 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       # Ingestion Configuration
       INGESTION_VISION_MODEL: gemini-2.0-flash-exp
-      INGESTION_VISION_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION}
+      AZURE_OPENAI_CHAT_DEPLOYMENT: ${AZURE_OPENAI_CHAT_DEPLOYMENT}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}
+      # Ingestion-specific Azure OpenAI Configuration
+      INGESTION_AZURE_OPENAI_ENDPOINT: ${INGESTION_AZURE_OPENAI_ENDPOINT:-${AZURE_OPENAI_ENDPOINT}}
+      INGESTION_AZURE_OPENAI_CHAT_DEPLOYMENT: ${INGESTION_AZURE_OPENAI_CHAT_DEPLOYMENT:-${AZURE_OPENAI_CHAT_DEPLOYMENT}}
+      INGESTION_AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${INGESTION_AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}}
+      INGESTION_AZURE_OPENAI_API_VERSION: ${INGESTION_AZURE_OPENAI_API_VERSION:-${AZURE_OPENAI_API_VERSION}}
+      INGESTION_ENTERPRISE_LLM_API_KEY: ${INGESTION_ENTERPRISE_LLM_API_KEY:-${AZURE_OPENAI_API_KEY}}
+      INGESTION_ENTERPRISE_EMBEDDING_API_KEY: ${INGESTION_ENTERPRISE_EMBEDDING_API_KEY:-${AZURE_OPENAI_API_KEY}}
+      COURTLISTENER_API_KEY: ${COURTLISTENER_API_KEY}
+      INGESTION_COST_MODE: ${INGESTION_COST_MODE:-community}
+
     ports:
-      - "8000:8000"
+      - "8001:8000"
     depends_on:
       - neo4j
       - qdrant
@@ -45,26 +61,56 @@ services:
     networks:
       - backend
     volumes:
-      - api_data:/data
+      # - ./backend:/src/backend
+      # - ./data:/data
+
       - voice_models:/models
-      - ./var/storage/documents:/var/cocounsel/documents
-      - ./var/storage/graphs:/var/cocounsel/graphs
-      - ./var/storage/telemetry:/var/cocounsel/telemetry
-      - ./var/models/huggingface:/var/cocounsel/models/huggingface
-      - ./var/models/whisper:/var/cocounsel/models/whisper
-      - ./var/models/tts:/var/cocounsel/models/tts
-      # - ./backend:/src/backend  # Disabled due to volume mount issues
+      - storage_documents:/var/cocounsel/documents
+      - storage_graphs:/var/cocounsel/graphs
+      - storage_telemetry:/var/cocounsel/telemetry
+      - models_huggingface:/var/cocounsel/models/huggingface
+      - models_whisper:/var/cocounsel/models/whisper
+      - models_tts:/var/cocounsel/models/tts
+      # - ./backend:/src/backend # Disabled due to volume mount issues
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 12G
+        reservations:
+          cpus: '0.5'
+          memory: 2G
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "8088:80"
+      - "0.0.0.0:8090:80"
     networks:
       - backend
     depends_on:
       - api
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:80" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
   neo4j:
     image: neo4j:5.23.0
@@ -73,7 +119,7 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      NEO4J_AUTH: neo4j/password
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-change_this_strong_password_123!}
     volumes:
       - neo4j_data:/data
     networks:
@@ -94,7 +140,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cocounsel}
       POSTGRES_USER: ${POSTGRES_USER:-cocounsel}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-securepassword}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_strong_pg_password_456!}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -120,8 +166,8 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - ./var/models/huggingface:/models/huggingface
-      - ./var/models/whisper:/models/whisper
+      - models_huggingface:/models/huggingface
+      - models_whisper:/models/whisper
     networks:
       - backend
 
@@ -142,9 +188,9 @@ services:
     ports:
       - "5002:5002"
     volumes:
-      - ./var/models/huggingface:/models/huggingface
-      - ./var/models/tts:/models/tts
-      - ./var/audio:/output
+      - models_huggingface:/models/huggingface
+      - models_tts:/models/tts
+      # - ./var/audio:/output  # Commented out - causing mount path error
     networks:
       - backend
 
@@ -157,30 +203,36 @@ services:
       - "9464:9464"
     networks:
       - backend
-
-  storage-backup:
-    image: ghcr.io/offen/docker-volume-backup:latest
-    environment:
-      BACKUP_CRON: ${BACKUP_CRON_SCHEDULE:-0 3 * * *}
-      BACKUP_FILENAME: full-stack
-      BACKUP_PATH: /var/backups
-      BACKUP_PRUNING_PREFIX: full-stack
-      BACKUP_PRUNING_KEEP_DAYS: ${BACKUP_RETENTION_DAYS:-7}
-      BACKUP_LATEST_SYMLINK: true
-    volumes:
-      - ./var/backups:/var/backups
-      - ./var/storage/documents:/backup/documents:ro
-      - ./var/storage/graphs:/backup/graphs:ro
-      - ./var/storage/telemetry:/backup/telemetry:ro
-    networks:
-      - backend
+  # Temporarily disabled due to Windows Docker Desktop mount path issues
+  # storage-backup:
+  #   image: ghcr.io/offen/docker-volume-backup:latest
+  #   environment:
+  #     BACKUP_CRON: ${BACKUP_CRON_SCHEDULE:-0 3 * * *}
+  #     BACKUP_FILENAME: full-stack
+  #     BACKUP_PATH: /var/backups
+  #     BACKUP_PRUNING_PREFIX: full-stack
+  #     BACKUP_PRUNING_KEEP_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+  #     BACKUP_LATEST_SYMLINK: true
+  #   volumes:
+  #     - ./var/backups:/var/backups
+  #     - ./var/storage/documents:/backup/documents:ro
+  #     - ./var/storage/graphs:/backup/graphs:ro
+  #     - ./var/storage/telemetry:/backup/telemetry:ro
+  #   networks:
+  #     - backend
 
 volumes:
   neo4j_data:
   qdrant_data:
-  api_data:
+
   voice_models:
   postgres_data:
+  storage_documents:
+  storage_graphs:
+  storage_telemetry:
+  models_huggingface:
+  models_whisper:
+  models_tts:
 
 
 networks:

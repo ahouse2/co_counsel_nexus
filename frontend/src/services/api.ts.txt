@@ -1,0 +1,101 @@
+import axios from 'axios';
+
+// Create an axios instance with default config
+const api = axios.create({
+    // In development (Vite), this is proxied to http://localhost:8000
+    // In production (Nginx), this is proxied to the backend service
+    baseURL: '/',
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
+
+// Response interceptor for error handling
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        console.error('API Error:', error);
+        return Promise.reject(error);
+    }
+);
+
+export const endpoints = {
+    // Graph
+    graph: {
+        neighbors: (nodeId: string) => api.get(`/api/graph/neighbors/${nodeId}`),
+        query: (cypher: string) => api.post('/api/graph/query', { query: cypher }),
+    },
+    // Chat / Agents
+    agents: {
+        list: () => api.get('/agents/'),
+        chat: (message: string) => api.post('/agents/chat', { message }),
+    },
+    // Documents
+    documents: {
+        list: (caseId: string) => api.get(`/api/documents/${caseId}/documents`),
+        upload: (caseId: string, formData: FormData, relativePath?: string, apiKeys?: { gemini?: string, courtListener?: string }) => {
+            let url = `/api/documents/upload?case_id=${caseId}&doc_type=my_documents`;
+            if (relativePath) {
+                url += `&relative_path=${encodeURIComponent(relativePath)}`;
+            }
+            const headers: any = { 'Content-Type': 'multipart/form-data' };
+            if (apiKeys?.gemini) headers['x-gemini-api-key'] = apiKeys.gemini;
+            if (apiKeys?.courtListener) headers['x-courtlistener-api-key'] = apiKeys.courtListener;
+
+            return api.post(url, formData, { headers });
+        },
+        uploadDirectory: (caseId: string, formData: FormData) => {
+            return api.post(`/api/documents/upload_directory?case_id=${caseId}`, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
+        },
+        uploadChunk: (caseId: string, formData: FormData) => {
+            return api.post(`/api/documents/upload_chunk?case_id=${caseId}`, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                },
+                timeout: 300000 // 5 minutes for large chunks
+            });
+        },
+    },
+    // Timeline
+    timeline: {
+        get: (caseId: string) => api.get(`/api/timeline/${caseId}`),
+        list: (page = 1, pageSize = 10) => api.get(`/api/timeline?page=${page}&page_size=${pageSize}`),
+        generate: (prompt: string, caseId: string) => api.post('/api/timeline/generate', { prompt, case_id: caseId }),
+        weave: (caseId: string) => api.post(`/api/timeline/${caseId}/weave`),
+        contradictions: (caseId: string) => api.get(`/api/timeline/${caseId}/contradictions`),
+    },
+    // Context
+    context: {
+        query: (q: string) => api.post('/query', { query: q }),
+    },
+    // Halo
+    halo: {
+        bootstrap: () => api.get('/api/halo/bootstrap'),
+    },
+    // Forensics
+    forensics: {
+        getMetadata: (docId: string) => api.get(`/api/forensics/${docId}`),
+        getHexView: (docId: string) => api.get(`/api/forensics/${docId}/hex`),
+    },
+    // Simulation
+    simulation: {
+        mootCourt: (data: any) => api.post('/api/simulation/moot_court', data),
+    },
+    // Evidence Map
+    evidenceMap: {
+        get: (caseId: string) => api.get(`/api/evidence-map/${caseId}`),
+        analyze: (caseId: string, data: any) => api.post(`/api/evidence-map/${caseId}/analyze`, data),
+    },
+    // Jury Sentiment
+    jurySentiment: {
+        analyzeArgument: (data: any) => api.post('/api/jury-sentiment/analyze-argument', data),
+        simulateJury: (data: any) => api.post('/api/jury-sentiment/simulate-jury', data),
+        getReport: (caseId: string) => api.get(`/api/jury-sentiment/${caseId}/report`),
+    },
+};
+
+export default api;

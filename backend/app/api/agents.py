@@ -19,35 +19,37 @@ def get_llm_config() -> LlmConfig:
         temperature=settings.llm_temperature,
     )
 
-class AgentInteractionRequest(BaseModel):
-    session_id: str
-    prompt: str
-    agent_name: str
+class AgentRunRequest(BaseModel):
+    task: str
+    case_id: str = "default_case"
 
-class AgentInteractionResponse(BaseModel):
-    response: str
+class AgentRunResponse(BaseModel):
+    result: str
 
-@router.post("/agents/invoke", response_model=AgentInteractionResponse)
-async def invoke_agent(
-    request: AgentInteractionRequest,
-    orchestrator: MicrosoftAgentsOrchestrator = Depends(get_orchestrator),
+@router.post("/run", response_model=AgentRunResponse)
+async def run_agent_task(
+    request: AgentRunRequest,
 ):
     """
-    Invoke a specific agent with a prompt.
+    Master Endpoint to run any agent task.
+    Routes the task to the appropriate Swarm Team based on intent.
     """
-    if request.agent_name not in orchestrator.agents:
-        raise HTTPException(status_code=404, detail=f"Agent '{request.agent_name}' not found.")
-
-    session = orchestrator.get_session(request.session_id)
+    from backend.app.agents.swarms_runner import get_swarms_runner
+    import asyncio
+    
+    runner = get_swarms_runner()
+    loop = asyncio.get_event_loop()
     
     try:
-        response = await session.invoke(
-            agent_name=request.agent_name,
-            prompt=request.prompt,
-        )
-        return AgentInteractionResponse(response=response.message)
+        # Prepend context
+        full_task = f"Case ID: {request.case_id}. Task: {request.task}"
+        
+        # Run Swarm
+        result = await loop.run_in_executor(None, runner.route_and_run, full_task)
+        
+        return AgentRunResponse(result=str(result))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Agent Execution Failed: {e}")
 
 class ReasoningRequest(BaseModel):
     case_id: str

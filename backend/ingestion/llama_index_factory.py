@@ -32,6 +32,11 @@ try:
 except ImportError:
     ollama = None
 
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
+
 
 class BaseLlmService:
     """Base class for LLM services."""
@@ -44,8 +49,17 @@ class OpenAILlmService(BaseLlmService):
     def __init__(self, config: LlmConfig):
         if openai is None:
             raise RuntimeError("OpenAI client not installed. Please install with 'pip install openai'")
-        self.client = openai.OpenAI(api_key=config.api_key, base_url=config.api_base)
-        self.model = config.model
+        
+        if config.provider == LlmProvider.AZURE_OPENAI:
+            self.client = openai.AzureOpenAI(
+                api_key=config.api_key,
+                azure_endpoint=config.api_base,
+                api_version=config.extra.get("api_version"),
+            )
+            self.model = config.extra.get("azure_deployment") or config.model
+        else:
+            self.client = openai.OpenAI(api_key=config.api_key, base_url=config.api_base)
+            self.model = config.model
 
     def generate_text(self, prompt: str) -> str:
         try:
@@ -56,7 +70,24 @@ class OpenAILlmService(BaseLlmService):
             )
             return response.choices[0].message.content
         except Exception as e:
-            print(f"Error calling OpenAI LLM: {e}")
+            print(f"Error calling OpenAI/Azure LLM: {e}")
+            raise
+
+
+class GeminiLlmService(BaseLlmService):
+    """Gemini LLM service."""
+    def __init__(self, config: LlmConfig):
+        if genai is None:
+            raise RuntimeError("Google Generative AI client not installed. Please install with 'pip install google-generativeai'")
+        genai.configure(api_key=config.api_key)
+        self.model = genai.GenerativeModel(config.model)
+
+    def generate_text(self, prompt: str) -> str:
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            print(f"Error calling Gemini LLM: {e}")
             raise
 
 
@@ -105,9 +136,11 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for lightweight envir
 class LocalHuggingFaceEmbedding(_BaseEmbedding):
     """Deterministic local embedding emulating HF behaviour without remote downloads."""
 
-    def __init__(self, model_name: str, dimensions: int | None) -> None:
-        self.model_name = model_name
-        self.dimensions = max(8, int(dimensions or 384))
+    model_name: str
+    dimensions: int
+
+    def __init__(self, model_name: str, dimensions: int | None, **kwargs: Any) -> None:
+        super().__init__(model_name=model_name, dimensions=max(8, int(dimensions or 384)), **kwargs)
 
     def _encode(self, text: str) -> list[float]:
         vector = [0.0] * self.dimensions
@@ -127,6 +160,18 @@ class LocalHuggingFaceEmbedding(_BaseEmbedding):
         return self._encode(text)
 
     def get_query_embedding(self, text: str) -> list[float]:
+        return self._encode(text)
+
+    def _get_query_embedding(self, query: str) -> list[float]:
+        return self._encode(query)
+
+    async def _aget_query_embedding(self, query: str) -> list[float]:
+        return self._encode(query)
+
+    def _get_text_embedding(self, text: str) -> list[float]:
+        return self._encode(text)
+
+    async def _aget_text_embedding(self, text: str) -> list[float]:
         return self._encode(text)
 
 
@@ -196,6 +241,8 @@ def create_llm_service(config: LlmConfig) -> BaseLlmService:
             return OpenAILlmService(config)
         if config.provider is LlmProvider.OLLAMA:
             return OllamaLlmService(config)
+        if config.provider is LlmProvider.GEMINI:
+            return GeminiLlmService(config)
     except Exception as e:
         print(f"Failed to initialize LLM provider {config.provider}: {e}")
         return NullLlmService()
@@ -205,10 +252,82 @@ def create_llm_service(config: LlmConfig) -> BaseLlmService:
     return NullLlmService()
 
 
+def create_extractors(runtime_config: LlamaIndexRuntimeConfig, llm_service: BaseLlmService) -> list[Any]:
+    """Create metadata extractors based on configuration."""
+    extractors = []
+    
+    # Only add extractors if we have a valid LLM (not NullLlmService)
+    # or if the extractor doesn't require an LLM (like KeywordExtractor might not, but usually does)
+    if isinstance(llm_service, NullLlmService):
+        return extractors
+
+    # We need to adapt our BaseLlmService to LlamaIndex's LLM class
+    # because Extractors expect a LlamaIndex LLM object, not our wrapper.
+    # However, our wrapper wraps the client. 
+    # Ideally, we should use the LlamaIndex LLM implementations directly if possible.
+    # In `create_llm_service`, we are returning our own wrapper.
+    # Let's check if we can get the underlying LlamaIndex LLM object.
+    
+    # Actually, `create_llm_service` in this file returns a `BaseLlmService` which is a custom wrapper.
+    # The LlamaIndex extractors (TitleExtractor, etc.) need a `llm` argument which is a `llama_index.core.llms.LLM`.
+    # We should probably instantiate the LlamaIndex LLM class directly here.
+    
+    llm = None
+    try:
+        from llama_index.llms.openai import OpenAI
+        from llama_index.llms.ollama import Ollama
+        from llama_index.llms.gemini import Gemini
+        
+        config = runtime_config.llm
+        if config.provider == LlmProvider.OPENAI:
+            llm = OpenAI(model=config.model, api_key=config.api_key, api_base=config.api_base)
+        elif config.provider == LlmProvider.AZURE_OPENAI:
+             from llama_index.llms.azure_openai import AzureOpenAI
+             llm = AzureOpenAI(
+                model=config.model,
+                deployment_name=config.extra.get("azure_deployment"),
+                api_key=config.api_key,
+                azure_endpoint=config.api_base,
+                api_version=config.extra.get("api_version"),
+            )
+        elif config.provider == LlmProvider.GEMINI:
+            llm = Gemini(model=config.model, api_key=config.api_key)
+        elif config.provider == LlmProvider.OLLAMA:
+            llm = Ollama(model=config.model, base_url=config.api_base)
+            
+    except ImportError:
+        pass
+
+    if not llm:
+        return extractors
+
+    try:
+        from llama_index.core.extractors import (
+            TitleExtractor,
+            SummaryExtractor,
+            KeywordExtractor,
+            QuestionsAnsweredExtractor,
+        )
+        
+        # Title Extractor
+        extractors.append(TitleExtractor(nodes=5, llm=llm))
+        
+        # Summary/Keyword/Questions only in PRO mode
+        if runtime_config.cost_mode != "community":
+            extractors.append(SummaryExtractor(summaries=["prev", "self"], llm=llm))
+            extractors.append(KeywordExtractor(keywords=10, llm=llm))
+            extractors.append(QuestionsAnsweredExtractor(questions=3, llm=llm))
+            
+    except ImportError:
+        pass
+        
+    return extractors
+
 __all__ = [
     "configure_global_settings",
     "create_embedding_model",
     "create_sentence_splitter",
-    "create_llm_service", # Added
-    "BaseLlmService", # Added
+    "create_llm_service",
+    "create_extractors", # Added
+    "BaseLlmService",
 ]

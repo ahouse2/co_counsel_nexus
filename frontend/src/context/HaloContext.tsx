@@ -15,7 +15,11 @@ export type ModuleId =
     | 'drafting'
     | 'presentation'
     | 'process'
-    | 'agents';
+    | 'agents'
+    | 'mootcourt'
+    | 'evidencemap'
+    | 'jurysentiment'
+    | 'classification';
 
 export type SubmoduleId = string | null;
 

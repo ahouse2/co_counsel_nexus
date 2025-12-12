@@ -23,6 +23,7 @@ class WorkflowComponent(str, Enum):
     SECURITY = "security"
     SCENARIO = "scenario"
     TTS = "tts"
+    ECHO = "echo"
 
 
 class WorkflowSeverity(str, Enum):

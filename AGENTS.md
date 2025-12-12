@@ -35,3 +35,12 @@ Backend Startup Fix (HTTP 502 Resolution)
 - Updated default from `"super-secret-jwt-key"` to `"super-secret-jwt-key-change-in-production-min32chars"` (51 chars)
 - Backend container restarted successfully and now accepting requests
 - File uploads should now work end-to-end with 20GB limit
+
+2025/12/07 12:35:00 PM
+Azure Migration & Deployment
+- Provisioned Azure infrastructure (Resource Group, ACR, Storage, Container Apps Env) using `scripts/provision_azure.ps1`.
+- Manually provisioned Azure Database for PostgreSQL in `eastus2` to bypass region restrictions in `eastus`.
+- Deployed Backend and Frontend to Azure Container Apps using `scripts/deploy_azure.ps1`.
+- Verified deployment via Frontend URL and API Health endpoint.
+- Created `walkthrough.md` with deployment details and verification steps.
+- Cleared `HANDOFFS.md`.

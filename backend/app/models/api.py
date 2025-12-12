@@ -6,10 +6,21 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, EmailStr, Field, HttpUrl, ConfigDict
 
 
+from enum import Enum
+
+class SourceType(str, Enum):
+    FILE = "file"
+    FOLDER = "folder"
+    EMAIL = "email"
+    URL = "url"
+
 class IngestionSource(BaseModel):
-    type: str = Field(description="Source type identifier")
+    source_id: str = Field(description="Unique identifier for this ingestion source")
+    type: str = Field(description="Source type identifier (e.g., 'file', 'folder', 'email')")
+    uri: Optional[str] = Field(default=None, description="URI or path to the source")
     path: Optional[str] = Field(default=None, description="Filesystem path for local sources")
     credRef: Optional[str] = Field(default=None, description="Credential reference for remote sources")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the source")
 
 
 class IngestionRequest(BaseModel):
@@ -148,6 +159,8 @@ class TimelineEventModel(BaseModel):
     outcome_probabilities: List[OutcomeProbabilityModel] = Field(default_factory=list)
     recommended_actions: List[str] = Field(default_factory=list)
     motion_deadline: Optional[datetime] = None
+    type: str = "fact"
+    related_ids: List[str] = Field(default_factory=list)
 
 
 class TimelineResponse(BaseModel):
@@ -218,6 +231,15 @@ class GraphStrategyBriefModel(BaseModel):
 class GraphNeighborResponse(BaseModel):
     nodes: List[GraphNodeModel]
     edges: List[GraphEdgeModel]
+
+
+class GraphQueryRequest(BaseModel):
+    query: str = Field(description="Cypher query to execute")
+
+
+class GraphQueryResponse(BaseModel):
+    records: List[Dict[str, Any]]
+    summary: Dict[str, Any]
 
 
 class ForensicsStageModel(BaseModel):

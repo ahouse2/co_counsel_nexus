@@ -16,7 +16,7 @@ class Recipient(BaseModel):
     address: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class Document(BaseModel):
     id: str
@@ -24,7 +24,7 @@ class Document(BaseModel):
     path: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ServiceRequest(BaseModel):
     id: str
@@ -33,7 +33,7 @@ class ServiceRequest(BaseModel):
     recipient: Recipient
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class ServiceRequestCreate(BaseModel):
     document_id: str

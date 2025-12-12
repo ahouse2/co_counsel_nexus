@@ -54,7 +54,7 @@ export function TrialUniversityModule() {
         // Fetch case context on mount
         const fetchContext = async () => {
             try {
-                const res = await endpoints.context.query("Summarize the key facts and legal issues of this case for a law student.");
+                const res = await endpoints.context.query("Summarize the key facts and legal issues of this case for a law student.", "default_case");
                 setCaseContext(res.data?.response || "No specific case context available.");
             } catch (e) {
                 console.error("Failed to fetch context", e);

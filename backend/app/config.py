@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Runtime configuration for the Co-Counsel API."""
 
+    app_name: str = "Co-Counsel API"
     app_version: str = "0.1.0"
 
     model_providers_primary: str = Field(default="gemini")
@@ -57,11 +58,12 @@ class Settings(BaseSettings):
     forensics_dir: Path = Field(default=Path("storage/forensics"))
     forensics_chain_path: Path = Field(default=Path("storage/forensics_chain/ledger.jsonl"))
     timeline_path: Path = Field(default=Path("storage/timeline.jsonl"))
-    job_store_dir: Path = Field(default=Path("storage/jobs"))
-    encryption_key: str = Field(default="a_very_secret_key_for_document_encryption_32_bytes_long", min_length=32) # Added
-    document_storage_path: Path = Field(default=Path("storage/documents")) # Renamed from document_store_dir for clarity
-    ingestion_workspace_dir: Path = Field(default=Path("storage/workspaces"))
-    agent_threads_dir: Path = Field(default=Path("storage/agent_threads"))
+    job_store_dir: Path = Field(default=Path("backend/storage/jobs"))
+    encryption_key: str = Field(default="u3Uc-qAi9iiCv3fkBfRUAKrM9Q8YP7MkF5JaK0R30J8=") # Valid Fernet key for development
+    document_storage_path: Path = Field(default=Path("backend/storage/documents")) # Renamed from document_store_dir for clarity
+    ingestion_temp_dir: Path = Field(default=Path("backend/storage/ingestion_temp")) # Temporary directory for ingestion uploads
+    ingestion_workspace_dir: Path = Field(default=Path("backend/storage/workspaces"))
+    agent_threads_dir: Path = Field(default=Path("backend/storage/agent_threads"))
     agent_retry_attempts: int = Field(default=3, ge=1)
     agent_retry_backoff_ms: int = Field(default=0, ge=0)
     agent_circuit_threshold: int = Field(default=4, ge=1)
@@ -84,16 +86,25 @@ class Settings(BaseSettings):
         default=("ingestion", "cocounsel")
     )
     credentials_registry_path: Path | None = Field(default=None)
-    settings_store_path: Path = Field(default=Path("storage/settings/preferences.json"))
-    manifest_encryption_key_path: Path = Field(default=Path("storage/manifest.key"))
+    settings_store_path: Path = Field(default=Path("backend/storage/settings/preferences.json"))
+    manifest_encryption_key_path: Path = Field(default=Path("backend/storage/manifest.key"))
     manifest_retention_days: int = Field(default=30)
-    audit_log_path: Path = Field(default=Path("storage/audit.log"))
-    billing_usage_path: Path = Field(default=Path("storage/billing/usage.json"))
-    cost_tracking_path: Path = Field(default=Path("storage/costs/events.jsonl"))
+    audit_log_path: Path = Field(default=Path("backend/storage/audit.log"))
+    billing_usage_path: Path = Field(default=Path("backend/storage/billing/usage.json"))
+    cost_tracking_path: Path = Field(default=Path("backend/storage/costs/events.jsonl"))
     scenario_library_path: Path | None = Field(default=None)
     scenario_default_top_k: int = Field(default=4, ge=1, le=20)
 
     secret_key: str = Field(default="super-secret-jwt-key-change-in-production-min32chars", min_length=32)
+
+    # PostgreSQL Configuration
+    postgres_host: str = Field(default="postgres")
+    postgres_db: str = Field(default="cocounsel")
+    postgres_user: str = Field(default="cocounsel")
+    postgres_password: str = Field(default="securepassword")
+    
+    # CORS Configuration (for production domains)
+    cors_origins: str | None = Field(default=None)  # Comma-separated list of allowed origins
 
     tts_enabled: bool = Field(default=True)
     tts_service_url: str | None = Field(default=None)
@@ -113,6 +124,7 @@ class Settings(BaseSettings):
     verify_pdf_api_key: Optional[str] = Field(default=None, description="API key for the VerifyPDF API.")
 
 
+    security_enabled: bool = Field(default=False, description="Enable mTLS and OAuth security. Set to False for local development.")
     security_mtls_ca_path: Path | None = Field(default=None)
     security_mtls_registry_path: Path | None = Field(default=None)
     security_mtls_header: str = Field(default="x-client-cert")
@@ -229,7 +241,9 @@ class Settings(BaseSettings):
     ingestion_enterprise_embedding_dimensions: Optional[int] = Field(default=None)
     ingestion_enterprise_embedding_api_key: Optional[str] = Field(default=None)
     ingestion_azure_openai_endpoint: Optional[str] = Field(default=None)
-    ingestion_azure_openai_deployment: Optional[str] = Field(default=None)
+    ingestion_azure_openai_deployment: Optional[str] = Field(default=None) # Deprecated: use specific deployment fields
+    ingestion_azure_openai_chat_deployment: Optional[str] = Field(default=None)
+    ingestion_azure_openai_embedding_deployment: Optional[str] = Field(default=None)
     ingestion_azure_openai_api_version: Optional[str] = Field(default="2024-05-01-preview")
     ingestion_tesseract_languages: str = Field(default="eng")
     ingestion_tesseract_path: Optional[Path] = Field(default=None)
@@ -270,6 +284,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         protected_namespaces=(),
+        extra="ignore",
     )
 
     def prepare_directories(self) -> None:
@@ -283,6 +298,7 @@ class Settings(BaseSettings):
         self.timeline_storage_path.mkdir(parents=True, exist_ok=True) # Updated for TimelineService
         self.job_store_dir.mkdir(parents=True, exist_ok=True)
         self.document_storage_path.mkdir(parents=True, exist_ok=True) # Updated
+        self.ingestion_temp_dir.mkdir(parents=True, exist_ok=True) # Temporary ingestion directory
         self.ingestion_workspace_dir.mkdir(parents=True, exist_ok=True)
         self.agent_threads_dir.mkdir(parents=True, exist_ok=True)
         self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
