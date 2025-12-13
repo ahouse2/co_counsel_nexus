@@ -1,31 +1,44 @@
 from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Dict, Any
-from backend.app.services.timeline import TimelineService, get_timeline_service, TimelineEvent
+from typing import List
+from pydantic import BaseModel
 
-router = APIRouter()
+from backend.app.services.narrative_service import NarrativeService, Contradiction
+from backend.app.services.timeline_service import TimelineService
+from backend.app.storage.document_store import DocumentStore
+from backend.app.config import Settings, get_settings
 
-@router.post("/weave/{case_id}", summary="Auto-generate narrative timeline")
-async def weave_narrative(
+router = APIRouter(tags=["narrative"])
+
+def get_document_store(settings: Settings = Depends(get_settings)) -> DocumentStore:
+    return DocumentStore(base_dir=settings.document_storage_path, encryption_key=settings.encryption_key)
+
+def get_narrative_service(
+    store: DocumentStore = Depends(get_document_store),
+) -> NarrativeService:
+    timeline_service = TimelineService()
+    return NarrativeService(timeline_service, store)
+
+class NarrativeResponse(BaseModel):
+    narrative: str
+
+@router.get("/{case_id}/generate", response_model=NarrativeResponse)
+async def generate_case_narrative(
     case_id: str,
-    service: TimelineService = Depends(get_timeline_service)
-) -> List[TimelineEvent]:
+    service: NarrativeService = Depends(get_narrative_service)
+):
     """
-    Triggers the AI to read case documents and construct a master timeline.
+    Generates a narrative summary for the specified case.
     """
-    try:
-        return service.weave_narrative(case_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    narrative = await service.generate_narrative(case_id)
+    return NarrativeResponse(narrative=narrative)
 
-@router.get("/contradictions/{case_id}", summary="Detect contradictions in timeline")
-async def detect_contradictions(
+@router.get("/{case_id}/contradictions", response_model=List[Contradiction])
+async def detect_case_contradictions(
     case_id: str,
-    service: TimelineService = Depends(get_timeline_service)
-) -> List[Dict[str, Any]]:
+    service: NarrativeService = Depends(get_narrative_service)
+):
     """
-    Analyzes the timeline for logical inconsistencies and witness contradictions.
+    Detects contradictions in the specified case.
     """
-    try:
-        return service.detect_contradictions(case_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    contradictions = await service.detect_contradictions(case_id)
+    return contradictions

@@ -160,6 +160,7 @@ export function InCourtPresentationModule() {
                                             <button
                                                 onClick={() => removeFromPlaylist(item.id)}
                                                 className="p-1 hover:bg-red-500/20 text-halo-muted hover:text-red-500 rounded"
+                                                title="Remove from playlist"
                                             >
                                                 <X size={16} />
                                             </button>
@@ -201,7 +202,7 @@ export function InCourtPresentationModule() {
                                 EXHIBIT {currentSlideIndex + 1} / {playlist.length}
                             </div>
                             <div className="flex items-center gap-4">
-                                <button onClick={() => setIsPresenting(false)} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors">
+                                <button onClick={() => setIsPresenting(false)} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white backdrop-blur-sm transition-colors" title="Exit presentation">
                                     <Minimize2 size={20} />
                                 </button>
                             </div>
@@ -214,6 +215,7 @@ export function InCourtPresentationModule() {
                                 onClick={prevSlide}
                                 disabled={currentSlideIndex === 0}
                                 className="absolute left-4 p-4 text-white/50 hover:text-white disabled:opacity-0 transition-all hover:scale-110"
+                                title="Previous slide"
                             >
                                 <ChevronLeft size={48} />
                             </button>
@@ -244,6 +246,7 @@ export function InCourtPresentationModule() {
                                 onClick={nextSlide}
                                 disabled={currentSlideIndex === playlist.length - 1}
                                 className="absolute right-4 p-4 text-white/50 hover:text-white disabled:opacity-0 transition-all hover:scale-110"
+                                title="Next slide"
                             >
                                 <ChevronRight size={48} />
                             </button>

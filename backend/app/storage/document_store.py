@@ -127,6 +127,74 @@ class DocumentStore:
         encrypted_content = storage_path.read_bytes()
         return self.encryption_service.decrypt(encrypted_content)
 
+    def get_document_content(self, doc_type: str, case_id: str, doc_id: str, version: Optional[str] = None) -> Optional[bytes]:
+        """
+        Retrieves and decrypts a document, returning raw bytes.
+        Useful for binary content like PDFs and images.
+        """
+        if version is None:
+            case_path = self._get_storage_path(doc_type, case_id, "")
+            versions = sorted([
+                f.name.replace(f"{doc_id}_v", "").replace(".encrypted", "")
+                for f in case_path.glob(f"{doc_id}_v*.encrypted")
+            ], reverse=True)
+            if not versions:
+                return None
+            version = versions[0]
+        
+        storage_path = self._get_storage_path(doc_type, case_id, doc_id, version=version).with_suffix(".encrypted")
+        
+        if not storage_path.exists():
+            return None
+
+        encrypted_content = storage_path.read_bytes()
+        decrypted = self.encryption_service.decrypt(encrypted_content)
+        
+        # Return as bytes
+        if isinstance(decrypted, str):
+            return decrypted.encode('utf-8')
+        return decrypted
+
+    def get_document_metadata(self, doc_type: str, case_id: str, doc_id: str, version: Optional[str] = None) -> Optional[dict]:
+        """
+        Retrieves the metadata for a document.
+        """
+        if version is None:
+            case_path = self._get_storage_path(doc_type, case_id, "")
+            if not case_path.exists():
+                return None
+            versions = sorted([
+                f.name.replace(f"{doc_id}_v", "").replace(".encrypted", "")
+                for f in case_path.glob(f"{doc_id}_v*.encrypted")
+            ], reverse=True)
+            if not versions:
+                return None
+            version = versions[0]
+        
+        meta_path = self._get_storage_path(doc_type, case_id, doc_id, version=version).with_suffix(".meta")
+        
+        if not meta_path.exists():
+            return None
+
+        try:
+            with open(meta_path, "r") as f:
+                metadata = json.load(f)
+            
+            # Add computed fields 
+            metadata["id"] = doc_id
+            metadata["doc_type"] = doc_type
+            metadata["case_id"] = case_id
+            
+            # Infer content_type from filename if not present
+            if "content_type" not in metadata and "file_name" in metadata:
+                import mimetypes
+                content_type, _ = mimetypes.guess_type(metadata["file_name"])
+                metadata["content_type"] = content_type or "application/octet-stream"
+            
+            return metadata
+        except Exception:
+            return None
+
     def list_document_versions(self, doc_type: str, case_id: str, doc_id: str) -> List[str]:
         """
         Lists all available versions for a given document.

@@ -168,6 +168,7 @@ export function MockTrialArenaModule() {
                                         value={juryDemographics.education}
                                         onChange={(e) => setJuryDemographics(prev => ({ ...prev, education: e.target.value }))}
                                         className="w-full bg-black border border-halo-border rounded p-2 text-halo-text focus:border-halo-cyan outline-none"
+                                        title="Select education level"
                                     >
                                         <option>High School</option>
                                         <option>College Graduate</option>
@@ -181,6 +182,7 @@ export function MockTrialArenaModule() {
                                         value={juryDemographics.age}
                                         onChange={(e) => setJuryDemographics(prev => ({ ...prev, age: e.target.value }))}
                                         className="w-full bg-black border border-halo-border rounded p-2 text-halo-text focus:border-halo-cyan outline-none"
+                                        title="Select age range"
                                     >
                                         <option>18-30</option>
                                         <option>30-50</option>

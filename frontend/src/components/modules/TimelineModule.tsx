@@ -142,6 +142,7 @@ export function TimelineModule() {
                             onKeyDown={(e) => e.key === 'Enter' && fetchTimeline()}
                             placeholder="Filter events..."
                             className="bg-black/40 border border-halo-border rounded-lg pl-9 pr-4 py-2 text-sm focus:border-halo-cyan focus:outline-none w-64"
+                            aria-label="Filter events"
                         />
                     </div>
                     <button onClick={fetchTimeline} className="p-2 bg-halo-card border border-halo-border rounded hover:bg-halo-cyan/10 hover:border-halo-cyan transition-colors" title="Refresh">
@@ -162,8 +163,8 @@ export function TimelineModule() {
                 {/* Chart Area */}
                 <div className="flex-1 flex flex-col p-6 relative">
                     <div className="absolute top-6 right-6 z-10 flex gap-2">
-                        <button onClick={() => handleZoom('in')} className="p-2 bg-black/60 border border-halo-border rounded hover:text-halo-cyan backdrop-blur-sm"><ZoomIn size={20} /></button>
-                        <button onClick={() => handleZoom('out')} className="p-2 bg-black/60 border border-halo-border rounded hover:text-halo-cyan backdrop-blur-sm"><ZoomOut size={20} /></button>
+                        <button onClick={() => handleZoom('in')} className="p-2 bg-black/60 border border-halo-border rounded hover:text-halo-cyan backdrop-blur-sm" title="Zoom in"><ZoomIn size={20} /></button>
+                        <button onClick={() => handleZoom('out')} className="p-2 bg-black/60 border border-halo-border rounded hover:text-halo-cyan backdrop-blur-sm" title="Zoom out"><ZoomOut size={20} /></button>
                     </div>
 
                     <div className="flex-1 w-full min-h-0 bg-black/40 border border-halo-border/30 rounded-xl p-4">

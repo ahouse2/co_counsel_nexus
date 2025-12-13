@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileText, Search, Filter, Upload, Loader2, File, FolderUp, Terminal, Play, Pause, X, Download, Import, RefreshCw, ShieldCheck, List } from 'lucide-react';
+import { FileText, Search, Filter, Upload, Loader2, File, FolderUp, Terminal, Play, Pause, X, Download, Import, RefreshCw, ShieldCheck, List, Trash2 } from 'lucide-react';
+import ForceGraph2D from 'react-force-graph-2d';
 import { endpoints } from '../../services/api';
 import { useHalo } from '../../context/HaloContext';
 import { useUploadManager } from '../../hooks/useUploadManager';
@@ -14,6 +15,45 @@ interface Document {
     url?: string;
     status?: string;
 }
+
+const DocumentGraph = ({ docId, caseId }: { docId: string, caseId: string }) => {
+    const [graphData, setGraphData] = useState({ nodes: [], links: [] });
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchGraph = async () => {
+            try {
+                const response = await endpoints.documents.getGraph(caseId, docId, 2);
+                const { nodes, edges } = response.data;
+                setGraphData({
+                    nodes: nodes.map((n: any) => ({ ...n, val: n.label === 'Document' ? 20 : 10 })),
+                    links: edges.map((e: any) => ({ ...e, source: e.source, target: e.target }))
+                });
+            } catch (error) {
+                console.error("Failed to fetch graph:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchGraph();
+    }, [docId, caseId]);
+
+    if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-halo-cyan" /></div>;
+    if (graphData.nodes.length === 0) return <div className="text-center p-8 text-halo-muted">No relationships found.</div>;
+
+    return (
+        <div className="w-full h-[300px] bg-black/50 rounded border border-halo-border overflow-hidden">
+            <ForceGraph2D
+                graphData={graphData}
+                nodeLabel="label"
+                nodeColor={node => (node as any).label === 'Document' ? '#00f0ff' : '#ff003c'}
+                linkColor={() => '#ffffff33'}
+                width={400} // Approximate width of side panel
+                height={300}
+            />
+        </div>
+    );
+};
 
 export function DocumentModule() {
     const { activeSubmodule, setActiveSubmodule } = useHalo();
@@ -40,6 +80,7 @@ export function DocumentModule() {
     const [uploading, setUploading] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
     const [syncMode, setSyncMode] = useState(false);
+    const [activeTab, setActiveTab] = useState<'preview' | 'graph'>('preview');
     const [logs, setLogs] = useState<string[]>([
         "[SYSTEM] Document Ingestion Pipeline Initialized",
         "[SYSTEM] Connected to Qdrant Vector Store",
@@ -48,6 +89,74 @@ export function DocumentModule() {
 
     // Upload Stats
     const [uploadHistory, setUploadHistory] = useState<number[]>([]);
+
+    // Search State
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<Document[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+    const displayDocs = searchQuery ? searchResults : documents;
+
+    const toggleSelection = (id: string) => {
+        const newSelection = new Set(selectedIds);
+        if (newSelection.has(id)) {
+            newSelection.delete(id);
+        } else {
+            newSelection.add(id);
+        }
+        setSelectedIds(newSelection);
+    };
+
+    const selectAll = () => {
+        if (selectedIds.size === displayDocs.length && displayDocs.length > 0) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(displayDocs.map(d => d.id)));
+        }
+    };
+
+    const handleBatchDelete = async () => {
+        if (!confirm(`Are you sure you want to delete ${selectedIds.size} documents?`)) return;
+        try {
+            await endpoints.documents.batchDelete(Array.from(selectedIds));
+            addLog(`[SUCCESS] Deleted ${selectedIds.size} documents`);
+            setSelectedIds(new Set());
+            fetchDocuments();
+        } catch (error) {
+            console.error("Batch delete failed:", error);
+            addLog(`[ERROR] Batch delete failed`);
+        }
+    };
+
+    const handleBatchReprocess = async () => {
+        try {
+            await endpoints.documents.batchReprocess(Array.from(selectedIds));
+            addLog(`[SUCCESS] Triggered reprocessing for ${selectedIds.size} documents`);
+            setSelectedIds(new Set());
+        } catch (error) {
+            console.error("Batch reprocess failed:", error);
+            addLog(`[ERROR] Batch reprocess failed`);
+        }
+    };
+
+    const handleBatchDownload = async () => {
+        try {
+            const response = await endpoints.documents.batchDownload(Array.from(selectedIds));
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', 'documents_archive.zip');
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            addLog(`[SUCCESS] Downloaded archive for ${selectedIds.size} documents`);
+            setSelectedIds(new Set());
+        } catch (error) {
+            console.error("Batch download failed:", error);
+            addLog(`[ERROR] Batch download failed`);
+        }
+    };
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +171,31 @@ export function DocumentModule() {
         }
         return () => clearInterval(interval);
     }, [activeSubmodule]);
+
+    // Debounced Search Effect
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (searchQuery.trim()) {
+                performSearch(searchQuery);
+            } else {
+                setSearchResults([]);
+            }
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    const performSearch = async (query: string) => {
+        setIsSearching(true);
+        try {
+            const response = await endpoints.documents.search(query);
+            setSearchResults(response.data);
+        } catch (error) {
+            console.error("Search failed:", error);
+            addLog(`[ERROR] Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+            setIsSearching(false);
+        }
+    };
 
     const addLog = (message: string) => {
         setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev]);
@@ -404,20 +538,63 @@ export function DocumentModule() {
         }
 
         // Default View (Upload/List)
+        // const displayDocs = searchQuery ? searchResults : documents; // Moved to top level
+
         return (
             <div className="flex-1 flex h-full p-6 gap-6">
                 {/* Document List */}
                 <div className="w-1/3 flex flex-col gap-4">
+                    {selectedIds.size > 0 && (
+                        <div className="flex items-center justify-between bg-halo-card/80 p-2 rounded border border-halo-cyan/30 mb-2">
+                            <span className="text-xs text-halo-cyan font-bold px-2">
+                                {selectedIds.size} Selected
+                            </span>
+                            <div className="flex gap-1">
+                                <button
+                                    onClick={handleBatchDownload}
+                                    className="p-1.5 hover:bg-halo-cyan/10 rounded text-halo-cyan transition-colors"
+                                    title="Download Selected"
+                                >
+                                    <Download size={16} />
+                                </button>
+                                <button
+                                    onClick={handleBatchReprocess}
+                                    className="p-1.5 hover:bg-halo-cyan/10 rounded text-halo-cyan transition-colors"
+                                    title="Reprocess Selected"
+                                >
+                                    <RefreshCw size={16} />
+                                </button>
+                                <button
+                                    onClick={handleBatchDelete}
+                                    className="p-1.5 hover:bg-red-500/10 rounded text-red-400 transition-colors"
+                                    title="Delete Selected"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     <div className="flex gap-2 items-center">
+                        <div className="flex items-center justify-center px-2">
+                            <input
+                                type="checkbox"
+                                checked={selectedIds.size === displayDocs.length && displayDocs.length > 0}
+                                onChange={selectAll}
+                                aria-label="Select all documents"
+                                className="w-4 h-4 rounded border-halo-border bg-halo-card/50 text-halo-cyan focus:ring-halo-cyan focus:ring-offset-0 cursor-pointer"
+                            />
+                        </div>
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-2.5 text-halo-muted w-4 h-4" />
                             <input
                                 type="text"
                                 placeholder="Search documents..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
                                 className="w-full bg-halo-card border border-halo-border rounded pl-9 py-2 text-sm focus:border-halo-cyan focus:outline-none transition-colors"
                             />
                         </div>
-                        <button className="p-2 border border-halo-border rounded hover:border-halo-cyan text-halo-muted hover:text-halo-cyan transition-colors">
+                        <button className="p-2 border border-halo-border rounded hover:border-halo-cyan text-halo-muted hover:text-halo-cyan transition-colors" title="Filter documents">
                             <Filter size={18} />
                         </button>
                         <div className="flex gap-1">
@@ -478,6 +655,7 @@ export function DocumentModule() {
                             onChange={handleFileChange}
                             className="hidden"
                             multiple
+                            title="Upload files"
                         />
                         <input
                             type="file"
@@ -485,6 +663,7 @@ export function DocumentModule() {
                             onChange={handleFileChange}
                             className="hidden"
                             {...{ webkitdirectory: "", directory: "" } as any}
+                            title="Upload folder"
                         />
                         <input
                             type="file"
@@ -492,26 +671,46 @@ export function DocumentModule() {
                             onChange={handleCaseImport}
                             className="hidden"
                             accept=".zip"
+                            title="Import case"
                         />
                     </div>
 
                     <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                        {loading ? (
-                            <div className="flex justify-center p-4 text-halo-cyan animate-pulse">Loading documents...</div>
-                        ) : documents.length === 0 ? (
-                            <div className="text-center p-8 text-halo-muted">No documents found. Upload one to get started.</div>
+                        {loading || isSearching ? (
+                            <div className="flex justify-center p-4 text-halo-cyan animate-pulse">
+                                {isSearching ? 'Searching...' : 'Loading documents...'}
+                            </div>
+                        ) : displayDocs.length === 0 ? (
+                            <div className="text-center p-8 text-halo-muted">
+                                {searchQuery ? 'No matching documents found.' : 'No documents found. Upload one to get started.'}
+                            </div>
                         ) : (
-                            documents.map((doc) => (
+                            displayDocs.map((doc) => (
                                 <div
                                     key={doc.id}
                                     onClick={() => setSelectedDoc(doc)}
                                     className={`p-3 rounded border cursor-pointer group transition-all
                                         ${selectedDoc?.id === doc.id
-                                            ? 'bg-halo-cyan/10 border-halo-cyan shadow-[0_0_10px_rgba(0,240,255,0.2)]'
-                                            : 'bg-halo-card/50 border-halo-border hover:border-halo-cyan/50'
+                                            ? 'bg-halo-cyan/10 border-halo-cyan halo-glow'
+                                            : 'bg-halo-card/50 halo-border hover:border-halo-cyan/50'
                                         }`}
                                 >
                                     <div className="flex items-start gap-3">
+                                        <div
+                                            className="pt-2 pl-1"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleSelection(doc.id);
+                                            }}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedIds.has(doc.id)}
+                                                onChange={() => { }}
+                                                className="w-4 h-4 rounded border-halo-border bg-halo-card/50 text-halo-cyan focus:ring-halo-cyan focus:ring-offset-0 cursor-pointer"
+                                                aria-label={`Select document ${doc.filename}`}
+                                            />
+                                        </div>
                                         <div className={`p-2 rounded transition-colors ${selectedDoc?.id === doc.id ? 'bg-halo-cyan text-black' : 'bg-halo-bg text-halo-cyan group-hover:text-white'}`}>
                                             <FileText size={20} />
                                         </div>
@@ -533,20 +732,155 @@ export function DocumentModule() {
                 </div>
 
                 {/* Document Preview */}
-                <div className="flex-1 bg-halo-card border border-halo-border rounded-lg flex items-center justify-center relative overflow-hidden">
+                <div className="flex-1 halo-panel flex relative overflow-hidden">
                     {selectedDoc ? (
-                        <div className="w-full h-full flex flex-col">
-                            <div className="p-4 border-b border-halo-border flex justify-between items-center bg-halo-bg/50">
-                                <h3 className="font-mono text-halo-cyan truncate">{selectedDoc.filename}</h3>
-                                <div className="text-xs text-halo-muted">{selectedDoc.id}</div>
-                            </div>
-                            <div className="flex-1 flex items-center justify-center bg-black/20">
-                                <div className="text-center space-y-4">
-                                    <File size={64} className="mx-auto text-halo-muted" />
-                                    <p className="text-halo-text">Preview not available for this file type.</p>
-                                    <button className="px-4 py-2 border border-halo-cyan text-halo-cyan rounded hover:bg-halo-cyan hover:text-black transition-colors">
-                                        Download to View
-                                    </button>
+                        <div className="w-full h-full flex">
+                            {/* Preview Area */}
+                            <div className="flex-1 flex flex-col">
+                                <div className="p-4 border-b border-halo-border flex justify-between items-center bg-halo-bg/50">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded bg-halo-cyan text-black">
+                                            <FileText size={20} />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-halo-text">{selectedDoc.filename}</h3>
+                                            <p className="text-xs text-halo-muted">{selectedDoc.content_type}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex bg-halo-bg rounded p-1 border border-halo-border">
+                                        <button
+                                            onClick={() => setActiveTab('preview')}
+                                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${activeTab === 'preview' ? 'bg-halo-cyan text-black' : 'text-halo-muted hover:text-halo-cyan'}`}
+                                        >
+                                            Preview
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('graph')}
+                                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${activeTab === 'graph' ? 'bg-halo-cyan text-black' : 'text-halo-muted hover:text-halo-cyan'}`}
+                                        >
+                                            Graph
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 overflow-auto custom-scrollbar flex items-center justify-center p-4">
+                                    {activeTab === 'preview' ? (
+                                        selectedDoc.content_type.startsWith('image/') ? (
+                                            /* Image Preview */
+                                            <img
+                                                src={`/api/documents/${selectedDoc.id}/preview`}
+                                                alt={selectedDoc.filename}
+                                                className="max-w-full max-h-full object-contain"
+                                            />
+                                        ) : selectedDoc.content_type.startsWith('text/') || selectedDoc.content_type === 'application/json' ? (
+                                            /* Text Preview */
+                                            <div className="p-4 font-mono text-sm text-halo-text w-full h-full overflow-auto custom-scrollbar bg-black/30">
+                                                <pre className="whitespace-pre-wrap break-words">Loading text preview...</pre>
+                                            </div>
+                                        ) : (
+                                            /* Fallback */
+                                            <div className="text-center space-y-4">
+                                                <File size={64} className="mx-auto text-halo-muted" />
+                                                <p className="text-halo-text">Preview not available for {selectedDoc.content_type}</p>
+                                                <button
+                                                    onClick={() => window.open(`/api/documents/${selectedDoc.id}/download`, '_blank')}
+                                                    className="px-4 py-2 border border-halo-cyan text-halo-cyan rounded hover:bg-halo-cyan hover:text-black transition-colors"
+                                                >
+                                                    Download to View
+                                                </button>
+                                            </div>
+                                        )
+                                    ) : (
+                                        <div className="w-full h-full bg-black/20 rounded border border-halo-border overflow-hidden">
+                                            <DocumentGraph docId={selectedDoc.id} caseId="default_case" />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Metadata Side Panel */}
+                                <div className="w-72 border-l border-halo-border bg-halo-bg/30 p-4 overflow-y-auto custom-scrollbar">
+                                    <h4 className="text-xs font-bold text-halo-muted uppercase tracking-wider mb-4">Document Metadata</h4>
+
+                                    {/* Basic Info */}
+                                    <div className="space-y-3 mb-6">
+                                        <div>
+                                            <label className="text-[10px] text-halo-muted uppercase">Document ID</label>
+                                            <p className="text-xs font-mono text-halo-text break-all">{selectedDoc.id}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-halo-muted uppercase">Created</label>
+                                            <p className="text-xs text-halo-text">{new Date(selectedDoc.created_at).toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-halo-muted uppercase">Content Type</label>
+                                            <p className="text-xs text-halo-text">{selectedDoc.content_type}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-halo-muted uppercase">Size</label>
+                                            <p className="text-xs text-halo-text">{formatSize(selectedDoc.size)}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Forensics Section */}
+                                    <div className="border-t border-halo-border pt-4 mb-6">
+                                        <h5 className="text-xs font-bold text-halo-cyan mb-3 flex items-center gap-2">
+                                            <ShieldCheck size={14} /> Forensics
+                                        </h5>
+                                        <div className="space-y-3">
+                                            <div>
+                                                <label className="text-[10px] text-halo-muted uppercase">SHA-256 Hash</label>
+                                                <p className="text-[10px] font-mono text-halo-text break-all bg-black/20 p-2 rounded">
+                                                    {selectedDoc.id.length === 64 ? selectedDoc.id : 'Click "Analyze" to compute'}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-halo-muted uppercase">Tamper Score</label>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <div className="flex-1 h-2 bg-halo-card rounded-full overflow-hidden">
+                                                        <div className="h-full bg-green-500 w-[15%]" />
+                                                    </div>
+                                                    <span className="text-xs text-green-400 font-mono">LOW</span>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={() => {
+                                                    addLog(`[AGENT] Running forensic analysis on ${selectedDoc.filename}`);
+                                                    endpoints.forensics.analyze(selectedDoc.id, 'default_case')
+                                                        .then(() => addLog(`[SUCCESS] Forensic analysis complete`))
+                                                        .catch(e => addLog(`[ERROR] Analysis failed: ${e.message}`));
+                                                }}
+                                                className="w-full px-3 py-1.5 bg-halo-card border border-halo-border text-xs rounded hover:border-halo-cyan hover:text-halo-cyan transition-colors"
+                                            >
+                                                Run Deep Analysis
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* AI Classification */}
+                                    <div className="border-t border-halo-border pt-4">
+                                        <h5 className="text-xs font-bold text-halo-violet mb-3 flex items-center gap-2">
+                                            ✨ AI Classification
+                                        </h5>
+                                        <div className="space-y-2">
+                                            <div className="flex flex-wrap gap-1">
+                                                <span className="px-2 py-0.5 bg-halo-cyan/10 text-halo-cyan text-[10px] rounded">Evidence</span>
+                                                <span className="px-2 py-0.5 bg-halo-violet/10 text-halo-violet text-[10px] rounded">Contract</span>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-halo-muted uppercase">Privilege Status</label>
+                                                <p className="text-xs text-yellow-400">⚠ Pending Review</p>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-halo-muted uppercase">Relevance Score</label>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <div className="flex-1 h-2 bg-halo-card rounded-full overflow-hidden">
+                                                        <div className="h-full bg-halo-cyan w-[78%]" />
+                                                    </div>
+                                                    <span className="text-xs text-halo-cyan font-mono">78%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -555,7 +889,7 @@ export function DocumentModule() {
                             <div className="absolute inset-0 flex items-center justify-center opacity-5 pointer-events-none">
                                 <FileText size={200} />
                             </div>
-                            <div className="text-halo-muted text-sm font-mono">SELECT A DOCUMENT TO INITIATE ANALYSIS</div>
+                            <div className="w-full h-full flex items-center justify-center text-halo-muted text-sm font-mono">SELECT A DOCUMENT TO INITIATE ANALYSIS</div>
                         </>
                     )}
                 </div>
@@ -617,3 +951,4 @@ export function DocumentModule() {
         </div>
     );
 }
+

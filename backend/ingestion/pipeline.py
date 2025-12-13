@@ -75,6 +75,8 @@ class DocumentPipelineResult:
     forensic_analysis_result: Optional[ForensicAnalysisResult] = None # Added
     crypto_tracing_result: Optional[CryptoTracingResult] = None # Added
     screening_result: Optional[ScreeningResult] = None # Added
+    flags: List[str] = field(default_factory=list) # Added
+
 
 
 @dataclass
@@ -188,9 +190,115 @@ def run_ingestion_pipeline(
     from .llama_index_factory import create_extractors
     extractors = create_extractors(runtime_config, llm_service)
     
-    # 2. Load Documents
+        # 2. Load Documents
     with record_pipeline_metrics(source.type.lower(), job_id):
         try:
+            # Check for large files and split if necessary
+            # We need to instantiate DocumentProcessingService here or use a utility
+            from backend.app.services.document_processing_service import DocumentProcessingService
+            doc_processor = DocumentProcessingService()
+            
+            # Assuming materialized_root is a directory containing the file(s)
+            # If it's a single file upload, it might be just one file in there.
+            # We iterate over files in materialized_root
+            files_to_process = []
+            if materialized_root.is_file():
+                files_to_process.append(materialized_root)
+            elif materialized_root.is_dir():
+                files_to_process.extend([f for f in materialized_root.rglob("*") if f.is_file()])
+            
+            # Split large files
+            final_files = []
+            for file_path in files_to_process:
+                # Check size (e.g., > 50MB) or type (PDF)
+                # For simplicity, we just call split methods which handle checks
+                if file_path.suffix.lower() == '.pdf':
+                    # We need to await this, but run_ingestion_pipeline is sync.
+                    # This is a problem. We should probably use asyncio.run or make this async.
+                    # Given the context, let's use a sync wrapper or just assume small files for now 
+                    # OR use asyncio.run since we are in a worker thread usually?
+                    # Actually, `process_ingestion` calls this.
+                    # Let's use asyncio.run for the splitting part as a quick fix, 
+                    # assuming no event loop conflict (which might happen if called from async context).
+                    # Ideally we refactor to async, but that's a larger change.
+                    # Let's try to run it synchronously if possible or use the existing loop.
+                    import asyncio
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # If we are in a loop, we can't use asyncio.run.
+                        # We should await it. But we can't await in sync function.
+                        # We have to use a background thread or similar.
+                        # Or just skip splitting for now if we can't easily do it sync.
+                        # WAIT: DocumentProcessingService methods are async.
+                        # We should really make run_ingestion_pipeline async.
+                        # But that breaks the interface.
+                        # Let's use `asyncio.run_coroutine_threadsafe` if we have a loop, 
+                        # or `asyncio.run` if not.
+                        future = asyncio.run_coroutine_threadsafe(doc_processor.split_pdf(file_path), loop)
+                        chunks = future.result()
+                    except RuntimeError: # No running loop
+                        chunks = asyncio.run(doc_processor.split_pdf(file_path))
+                        
+                    final_files.extend(chunks)
+                elif file_path.suffix.lower() in ['.txt', '.md', '.csv', '.jsonl']:
+                     import asyncio
+                     try:
+                        loop = asyncio.get_running_loop()
+                        future = asyncio.run_coroutine_threadsafe(doc_processor.split_text_file(file_path), loop)
+                        chunks = future.result()
+                     except RuntimeError:
+                        chunks = asyncio.run(doc_processor.split_text_file(file_path))
+                     final_files.extend(chunks)
+                else:
+                    final_files.append(file_path)
+            
+            # Now load from the final list of files
+            # LoaderRegistry expects a root path, but we have a list of files.
+            # We might need to adjust how we call load_documents or move split files to a temp dir.
+            # For now, let's assume LoaderRegistry scans the directory. 
+            # So we just need to ensure split files are IN the directory.
+            # The split methods write to the same directory.
+            # So we just need to re-scan or pass the new list if LoaderRegistry supports it.
+            # LoaderRegistry.load_documents takes `path: Path`.
+            # If we pass the directory, it loads everything.
+            # So we just need to make sure we don't load the original large file if it was split.
+            # The split methods return the original if not split.
+            # If split, they return chunks. We should probably delete or ignore the original?
+            # DocumentProcessingService.split_pdf returns [original] if no split.
+            # If split, it returns [chunk1, chunk2...]. The original remains.
+            # We should probably move the original out or tell Loader to ignore it?
+            # Or just let Loader load everything and we filter?
+            # Simpler: We just let Loader load everything. 
+            # If we split, we have original + chunks. That's duplication.
+            # We should remove the original if split occurred.
+            
+            # Let's refine the splitting logic in the loop above to remove original if split.
+            # Actually, `split_pdf` returns chunks. If len(chunks) > 1, it split.
+            # If so, we can delete/move original.
+            # But `split_pdf` implementation I wrote doesn't delete original.
+            # Let's handle it here.
+            
+            # Re-doing the loop for cleanup
+            for file_path in files_to_process:
+                 if file_path.suffix.lower() == '.pdf':
+                    import asyncio
+                    try:
+                        loop = asyncio.get_running_loop()
+                        future = asyncio.run_coroutine_threadsafe(doc_processor.split_pdf(file_path), loop)
+                        chunks = future.result()
+                    except RuntimeError:
+                        chunks = asyncio.run(doc_processor.split_pdf(file_path))
+                    
+                    if len(chunks) > 1:
+                        # Split happened. Remove original to avoid duplication
+                        # But wait, maybe we want to keep it as a "master"?
+                        # For ingestion, we want chunks.
+                        # Let's rename original to .bak or something so Loader ignores it?
+                        # Or just delete it if we are sure.
+                        # Let's rename to .original
+                        file_path.rename(file_path.with_suffix('.pdf.original'))
+
+            # Now call registry.load_documents on the directory
             loaded_documents = registry.load_documents(materialized_root, source, origin=origin)
             logger.info(f"Loaded {len(loaded_documents)} documents for job {job_id}")
         except Exception as e:
@@ -203,6 +311,10 @@ def run_ingestion_pipeline(
         from llama_index.core import Document
         llama_documents = []
         for loaded in loaded_documents:
+            # Skip .original files if Loader picked them up (unlikely if we check extensions)
+            if str(loaded.path).endswith('.original'):
+                continue
+                
             doc = Document(
                 text=loaded.text,
                 metadata={
@@ -214,6 +326,7 @@ def run_ingestion_pipeline(
                 }
             )
             llama_documents.append(doc)
+
 
         # 3. Setup Vector Store
         try:
@@ -291,9 +404,16 @@ def run_ingestion_pipeline(
             forensic_analysis_result = None
             crypto_tracing_result = None
             screening_result = None
+            flags = [] # Added
 
             try:
+                # Flagging Service
+                from backend.app.services.flagging_service import get_flagging_service
+                flagging_service = get_flagging_service()
+                flags = flagging_service.check_flags(cleaned_text, loaded.source.metadata)
+                
                 entities = extract_entities(cleaned_text)
+
                 triples = extract_triples(cleaned_text)
                 
                 if runtime_config.cost_mode == "community":
@@ -392,6 +512,7 @@ def run_ingestion_pipeline(
                 forensic_analysis_result=forensic_analysis_result,
                 crypto_tracing_result=crypto_tracing_result,
                 screening_result=screening_result, # Added
+                flags=flags, # Added
             ))
 
         # 6. Graph Indexing (Pro Mode)

@@ -7,6 +7,9 @@ import pytesseract
 from PIL import Image
 import io
 import docx
+import os
+import math
+
 
 class DocumentProcessingService:
     """
@@ -18,6 +21,103 @@ class DocumentProcessingService:
         # Configure pytesseract path if necessary
         # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
         pass
+
+    def get_file_size(self, file_path: str | Path) -> int:
+        """Returns the size of the file in bytes."""
+        return Path(file_path).stat().st_size
+
+    async def split_pdf(self, file_path: str | Path, max_pages: int = 50) -> List[Path]:
+        """
+        Splits a PDF into smaller chunks if it exceeds max_pages.
+        Returns a list of paths to the chunked files (or the original if no split needed).
+        """
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"PDF file not found: {file_path}")
+
+        try:
+            reader = pypdf.PdfReader(file_path)
+            total_pages = len(reader.pages)
+            
+            if total_pages <= max_pages:
+                return [file_path]
+            
+            chunks = []
+            base_name = file_path.stem
+            parent_dir = file_path.parent
+            
+            num_chunks = math.ceil(total_pages / max_pages)
+            
+            for i in range(num_chunks):
+                start_page = i * max_pages
+                end_page = min((i + 1) * max_pages, total_pages)
+                
+                writer = pypdf.PdfWriter()
+                for page_num in range(start_page, end_page):
+                    writer.add_page(reader.pages[page_num])
+                
+                chunk_filename = f"{base_name}_part_{i+1}_of_{num_chunks}.pdf"
+                chunk_path = parent_dir / chunk_filename
+                
+                with open(chunk_path, "wb") as f:
+                    writer.write(f)
+                
+                chunks.append(chunk_path)
+                
+            return chunks
+            
+        except Exception as e:
+            print(f"Failed to split PDF {file_path}: {e}")
+            # Fallback to returning original file if split fails
+            return [file_path]
+
+    async def split_text_file(self, file_path: str | Path, max_size_mb: int = 10) -> List[Path]:
+        """
+        Splits a text file into smaller chunks if it exceeds max_size_mb.
+        Returns a list of paths to the chunked files.
+        """
+        file_path = Path(file_path)
+        file_size = self.get_file_size(file_path)
+        max_bytes = max_size_mb * 1024 * 1024
+        
+        if file_size <= max_bytes:
+            return [file_path]
+            
+        chunks = []
+        base_name = file_path.stem
+        parent_dir = file_path.parent
+        suffix = file_path.suffix
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                
+            total_chars = len(content)
+            # Approximate chars per chunk (assuming 1 byte/char for simplicity in split logic, 
+            # though UTF-8 varies. This is a rough split.)
+            chars_per_chunk = max_bytes 
+            
+            num_chunks = math.ceil(total_chars / chars_per_chunk)
+            
+            for i in range(num_chunks):
+                start = i * chars_per_chunk
+                end = min((i + 1) * chars_per_chunk, total_chars)
+                chunk_content = content[start:end]
+                
+                chunk_filename = f"{base_name}_part_{i+1}_of_{num_chunks}{suffix}"
+                chunk_path = parent_dir / chunk_filename
+                
+                with open(chunk_path, 'w', encoding='utf-8') as f:
+                    f.write(chunk_content)
+                    
+                chunks.append(chunk_path)
+                
+            return chunks
+            
+        except Exception as e:
+            print(f"Failed to split text file {file_path}: {e}")
+            return [file_path]
+
 
     async def extract_text_from_pdf(self, file_path: str | Path) -> str:
         """Extracts text from a PDF document, performing OCR if necessary."""

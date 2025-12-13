@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -77,7 +78,8 @@ class AutonomousCourtListenerService:
         
         # CourtListener API configuration
         self.api_base = "https://www.courtlistener.com/api/rest/v3"
-        self.api_token = self.settings.courtlistener_token if hasattr(self.settings, 'courtlistener_token') else None
+        # Fallback to COURTLISTENER_API_KEY if COURTLISTENER_TOKEN is not set
+        self.api_token = getattr(self.settings, 'courtlistener_token', None) or os.environ.get('COURTLISTENER_API_KEY')
         
         # Track monitors and processed opinions
         self.monitors: Dict[str, CourtListenerMonitor] = {}
@@ -351,20 +353,25 @@ class AutonomousCourtListenerService:
         # Create CaseOpinion entity in KG
         entity_id = f"opinion:courtlistener:{opinion_id}"
         
+        # Create CaseOpinion entity in KG
+        entity_id = f"opinion:courtlistener:{opinion_id}"
+        
+        properties = {
+            "id": entity_id,
+            "case_name": case_name,
+            "court": court,
+            "date_filed": date_filed,
+            "citation": citation if isinstance(citation, list) else [citation],
+            "snippet": snippet[:1000],  # Limit snippet
+            "courtlistener_id": opinion_id,
+            "monitor_type": monitor.monitor_type,
+            "monitor_value": monitor.value,
+            "ingested_at": datetime.now(timezone.utc).isoformat()
+        }
+
         await self.kg_service.add_entity(
-            entity_id=entity_id,
             entity_type="CaseOpinion",
-            properties={
-                "case_name": case_name,
-                "court": court,
-                "date_filed": date_filed,
-                "citation": citation if isinstance(citation, list) else [citation],
-                "snippet": snippet[:1000],  # Limit snippet
-                "courtlistener_id": opinion_id,
-                "monitor_type": monitor.monitor_type,
-                "monitor_value": monitor.value,
-                "ingested_at": datetime.now(timezone.utc).isoformat()
-            }
+            properties=properties
         )
         
         # If citation monitor, create CITES relationship
@@ -372,13 +379,14 @@ class AutonomousCourtListenerService:
             citing_case_id = f"precedent:{self._sanitize_id(monitor.value)}"
             
             # Create precedent node if doesn't exist
+            precedent_props = {
+                "id": citing_case_id,
+                "citation": monitor.value,
+                "tracked": True
+            }
             await self.kg_service.add_entity(
-                entity_id=citing_case_id,
                 entity_type="Precedent",
-                properties={
-                    "citation": monitor.value,
-                    "tracked": True
-                }
+                properties=precedent_props
             )
             
             # Create CITES relationship
@@ -500,7 +508,7 @@ class AutonomousCourtListenerService:
 _autonomous_courtlistener_service: Optional[AutonomousCourtListenerService] = None
 
 
-def get_autonomous_courtlistener_service() -> AutonomousCourtListenerService:
+async def get_autonomous_courtlistener_service() -> AutonomousCourtListenerService:
     """Get or create the autonomous CourtListener service singleton."""
     global _autonomous_courtlistener_service
     if _autonomous_courtlistener_service is None:

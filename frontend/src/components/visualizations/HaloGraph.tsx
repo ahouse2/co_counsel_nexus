@@ -97,10 +97,27 @@ export function HaloGraph() {
 
     const fetchInitialData = async () => {
         try {
-            // Bootstrap with a central node or "Case" node
-            const response = await endpoints.graph.neighbors('1'); // Assuming '1' is the case ID
+            // Bootstrap with a smart query to find key entities
+            // This is better than guessing a node ID like '1'
+            const response = await endpoints.graph.agentQuery("Show me the most important entities and relationships in this case.", "default_case");
             const transformed = transformData(response.data);
-            setData(transformed);
+
+            if (transformed.nodes.length === 0) {
+                // Fallback if agent finds nothing (empty graph?)
+                console.warn("Graph agent returned no nodes, trying fallback search...");
+                const searchRes = await endpoints.documents.search("important", 5);
+                // Convert search docs to graph nodes
+                const nodes = searchRes.data.map((d: any) => ({
+                    id: d.id,
+                    group: 'document',
+                    val: 10,
+                    label: d.filename,
+                    color: '#00f0ff'
+                }));
+                setData({ nodes, links: [] });
+            } else {
+                setData(transformed);
+            }
             setLoading(false);
         } catch (error) {
             console.error("Graph load failed:", error);
@@ -149,41 +166,17 @@ export function HaloGraph() {
                 }
 
                 // REAL AGENT CALL: Ask for a Cypher query
-                // We use a specific prompt to get a valid query back
-                // const prompt = `I am exploring a legal knowledge graph. I am at node "${targetNode.label}" (ID: ${targetNode.id}). 
-                // Generate a Cypher query to find all connected nodes and relationships to expand the context. 
-                // Return ONLY the Cypher query string. Do not include markdown formatting.`;
+                const prompt = `Find all interesting relationships and connected entities for the node "${targetNode.label}" (ID: ${targetNode.id}). Expand the graph to reveal hidden connections.`;
 
-                // Note: In a real prod env, we might have a dedicated 'generate_query' endpoint, 
-                // but 'chat' works if the agent is smart.
-                // For robustness, we'll fallback to a template if the agent returns garbage, 
-                // but we TRY the agent first.
+                addToLog(`Agent: expanding context for ${targetNode.label}`);
 
-                let cypher = `MATCH (n)-[r]-(m) WHERE id(n) = ${targetNode.id} RETURN n, r, m LIMIT 10`; // Default safety
-
-                try {
-                    // Uncomment this to enable FULL Agent control (latency warning)
-                    // const agentRes = await endpoints.agents.chat(prompt);
-                    // const text = agentRes.data.response || agentRes.data.answer;
-                    // if (text && text.toLowerCase().includes('match')) {
-                    //     cypher = text.replace(/```cypher/g, '').replace(/```/g, '').trim();
-                    //     addToLog(`Agent generated query strategy.`);
-                    // }
-
-                    // For speed/reliability in this demo, we'll simulate the *Agent's Decision* 
-                    // but run the safe query. The user wants "Real Cypher", which this IS.
-                    addToLog(`Agent: expanding context for ${targetNode.label}`);
-                    addToLog(`> ${cypher}`);
-
-                } catch (e) {
-                    console.warn("Agent generation failed, using fallback Cypher");
-                }
-
-                // 3. Execute REAL Cypher Query
-                const queryRes = await endpoints.graph.query(cypher);
+                // 3. Execute REAL Agent Query
+                const queryRes = await endpoints.graph.agentQuery(prompt);
 
                 // 4. Merge Results
+                // The agent endpoint returns { records: [...], summary: ... }
                 const newData = transformData(queryRes.data);
+
                 if (newData.nodes.length > 0) {
                     setData(prev => {
                         const existingNodeIds = new Set(prev.nodes.map(n => n.id));
@@ -203,14 +196,17 @@ export function HaloGraph() {
                             links: [...prev.links, ...newLinks]
                         };
                     });
+                } else {
+                    addToLog(`Agent found no new connections.`);
                 }
 
             } catch (err) {
-                addToLog(`Query failed: ${err}`);
+                console.error("Agent step failed:", err);
+                addToLog(`Agent failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
             }
         };
 
-        const interval = setInterval(runAutonomousStep, 5000); // Run every 5 seconds
+        const interval = setInterval(runAutonomousStep, 8000); // Run every 8 seconds to give time for LLM
 
         return () => clearInterval(interval);
     }, [autonomousMode, data.nodes]);
@@ -306,7 +302,7 @@ export function HaloGraph() {
                 nodeLabel="label"
                 nodeColor="color"
                 nodeVal="val"
-                linkColor={() => 'rgba(0, 240, 255, 0.2)'}
+                linkColor={() => 'rgba(0, 240, 255, 0.3)'}
                 linkWidth={1}
                 linkOpacity={0.5}
                 backgroundColor="#000000"
@@ -323,7 +319,7 @@ export function HaloGraph() {
 
             {/* Overlay UI */}
             <div className="absolute top-4 left-4 z-10 flex flex-col gap-4 pointer-events-none">
-                <div className="bg-black/60 backdrop-blur-md border border-halo-cyan/30 p-4 rounded-lg shadow-[0_0_20px_rgba(0,240,255,0.2)] pointer-events-auto">
+                <div className="halo-panel p-4 pointer-events-auto">
                     <h3 className="text-halo-cyan font-mono text-sm uppercase tracking-widest mb-2 flex items-center gap-2">
                         <Activity size={14} /> Graph Explorer
                     </h3>
@@ -350,7 +346,7 @@ export function HaloGraph() {
 
                 {/* Agent Log Console */}
                 {autonomousMode && (
-                    <div className="bg-black/80 backdrop-blur-md border-l-2 border-halo-cyan p-4 rounded-r-lg max-w-xs pointer-events-auto">
+                    <div className="halo-panel border-l-2 border-halo-cyan p-4 rounded-r-lg max-w-xs pointer-events-auto">
                         <h4 className="text-xs text-halo-muted font-mono mb-2 flex items-center gap-2">
                             <Terminal size={12} /> AGENT LOG
                         </h4>

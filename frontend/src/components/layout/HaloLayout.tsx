@@ -105,6 +105,14 @@ const SUBMODULES: Record<ModuleId, { id: string; label: string }[]> = {
         { id: 'review', label: 'Review Queue' },
         { id: 'history', label: 'History' },
     ],
+    narrative: [
+        { id: 'timeline', label: 'Timeline View' },
+        { id: 'contradictions', label: 'Contradiction Analysis' },
+    ],
+    devils_advocate: [
+        { id: 'challenge', label: 'Challenge Theory' },
+        { id: 'analysis', label: 'Weakness Analysis' },
+    ],
 };
 
 export function HaloLayout({ children }: { children: React.ReactNode }) {
@@ -243,7 +251,7 @@ export function HaloLayout({ children }: { children: React.ReactNode }) {
 
                             <div title="Select the visual theme for the Halo interface.">
                                 <label className="block text-xs font-mono text-halo-muted mb-2 uppercase">Interface Theme</label>
-                                <select className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white">
+                                <select className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white" title="Select theme">
                                     <option>Cyberpunk (Default)</option>
                                     <option>Minimalist</option>
                                     <option>High Contrast</option>
@@ -252,7 +260,7 @@ export function HaloLayout({ children }: { children: React.ReactNode }) {
 
                             <div title="Adjust animation complexity and background processes to save resources.">
                                 <label className="block text-xs font-mono text-halo-muted mb-2 uppercase">Performance Mode</label>
-                                <select className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white">
+                                <select className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white" title="Select performance mode">
                                     <option>High Performance</option>
                                     <option>Battery Saver</option>
                                 </select>

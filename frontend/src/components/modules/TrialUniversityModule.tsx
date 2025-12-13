@@ -200,11 +200,13 @@ export function TrialUniversityModule() {
                                     placeholder="Ask a question or respond to the quiz..."
                                     className="w-full bg-black/50 border border-halo-border rounded-lg pl-4 pr-12 py-3 text-sm focus:border-halo-cyan focus:outline-none transition-colors"
                                     disabled={loading}
+                                    aria-label="Ask a question"
                                 />
                                 <button
                                     type="submit"
                                     disabled={!input.trim() || loading}
                                     className="absolute right-2 top-2 p-1.5 bg-halo-cyan text-black rounded hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="Send message"
                                 >
                                     <ArrowRight size={16} />
                                 </button>

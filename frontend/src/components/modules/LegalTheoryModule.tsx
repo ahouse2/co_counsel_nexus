@@ -226,6 +226,7 @@ export function LegalTheoryModule() {
                             type="submit"
                             disabled={loadingCustom}
                             className="absolute right-2 top-1.5 p-1 text-halo-cyan hover:text-white disabled:opacity-50"
+                            title="Submit query"
                         >
                             {loadingCustom ? <Loader2 size={16} className="animate-spin" /> : <MessageSquare size={16} />}
                         </button>
@@ -252,7 +253,7 @@ export function LegalTheoryModule() {
                         <h3 className="text-halo-cyan font-bold text-sm uppercase tracking-wider flex items-center gap-2">
                             <MessageSquare size={16} /> Custom Analysis
                         </h3>
-                        <button onClick={() => setCustomResponse(null)} className="text-halo-muted hover:text-white"><Zap size={14} /></button>
+                        <button onClick={() => setCustomResponse(null)} className="text-halo-muted hover:text-white" aria-label="Close custom analysis"><Zap size={14} /></button>
                     </div>
                     <p className="text-halo-text/90 leading-relaxed whitespace-pre-wrap">{customResponse}</p>
                 </div>

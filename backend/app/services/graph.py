@@ -1712,6 +1712,54 @@ class GraphService:
             f"Graph query answering '{question}' returned {record_count} record(s) with {doc_text}."
         )
 
+    def get_document_neighborhood(self, case_id: str, doc_id: str, hops: int = 1) -> Dict[str, Any]:
+        """
+        Retrieves the immediate graph neighborhood of a document.
+        Returns nodes and edges.
+        """
+        if self.mode != "neo4j":
+            return {"nodes": [], "edges": []}
+
+        query = f"""
+        MATCH (d:Document {{id: $doc_id}})
+        CALL apoc.path.subgraphAll(d, {{
+            maxLevel: $hops,
+            relationshipFilter: "CITES|MENTIONS|SIMILAR_TO|HAS_ENTITY",
+            labelFilter: "+Document|Entity"
+        }})
+        YIELD nodes, relationships
+        RETURN nodes, relationships
+        """
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, doc_id=doc_id, hops=hops)
+                record = result.single()
+                if not record:
+                    return {"nodes": [], "edges": []}
+                
+                nodes = []
+                for node in record["nodes"]:
+                    nodes.append({
+                        "id": node["id"],
+                        "label": list(node.labels)[0] if node.labels else "Unknown",
+                        "properties": dict(node)
+                    })
+                
+                edges = []
+                for rel in record["relationships"]:
+                    edges.append({
+                        "source": rel.start_node["id"],
+                        "target": rel.end_node["id"],
+                        "type": rel.type,
+                        "properties": dict(rel)
+                    })
+                
+                return {"nodes": nodes, "edges": edges}
+        except Exception as e:
+            # logger.error(f"Failed to get document neighborhood: {e}")
+            return {"nodes": [], "edges": []}
+
     # endregion
 
 

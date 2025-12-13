@@ -1,168 +1,197 @@
-import { useState, useEffect, useCallback } from 'react';
-import { BookOpen, AlertTriangle, Clock, GitCommit, Play, RefreshCw } from 'lucide-react';
-import { endpoints } from '../../services/api';
-
-interface TimelineEvent {
-  id: string;
-  ts: string;
-  title: string;
-  summary: string;
-  citations: string[];
-  risk_score?: number;
-}
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { BookOpen, RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface Contradiction {
-  title: string;
+  id: string;
   description: string;
-  event_ids: string[];
+  source_a: string;
+  source_b: string;
   confidence: number;
   severity: 'high' | 'medium' | 'low';
 }
 
-export function NarrativeModule() {
-  const [events, setEvents] = useState<TimelineEvent[]>([]);
+interface NarrativeModuleProps {
+  caseId: string;
+  isActive: boolean;
+}
+
+export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActive }) => {
+  const [narrative, setNarrative] = useState<string>("");
   const [contradictions, setContradictions] = useState<Contradiction[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'narrative' | 'contradictions'>('narrative');
 
-  // Wrap in useCallback to prevent infinite loops and satisfy linter
-  const fetchTimeline = useCallback(async () => {
-    setLoading(true);
+  const fetchNarrative = async () => {
+    setIsLoading(true);
     try {
-      const response = await endpoints.timeline.list();
-      setEvents(response.data.events);
+      // Use direct fetch or api service if available. 
+      // Assuming proxy is set up to forward /api to backend
+      const res = await fetch(`/api/narrative/${caseId}/generate`);
+      if (res.ok) {
+        const data = await res.json();
+        setNarrative(data.narrative);
+      }
     } catch (error) {
-      console.error("Failed to fetch timeline:", error);
+      console.error("Failed to fetch narrative", error);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  }, []);
+  };
 
-  // Initial load
+  const fetchContradictions = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/narrative/${caseId}/contradictions`);
+      if (res.ok) {
+        const data = await res.json();
+        setContradictions(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch contradictions", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchTimeline();
-  }, [fetchTimeline]);
-
-  const handleWeave = async () => {
-    setLoading(true);
-    try {
-      // @ts-ignore - explicitly ignoring if type definition is lagging in api.ts
-      await endpoints.narrative.weave('default_case');
-      await fetchTimeline();
-    } catch (error) {
-      console.error("Failed to weave narrative:", error);
-    } finally {
-      setLoading(false);
+    if (isActive) {
+      if (!narrative) fetchNarrative();
+      if (contradictions.length === 0) fetchContradictions();
     }
-  };
-
-  const handleAnalyze = async () => {
-    setAnalyzing(true);
-    try {
-      // @ts-ignore - explicitly ignoring if type definition is lagging in api.ts
-      const response = await endpoints.narrative.detectContradictions('default_case');
-      setContradictions(response.data);
-    } catch (error) {
-      console.error("Failed to analyze contradictions:", error);
-    } finally {
-      setAnalyzing(false);
-    }
-  };
+  }, [isActive, caseId]);
 
   return (
-    <div>
-      {/* Header */}
-      <h3 className="text-2xl font-bold mb-2 flex items-center gap-2">
-        <BookOpen className="inline-block" /> Narrative Weaver
-      </h3>
-      <p className="mb-4 text-halo-muted">AI-driven timeline reconstruction and contradiction detection</p>
-      
-      <div className="flex gap-4 mb-8">
+    <div className="h-full w-full flex flex-col bg-slate-950 text-slate-200 p-6 overflow-hidden">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-2">
+          <BookOpen className="w-6 h-6 text-purple-400" />
+          Narrative Weaver
+        </h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => activeTab === 'narrative' ? fetchNarrative() : fetchContradictions()}
+            className="p-2 hover:bg-slate-800 rounded-full transition-colors"
+            title="Regenerate"
+          >
+            <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex gap-4 mb-6">
         <button
-          className="bg-halo-cyan text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={handleWeave}
-          disabled={loading}
+          onClick={() => setActiveTab('narrative')}
+          className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'narrative'
+            ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50'
+            : 'hover:bg-slate-800 text-slate-400'
+            }`}
         >
-          {loading ? <RefreshCw className="animate-spin" /> : <Play />}
-          WEAVE NARRATIVE
+          Case Narrative
         </button>
         <button
-          className="bg-halo-yellow text-black px-4 py-2 rounded flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={handleAnalyze}
-          disabled={analyzing}
+          onClick={() => setActiveTab('contradictions')}
+          className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'contradictions'
+            ? 'bg-red-500/20 text-red-300 border border-red-500/50'
+            : 'hover:bg-slate-800 text-slate-400'
+            }`}
         >
-          {analyzing ? <RefreshCw className="animate-spin" /> : <AlertTriangle />}
-          DETECT CONTRADICTIONS
+          Contradictions
+          {contradictions.length > 0 && (
+            <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+              {contradictions.length}
+            </span>
+          )}
         </button>
       </div>
 
-      {/* Timeline Column */}
-      <h4 className="text-xl font-semibold mb-2 flex items-center gap-2">
-        <Clock /> Master Timeline
-      </h4>
-      
-      <div className="mb-8">
-        {loading && events.length === 0 ? (
-          <div className="text-halo-muted">Weaving narrative...</div>
-        ) : events.length === 0 ? (
-          <div className="text-halo-muted">No events found. Click "Weave Narrative" to start.</div>
-        ) : (
-          events.map((event) => (
-            <div key={event.id} className="mb-6 pl-4 border-l-2 border-halo-cyan relative">
-              {/* Dot */}
-              <div className="absolute -left-2 top-2 w-4 h-4 bg-halo-cyan rounded-full border-2 border-white"></div>
-              <div className="flex items-center gap-2 text-xs text-halo-muted mb-1">
-                {new Date(event.ts).toLocaleString()}
-                {event.risk_score && event.risk_score > 0.7 && (
-                  <span className="ml-2 text-red-500 font-bold">HIGH RISK</span>
-                )}
-              </div>
-              <h5 className="text-lg font-bold">{event.title}</h5>
-              <div className="mb-2">{event.summary}</div>
-              {event.citations.length > 0 && (
-                <div className="text-xs text-halo-cyan">
-                  Citations:{" "}
-                  {event.citations.map((cite, i) => (
-                    <span key={i} className="mr-2">{cite}</span>
-                  ))}
+      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+        <AnimatePresence mode="wait">
+          {activeTab === 'narrative' ? (
+            <motion.div
+              key="narrative"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="prose prose-invert max-w-none"
+            >
+              {isLoading && !narrative ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-500">
+                  <RefreshCw className="w-8 h-8 animate-spin mb-4" />
+                  <p>Weaving narrative from evidence...</p>
+                </div>
+              ) : (
+                <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 leading-relaxed whitespace-pre-wrap">
+                  {narrative || "No narrative generated yet."}
                 </div>
               )}
-            </div>
-          ))
-        )}
-      </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="contradictions"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-4"
+            >
+              {isLoading && contradictions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-500">
+                  <RefreshCw className="w-8 h-8 animate-spin mb-4" />
+                  <p>Analyzing contradictions...</p>
+                </div>
+              ) : contradictions.length === 0 ? (
+                <div className="text-center text-slate-500 py-12">
+                  <AlertTriangle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No contradictions detected.</p>
+                </div>
+              ) : (
+                contradictions.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`p-4 rounded-xl border ${item.severity === 'high' ? 'bg-red-950/20 border-red-500/30' :
+                      item.severity === 'medium' ? 'bg-orange-950/20 border-orange-500/30' :
+                        'bg-yellow-950/20 border-yellow-500/30'
+                      }`}
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-semibold text-slate-200">{item.description}</h3>
+                      <span className={`text-xs px-2 py-1 rounded-full uppercase font-bold ${item.severity === 'high' ? 'bg-red-500/20 text-red-400' :
+                        item.severity === 'medium' ? 'bg-orange-500/20 text-orange-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                        {item.severity}
+                      </span>
+                    </div>
 
-      {/* Contradictions Column */}
-      <h4 className="text-xl font-semibold mb-2 flex items-center gap-2">
-        <GitCommit /> Contradictions
-      </h4>
-      
-      <div>
-        {analyzing ? (
-          <div className="text-halo-muted">Analyzing inconsistencies...</div>
-        ) : contradictions.length === 0 ? (
-          <div className="text-halo-muted">
-            No contradictions detected yet.
-            <br />
-            Click "Detect Contradictions" to analyze.
-          </div>
-        ) : (
-          contradictions.map((item, i) => (
-            <div key={i} className="mb-6 p-4 border-l-4 border-yellow-400 bg-yellow-50 rounded">
-              <h5 className="text-lg font-bold flex items-center gap-2">
-                <AlertTriangle className="text-yellow-500" /> {item.title}
-              </h5>
-              <div className="text-xs text-halo-muted mb-1">
-                {(item.confidence * 100).toFixed(0)}% CONFIDENCE
-              </div>
-              <div className="mb-2">{item.description}</div>
-              <div className="text-xs text-halo-cyan">
-                Linked to {item.event_ids.length} event{item.event_ids.length !== 1 ? 's' : ''}
-              </div>
-            </div>
-          ))
-        )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-sm">
+                      <div className="bg-slate-950/50 p-3 rounded-lg border border-slate-800/50">
+                        <div className="flex items-center gap-2 text-slate-400 mb-1">
+                          <div className="w-2 h-2 rounded-full bg-blue-400" />
+                          Source A
+                        </div>
+                        <p className="text-slate-300">{item.source_a}</p>
+                      </div>
+                      <div className="bg-slate-950/50 p-3 rounded-lg border border-slate-800/50">
+                        <div className="flex items-center gap-2 text-slate-400 mb-1">
+                          <div className="w-2 h-2 rounded-full bg-purple-400" />
+                          Source B
+                        </div>
+                        <p className="text-slate-300">{item.source_b}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex justify-end">
+                      <span className="text-xs text-slate-500">
+                        Confidence: {(item.confidence * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
-}
+};

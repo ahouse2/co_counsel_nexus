@@ -1,3 +1,4 @@
+import { motion, AnimatePresence } from 'framer-motion';
 import { useHalo } from '../context/HaloContext';
 import { HaloGraph } from './visualizations/HaloGraph';
 import { SlideOutMenu } from './SlideOutMenu';
@@ -15,7 +16,8 @@ import { MockTrialArenaModule } from './modules/MockTrialArenaModule';
 import { TrialUniversityModule } from './modules/TrialUniversityModule';
 import { TrialBinderModule } from './modules/TrialBinderModule';
 import { ClassificationStationModule } from './modules/ClassificationStationModule';
-import { AnimatePresence, motion } from 'framer-motion';
+import { NarrativeModule } from './modules/NarrativeModule';
+import { DevilsAdvocateModule } from './modules/DevilsAdvocateModule';
 
 export function DashboardHub() {
     const { activeModule } = useHalo();
@@ -52,6 +54,10 @@ export function DashboardHub() {
                 return <TrialBinderModule />;
             case 'classification':
                 return <ClassificationStationModule />;
+            case 'narrative':
+                return <NarrativeModule caseId="default_case" isActive={activeModule === 'narrative'} />;
+            case 'devils_advocate':
+                return <DevilsAdvocateModule caseId="default_case" isActive={activeModule === 'devils_advocate'} />;
             default:
                 return null;
         }
@@ -81,7 +87,7 @@ export function DashboardHub() {
                                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                                 exit={{ opacity: 0, scale: 1.05, filter: 'blur(10px)' }}
                                 transition={{ duration: 0.3, ease: "circOut" }}
-                                className="w-[96vw] h-[94vh] bg-black/95 backdrop-blur-xl border border-halo-border/50 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col relative"
+                                className="w-[96vw] h-[94vh] bg-black/90 backdrop-blur-xl halo-border halo-glow rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col relative"
                             >
                                 <div className="flex-1 overflow-hidden relative">
                                     {renderModule()}

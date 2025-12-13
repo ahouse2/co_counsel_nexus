@@ -6,7 +6,7 @@ from .telemetry import setup_telemetry
 from .events import register_events
 
 # Routers
-from .api import retrieval, graph, agents, scenarios, auth, evidence_binder, predictive_analytics, settings as settings_api, graphql, health, billing, onboarding, legal_research, legal_theory, argument_mapping, strategic_recommendations, timeline, voice, ingestion, knowledge, dev_agent, sandbox, cost, documents, document_drafting, binder_preparation, feedback, mock_trial, forensics, knowledge_graph, service_of_process, users, cases, trial_university, halo, agents_status, agents_stream, memory, autonomous_scraping, autonomous_courtlistener, video_generation, narrative, simulation, evidence_map, jury_sentiment, metrics, context, intelligence
+from .api import retrieval, graph, agents, scenarios, auth, evidence_binder, predictive_analytics, settings as settings_api, graphql, health, billing, onboarding, legal_research, legal_theory, argument_mapping, strategic_recommendations, timeline, voice, ingestion, knowledge, dev_agent, sandbox, cost, documents, document_drafting, binder_preparation, feedback, mock_trial, forensics, knowledge_graph, service_of_process, users, cases, trial_university, halo, agents_status, agents_stream, memory, autonomous_scraping, autonomous_courtlistener, video_generation, narrative, adversarial, evidence_map, simulation, jury_sentiment, metrics, context, intelligence, devils_advocate, financial_forensics
 from .memory_store import CaseMemoryStore
 from .api import memory
 
@@ -163,8 +163,10 @@ app.include_router(video_generation.router, prefix="/api", tags=["Video Generati
 app.include_router(context.router, prefix="/api/context", tags=["context"]) # Added
 
 app.include_router(narrative.router, prefix="/api/narrative", tags=["Narrative"])
-app.include_router(simulation.router, prefix="/api", tags=["Simulation"])
-app.include_router(evidence_map.router, prefix="/api", tags=["Evidence Map"])
+app.include_router(adversarial.router, prefix="/api/adversarial", tags=["Adversarial"])
+app.include_router(evidence_map.router, prefix="/api/evidence-map", tags=["Evidence Map"])
+app.include_router(devils_advocate.router, prefix="/api/devils-advocate", tags=["Devil's Advocate"])
+app.include_router(financial_forensics.router, prefix="/api/financial", tags=["Financial Forensics"])
 app.include_router(jury_sentiment.router, prefix="/api", tags=["Jury Sentiment"])
 app.include_router(metrics.router, prefix="/api", tags=["Metrics"])
 app.include_router(intelligence.router, prefix="/api/intelligence", tags=["Intelligence"])

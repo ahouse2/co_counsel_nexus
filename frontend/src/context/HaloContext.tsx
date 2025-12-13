@@ -19,7 +19,9 @@ export type ModuleId =
     | 'mootcourt'
     | 'evidencemap'
     | 'jurysentiment'
-    | 'classification';
+    | 'classification'
+    | 'narrative'
+    | 'devils_advocate';
 
 export type SubmoduleId = string | null;
 

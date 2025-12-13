@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Activity, Terminal, Cpu, Network, Tag, GitBranch, FileText, Calendar, Zap } from 'lucide-react';
+import { Activity, Terminal, Cpu, Network, Tag, GitBranch, FileText, Calendar } from 'lucide-react';
 
 interface Agent {
     id: string;

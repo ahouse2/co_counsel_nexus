@@ -146,7 +146,7 @@ class IntelligenceService:
                 doc_type=doc_type,
                 case_id=case_id,
                 doc_id=doc_id,
-                new_metadata={
+                metadata_updates={
                     "ai_tags": results.get("tags", []),
                     "ai_summary": results.get("summary", {}),
                     "ai_relations_count": len(results.get("relations", [])),

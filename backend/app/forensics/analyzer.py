@@ -76,7 +76,7 @@ class ForensicAnalyzer:
             score=0.5 if is_suspicious else 0.0 # Placeholder score
         )
 
-    def analyze(self, document_path: Path, metadata: Dict[str, Any]) -> ForensicAnalysisResult:
+    def analyze(self, document_path: Path, metadata: Dict[str, Any], doc_id: str = "") -> ForensicAnalysisResult:
         """
         Performs comprehensive forensic analysis on a document.
         """
@@ -98,8 +98,9 @@ class ForensicAnalyzer:
         overall_verdict = self._determine_overall_verdict(tamper_score_result)
 
         return ForensicAnalysisResult(
+            document_id=doc_id,
             tamper_score=tamper_score_result,
-            ela=ela_result,
+            ela_analysis=ela_result,
             clone_splicing_detection=clone_splicing_result,
             font_object_analysis=font_object_result,
             anti_scan_alter_rescan=anti_scan_alter_rescan_result,
@@ -173,13 +174,13 @@ class ForensicAnalyzer:
             confidence = min(tamperedPercentage / 10, 1.0)  # Scale to 0-1
             
             return ElaResult(
-                confidence=confidence,
+                ela_score=confidence,
                 details=f"ELA detected {tamperedPercentage:.2f}% high-variance pixels. Mean error: {mean_error:.2f}, Max: {max_error:.2f}",
-                heatmap_data=ela_image.tolist() if ela_image.size < 100000 else None  # Limit size
+                ela_heatmap_url=None  # Heatmap data not supported in current model
             )
             
         except Exception as exc:
-            return ElaResult(confidence=0.0, details=f"ELA failed: {str(exc)}", heatmap_data=None)
+            return ElaResult(ela_score=0.0, details=f"ELA failed: {str(exc)}", ela_heatmap_url=None)
 
     def _detect_clone_splicing(self, document_content: bytes, metadata: Dict[str, Any]) -> Optional[CloneSplicingResult]:
         """
@@ -199,14 +200,13 @@ class ForensicAnalyzer:
             keypoints, descriptors = sift.detectAndCompute(gray, None)
             
             if descriptors is None or len(keypoints) < 10:
-                return CloneSplicingResult(confidence=0.0, details="Insufficient keypoints detected", cloned_regions=[])
+                return CloneSplicingResult(detected=False, details="Insufficient keypoints detected", regions=[])
             
             # Match keypoints to find duplicates
             bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
             matches = bf.knnMatch(descriptors, descriptors, k=2)
             
             # Filter good matches (not self-matches, spatial distance check)
-            cloned_regions = []
             good_matches = []
             
             for match_pair in matches:
@@ -227,24 +227,26 @@ class ForensicAnalyzer:
                             good_matches.append((pt1, pt2))
             
             confidence = min(len(good_matches) / 100, 1.0)  # Scale based on matches found
+            detected = confidence > 0.1 # Low threshold for detection
             
             # Group matches into regions
+            regions = []
             if len(good_matches) > 5:
-                cloned_regions = [
-                    {"source": list(m[0]), "target": list(m[1])} 
+                regions = [
+                    f"Match between {m[0]} and {m[1]}" 
                     for m in good_matches[:10]  # Limit to top 10
                 ]
             
             details = f"Found {len(good_matches)} potential clone matches"
             
             return CloneSplicingResult(
-                confidence=confidence,
+                detected=detected,
                 details=details,
-                cloned_regions=cloned_regions
+                regions=regions
             )
             
         except Exception as exc:
-            return CloneSplicingResult(confidence=0.0, details=f"Clone detection failed: {str(exc)}", cloned_regions=[])
+            return CloneSplicingResult(detected=False, details=f"Clone detection failed: {str(exc)}", regions=[])
 
     def _analyze_font_object(self, document_content: bytes, metadata: Dict[str, Any]) -> Optional[FontObjectAnalysisResult]:
         """
@@ -257,7 +259,6 @@ class ForensicAnalyzer:
             # Open PDF
             doc = fitz.open(stream=document_content, filetype="pdf")
             
-            font_analysis = []
             all_fonts = {}
             
             for page_num in range(len(doc)):
@@ -293,15 +294,16 @@ class ForensicAnalyzer:
                         inconsistencies.append(f"Rare font '{font_name}' used sparingly")
             
             confidence = min(len(inconsistencies) / 5, 1.0)
+            detected = confidence > 0.0
             
             return FontObjectAnalysisResult(
-                confidence=confidence,
+                inconsistencies_detected=detected,
                 details=f"Analyzed {unique_fonts} unique fonts. {len(inconsistencies)} inconsistencies found.",
-                inconsistencies=inconsistencies
+                anomalies=inconsistencies
             )
             
         except Exception as exc:
-            return FontObjectAnalysisResult(confidence=0.0, details=f"Font analysis failed: {str(exc)}", inconsistencies=[])
+            return FontObjectAnalysisResult(inconsistencies_detected=False, details=f"Font analysis failed: {str(exc)}", anomalies=[])
 
     def _detect_anti_scan_alter_rescan(self, document_content: bytes, metadata: Dict[str, Any]) -> Optional[AntiScanAlterRescanResult]:
         """
@@ -326,7 +328,6 @@ class ForensicAnalyzer:
             # Check for double JPEG compression artifacts
             # Rescan typically shows lower noise variance
             threshold_low_noise = 100  # Unusually clean for a scan
-            threshold_high_noise = 5000  # Too noisy
             
             # Detect periodic artifacts (printer patterns)
             fft = np.fft.fft2(gray)
@@ -350,15 +351,21 @@ class ForensicAnalyzer:
                 indicators.append("Periodic patterns suggest re-scanning")
             
             confidence = min(confidence, 1.0)
+            detected = confidence > 0.5
             
             return AntiScanAlterRescanResult(
-                confidence=confidence,
+                detected=detected,
                 details=f"Noise variance: {noise_variance:.2f}, Strong peaks: {strong_peaks}",
-                indicators=indicators
+                # indicators field missing in model? models.py has 'details' but no 'indicators'?
+                # Wait, models.py Step 654:
+                # class AntiScanAlterRescanResult(BaseModel):
+                #     detected: bool
+                #     details: str
+                # No indicators field!
             )
             
         except Exception as exc:
-            return AntiScanAlterRescanResult(confidence=0.0, details=f"Scan analysis failed: {str(exc)}", indicators=[])
+            return AntiScanAlterRescanResult(detected=False, details=f"Scan analysis failed: {str(exc)}")
 
     def _determine_overall_verdict(self, tamper_score: TamperScoreResult) -> str:
         if tamper_score.score >= 0.7:

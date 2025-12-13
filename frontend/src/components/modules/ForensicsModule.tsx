@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Shield, FileText, Activity, Lock, CheckCircle, X, Binary } from 'lucide-react';
+import { Shield, FileText, Activity, Lock, CheckCircle, Binary } from 'lucide-react';
 import { endpoints } from '../../services/api';
+import { HexViewer } from './forensics/HexViewer';
+import { MetadataPanel } from './forensics/MetadataPanel';
 
 interface ForensicDoc {
   id: string;
@@ -31,6 +33,7 @@ interface ApiDocResponse {
   hash_sha256?: string;
   forensic_metadata?: {
     size_bytes?: number;
+    [key: string]: any;
   };
 }
 
@@ -76,7 +79,7 @@ export function ForensicsModule() {
     try {
       // @ts-ignore
       const response = await endpoints.forensics.analyze(id, 'default_case');
-      setAnalysisResult(response.data);
+      setAnalysisResult(response.data); // Now returns ForensicAnalysisResult dict
     } catch (error) {
       console.error("Failed to run deep analysis:", error);
       alert("Deep Analysis Failed. Check backend logs.");
@@ -98,11 +101,6 @@ export function ForensicsModule() {
     } finally {
       setVerifying(null);
     }
-  };
-
-  const formatHex = (hex: string) => {
-    // Split into chunks of 2 for readability
-    return hex.match(/.{1,2}/g)?.join(' ') ?? hex;
   };
 
   return (
@@ -206,119 +204,14 @@ export function ForensicsModule() {
         </div>
       </div>
 
-      {/* Hex View Modal */}
+      {/* Hex Viewer Modal */}
       {showHex && hexData && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-8"
-          onClick={() => setShowHex(false)}
-        >
-          <div
-            className="bg-[#0a0a0a] border border-halo-cyan/30 rounded-lg max-w-5xl w-full max-h-[90vh] flex flex-col shadow-[0_0_50px_rgba(0,240,255,0.15)]"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center p-6 border-b border-halo-border/30 bg-halo-cyan/5">
-              <div className="flex items-center gap-3">
-                <Binary className="text-halo-cyan" />
-                <div>
-                  <h3 className="text-xl font-mono text-halo-cyan tracking-wider">HEX INSPECTOR</h3>
-                  <p className="text-xs text-halo-muted font-mono">DOC ID: {hexData.doc_id}</p>
-                </div>
-              </div>
-              <button onClick={() => setShowHex(false)} className="text-halo-muted hover:text-white transition-colors">
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 font-mono text-xs custom-scrollbar bg-black/50">
-              <div className="grid grid-cols-1 gap-8">
-                <div>
-                  <div className="flex items-center gap-2 mb-2 text-green-400 font-bold border-b border-green-500/30 pb-1">
-                    <span>HEAD</span>
-                    <span className="text-halo-muted font-normal">(First 512 bytes)</span>
-                  </div>
-                  <div className="bg-[#050505] p-4 rounded border border-halo-border/20 text-green-500/80 leading-relaxed break-all selection:bg-green-500/30 selection:text-white">
-                    {formatHex(hexData.head)}
-                  </div>
-                </div>
-                {hexData.tail && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-2 text-green-400 font-bold border-b border-green-500/30 pb-1">
-                      <span>TAIL</span>
-                      <span className="text-halo-muted font-normal">(Last 512 bytes)</span>
-                    </div>
-                    <div className="bg-[#050505] p-4 rounded border border-halo-border/20 text-green-500/80 leading-relaxed break-all selection:bg-green-500/30 selection:text-white">
-                      {formatHex(hexData.tail)}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="p-4 border-t border-halo-border/30 bg-halo-cyan/5 flex justify-between items-center text-xs text-halo-muted font-mono">
-              <span>TOTAL SIZE: {hexData.total_size.toLocaleString()} bytes</span>
-              <span>INTEGRITY CHECK: PASSED</span>
-            </div>
-          </div>
-        </div>
+        <HexViewer hexData={hexData} onClose={() => setShowHex(false)} />
       )}
 
       {/* Analysis Result Modal */}
       {analysisResult && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-8"
-          onClick={() => setAnalysisResult(null)}
-        >
-          <div
-            className="bg-[#0a0a0a] border border-purple-500/30 rounded-lg max-w-2xl w-full max-h-[90vh] flex flex-col shadow-[0_0_50px_rgba(168,85,247,0.15)]"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center p-6 border-b border-purple-500/30 bg-purple-500/5">
-              <div className="flex items-center gap-3">
-                <Shield className="text-purple-400" />
-                <div>
-                  <h3 className="text-xl font-mono text-purple-400 tracking-wider">FORENSIC REPORT</h3>
-                  <p className="text-xs text-halo-muted font-mono">DEEP ANALYSIS COMPLETE</p>
-                </div>
-              </div>
-              <button onClick={() => setAnalysisResult(null)} className="text-halo-muted hover:text-white transition-colors">
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
-              <div className="flex justify-between items-center bg-white/5 p-4 rounded">
-                <span className="text-halo-muted">Authenticity Score</span>
-                <span className={`text-xl font-bold ${analysisResult.authenticity_score > 0.8 ? 'text-green-400' : 'text-red-400'}`}>
-                  {(analysisResult.authenticity_score * 100).toFixed(1)}%
-                </span>
-              </div>
-
-              <div>
-                <h4 className="text-sm text-halo-muted uppercase mb-2">Flags & Issues</h4>
-                <ul className="space-y-2">
-                  {analysisResult.flags?.map((flag: string, i: number) => (
-                    <li key={i} className="flex items-start gap-2 text-sm text-red-300 bg-red-500/10 p-2 rounded">
-                      <Activity size={14} className="mt-1 shrink-0" />
-                      {flag}
-                    </li>
-                  ))}
-                  {(!analysisResult.flags || analysisResult.flags.length === 0) && (
-                    <li className="text-green-400 text-sm flex items-center gap-2">
-                      <CheckCircle size={14} /> No issues detected.
-                    </li>
-                  )}
-                </ul>
-              </div>
-
-              <div>
-                <h4 className="text-sm text-halo-muted uppercase mb-2">Detailed Findings</h4>
-                <p className="text-sm text-halo-text leading-relaxed whitespace-pre-wrap bg-black/30 p-4 rounded border border-white/5">
-                  {analysisResult.details}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <MetadataPanel analysisResult={analysisResult} onClose={() => setAnalysisResult(null)} />
       )}
     </div>
   );

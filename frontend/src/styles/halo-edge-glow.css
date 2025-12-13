@@ -18,7 +18,7 @@
             rgba(0, 240, 255, 0.05) 75%,
             rgba(0, 240, 255, 0.15) 100%);
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask-composite: xor;
+    mask-composite: exclude;
     -webkit-mask-composite: xor;
     pointer-events: none;
     z-index: 1;

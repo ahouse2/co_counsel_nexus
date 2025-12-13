@@ -136,6 +136,7 @@ export function TrialBinderModule() {
                                                     playSound.click();
                                                 }}
                                                 className="text-halo-muted hover:text-white transition-colors p-1"
+                                                title="More options"
                                             >
                                                 <MoreVertical size={18} />
                                             </button>
@@ -200,7 +201,7 @@ export function TrialBinderModule() {
                         >
                             <div className="p-6 border-b border-halo-border flex justify-between items-center">
                                 <h3 className="text-xl font-light text-halo-text">Add to Binder</h3>
-                                <button onClick={() => setIsAdding(false)} className="text-halo-muted hover:text-white">
+                                <button onClick={() => setIsAdding(false)} className="text-halo-muted hover:text-white" title="Close">
                                     <X size={24} />
                                 </button>
                             </div>
@@ -215,6 +216,7 @@ export function TrialBinderModule() {
                                         onChange={(e) => setSearchQuery(e.target.value)}
                                         className="w-full bg-black/50 border border-halo-border rounded-lg pl-10 pr-4 py-2 text-halo-text focus:border-halo-cyan focus:outline-none"
                                         autoFocus
+                                        aria-label="Search available documents"
                                     />
                                 </div>
                             </div>

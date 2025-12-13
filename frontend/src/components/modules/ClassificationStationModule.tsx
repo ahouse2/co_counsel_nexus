@@ -246,6 +246,8 @@ export function ClassificationStationModule() {
                                                 value={editForm.categories}
                                                 onChange={e => setEditForm({ ...editForm, categories: e.target.value })}
                                                 className="w-full bg-black/50 border border-halo-border rounded p-2 text-white focus:border-halo-cyan outline-none"
+                                                title="Edit categories"
+                                                placeholder="e.g. Correspondence, Financial"
                                             />
                                         </div>
                                         <div>
@@ -254,6 +256,8 @@ export function ClassificationStationModule() {
                                                 value={editForm.tags}
                                                 onChange={e => setEditForm({ ...editForm, tags: e.target.value })}
                                                 className="w-full bg-black/50 border border-halo-border rounded p-2 text-white focus:border-halo-cyan outline-none"
+                                                title="Edit tags"
+                                                placeholder="e.g. Urgent, Confidential"
                                             />
                                         </div>
                                         <button

@@ -116,3 +116,16 @@ Fixed Silent Failure in Document Listing
 UI Improvements
 - Increased module viewport size in `DashboardHub.tsx` to `w-[99.5vw]` and `h-[99vh]` to push the Halo to the absolute edge.
 - Implemented dynamic camera zoom in `HaloGraph.tsx`: zooms in (z=150) when a module is active and zooms out (z=400) when returning to the graph view.
+
+/newline
+@2025/12/12 05:15:00 AM
+Advanced Search & Filtering Implementation
+- Implemented `HybridQueryEngine` in `DocumentService` combining vector, graph, and keyword search.
+- Added `GET /api/documents/search` endpoint to `backend/app/api/documents.py`.
+- Updated `DocumentModule.tsx` with search input, state management, and results rendering.
+- Fixed critical API crash caused by missing `Any` import in `document_service.py`.
+- Fixed `TypeError` in fallback search by passing `case_id` correctly.
+- Removed `case_id` from `HybridQueryEngine.retrieve` call as it's not supported yet, relying on fallback for now if hybrid fails.
+- Fixed frontend build errors in `ServiceOfProcessModule.tsx` and `AgentConsoleModule.tsx` by removing unused variables.
+- Verified API health (`/health` returns 200 OK) and search endpoint functionality (fallback path).
+- Cleared `HANDOFFS.md`.

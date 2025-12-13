@@ -283,17 +283,18 @@ class AutonomousScraperService:
         entity_id = f"statute:{source}:{self._sanitize_id(title)}"
         
         # Create LegalReference node
+        properties = {
+            "id": entity_id,
+            "title": title,
+            "text": text[:5000],  # Limit text length
+            "url": url,
+            "source": source,
+            "query": query,
+            "scraped_at": datetime.now(timezone.utc).isoformat()
+        }
         await self.kg_service.add_entity(
-            entity_id=entity_id,
             entity_type="LegalReference",
-            properties={
-                "title": title,
-                "text": text[:5000],  # Limit text length
-                "url": url,
-                "source": source,
-                "query": query,
-                "scraped_at": datetime.now(timezone.utc).isoformat()
-            }
+            properties=properties
         )
         
         # Create relationship to query topic if exists
@@ -426,7 +427,7 @@ class AutonomousScraperService:
 _autonomous_scraper_service: Optional[AutonomousScraperService] = None
 
 
-def get_autonomous_scraper_service() -> AutonomousScraperService:
+async def get_autonomous_scraper_service() -> AutonomousScraperService:
     """Get or create the autonomous scraper service singleton."""
     global _autonomous_scraper_service
     if _autonomous_scraper_service is None:

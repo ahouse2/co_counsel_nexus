@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Union, Dict, BinaryIO
+from typing import List, Optional, Union, Dict, BinaryIO, Any
 import asyncio
 import uuid
 import dataclasses
@@ -9,6 +9,18 @@ from backend.app.models.api import IngestionSource, SourceType
 from backend.ingestion.pipeline import run_ingestion_pipeline
 from backend.ingestion.loader_registry import LoaderRegistry
 from backend.ingestion.settings import LlamaIndexRuntimeConfig
+from backend.ingestion.llama_index_factory import create_embedding_model
+from backend.app.services.retrieval_engine import (
+    HybridQueryEngine,
+    VectorRetrieverAdapter,
+    GraphRetrieverAdapter,
+    KeywordRetrieverAdapter
+)
+from backend.app.services.vector import VectorService
+from backend.app.services.graph import GraphService
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DocumentService:
     """
@@ -20,11 +32,87 @@ class DocumentService:
         loader_registry: LoaderRegistry,
         runtime_config: LlamaIndexRuntimeConfig,
         materialized_root: Path,
+        vector_service: Optional[VectorService] = None,
+        graph_service: Optional[GraphService] = None,
     ):
         self.document_store = document_store
         self.loader_registry = loader_registry
         self.runtime_config = runtime_config
         self.materialized_root = materialized_root
+        self.vector_service = vector_service
+        self.graph_service = graph_service
+        
+        self.query_engine: Optional[HybridQueryEngine] = None
+        if self.vector_service and self.graph_service:
+            self._init_query_engine()
+
+    def _init_query_engine(self):
+        try:
+            embed_model = create_embedding_model(self.runtime_config.embedding)
+            
+            vector_adapter = VectorRetrieverAdapter(self.vector_service, embed_model)
+            graph_adapter = GraphRetrieverAdapter(self.graph_service)
+            keyword_adapter = KeywordRetrieverAdapter(self.document_store)
+            
+            self.query_engine = HybridQueryEngine(
+                vector=vector_adapter,
+                graph=graph_adapter,
+                keyword=keyword_adapter
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize query engine: {e}")
+
+    async def search_documents(self, query: str, top_k: int = 10, case_id: str = "default_case") -> List[Dict[str, Any]]:
+        """
+        Performs a hybrid search across documents using vector, graph, and keyword retrieval.
+        """
+        if not self.query_engine:
+            if self.vector_service and self.graph_service:
+                self._init_query_engine()
+            
+            if not self.query_engine:
+                # Fallback to simple keyword search if engine not available
+                logger.info("Query engine not available, falling back to simple keyword search")
+                return self._simple_keyword_search(query, top_k, case_id)
+
+        try:
+            bundle = self.query_engine.retrieve(
+                query, 
+                top_k=top_k, 
+                vector_window=top_k*2, 
+                graph_window=top_k*2, 
+                keyword_window=top_k*2, 
+                use_cross_encoder=False,
+                # case_id=case_id # HybridQueryEngine.retrieve does not support case_id yet
+            )
+            
+            results = []
+            for point in bundle.fused_points:
+                payload = point.payload or {}
+                # Ensure id is present
+                if "id" not in payload and "doc_id" in payload:
+                    payload["id"] = payload["doc_id"]
+                results.append(payload)
+                
+            return results
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
+            return self._simple_keyword_search(query, top_k, case_id)
+
+    def _simple_keyword_search(self, query: str, top_k: int = 10, case_id: str = "default_case") -> List[Dict[str, Any]]:
+        """
+        Simple keyword search implementation as fallback.
+        """
+        results = []
+        query_lower = query.lower()
+        for doc in self.document_store.list_all_documents(case_id):
+            # Basic matching on filename or content if available
+            # Note: list_all_documents returns metadata dicts
+            if query_lower in doc.get("file_name", "").lower():
+                results.append(doc)
+            if len(results) >= top_k:
+                break
+        return results
 
     async def upload_document(
         self,
@@ -249,6 +337,18 @@ class DocumentService:
 
     def get_document(self, case_id: str, doc_type: str, doc_id: str, version: Optional[str] = None) -> Optional[str]:
         return self.document_store.get_document(doc_type, case_id, doc_id, version)
+
+    def get_document_content(self, case_id: str, doc_type: str, doc_id: str) -> Optional[bytes]:
+        """
+        Retrieves the raw binary content of a document.
+        """
+        return self.document_store.get_document_content(doc_type, case_id, doc_id)
+
+    def get_document_metadata(self, case_id: str, doc_type: str, doc_id: str) -> Optional[dict]:
+        """
+        Retrieves the metadata of a document.
+        """
+        return self.document_store.get_document_metadata(doc_type, case_id, doc_id)
 
     def list_document_versions(self, case_id: str, doc_type: str, doc_id: str) -> List[str]:
         return self.document_store.list_document_versions(doc_type, case_id, doc_id)

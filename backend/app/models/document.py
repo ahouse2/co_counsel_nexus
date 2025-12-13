@@ -15,5 +15,6 @@ class Document(Base):
     custom_metadata = Column(JSON)
     hash_sha256 = Column(String, index=True)
     forensic_metadata = Column(JSON)
+    flags = Column(JSON) # Added for flagging service
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

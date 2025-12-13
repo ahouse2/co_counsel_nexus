@@ -45,8 +45,10 @@ async def get_hex_view(
     """
     for doc_type in ["my_documents", "opposition_documents"]:
         try:
-            content = store.get_document(doc_type, case_id, doc_id)
+            content = store.get_document_content(doc_type, case_id, doc_id)
             if content:
+                if isinstance(content, str):
+                    content = content.encode('utf-8')
                 # Return head and tail
                 head = content[:512].hex()
                 tail = content[-512:].hex() if len(content) > 512 else ""
@@ -60,6 +62,7 @@ async def get_hex_view(
             print(f"Error reading document {doc_id}: {e}")
             continue
             
+
     raise HTTPException(status_code=404, detail="Document not found")
 
 @router.post("/{doc_id}/analyze", summary="Trigger Deep Forensic Analysis")
@@ -69,54 +72,40 @@ async def trigger_deep_analysis(
     store: DocumentStore = Depends(get_document_store)
 ):
     """
-    Triggers the ForensicAnalysisCrew to perform deep analysis (ELA, Splicing, etc.).
+    Triggers deep forensic analysis (Tampering Detection, Metadata Anomalies).
     """
-    from backend.app.agents.swarms_runner import get_swarms_runner
-    import asyncio
+    from backend.app.services.forensic_analyzer import ForensicAnalyzer
     
-    runner = get_swarms_runner()
+    analyzer = ForensicAnalyzer()
     
-    # Check if document exists
-    doc_path = None
+    # Find document content and metadata
     for doc_type in ["my_documents", "opposition_documents"]:
-        versions = store.list_document_versions(doc_type, case_id, doc_id)
-        if versions:
-            # Get the actual file path
-            # This is a bit hacky, accessing internal method, but needed for the tool
-            doc_path = str(store._get_storage_path(doc_type, case_id, doc_id, version=versions[0]))
-            break
+        try:
+            # Get Content
+            content = store.get_document_content(doc_type, case_id, doc_id)
+            if not content:
+                continue
+                
+            if isinstance(content, str):
+                content = content.encode('utf-8')
+
+            # Get Metadata
+            versions = store.list_document_versions(doc_type, case_id, doc_id)
+            if not versions:
+                continue
             
-    if not doc_path:
-        raise HTTPException(status_code=404, detail="Document not found")
-        
-    prompt = f"""
-    Context: Forensic Analysis for Document {doc_id}.
-    File Path: {doc_path}
-    Role: You are the Forensics Lead.
-    
-    Task:
-    1. Analyze the document for authenticity (ELA, Metadata).
-    2. Check for splicing or manipulation.
-    3. Return a JSON report with:
-       - authenticity_score: float (0.0-1.0)
-       - flags: list of strings (Issues found)
-       - details: str (Detailed findings)
-    """
-    
-    loop = asyncio.get_event_loop()
-    try:
-        # Route to 'forensics'
-        response_text = await loop.run_in_executor(None, runner.route_and_run, prompt)
-        
-        # Parse JSON
-        import json
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0]
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0]
+            meta_path = store._get_storage_path(doc_type, case_id, doc_id, version=versions[0]).with_suffix(".meta")
+            metadata = {}
+            if meta_path.exists():
+                with open(meta_path, "r") as f:
+                    metadata = json.load(f)
+
+            # Run Analysis
+            result = analyzer.analyze_manipulation(metadata, content)
+            return result
             
-        return json.loads(response_text.strip())
-        
-    except Exception as e:
-        print(f"Swarms Execution Failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Forensic Analysis Failed: {e}")
+        except Exception as e:
+            print(f"Error accessing doc {doc_id}: {e}")
+            continue
+
+    raise HTTPException(status_code=404, detail="Document not found")

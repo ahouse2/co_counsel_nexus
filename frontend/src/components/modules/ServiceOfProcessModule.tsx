@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Send, MapPin, Check, Clock, AlertCircle, FileText, Plus, Loader2, Trash2, Eye } from 'lucide-react';
+import { useState } from 'react';
+import { Send, MapPin, Check, Clock, AlertCircle, FileText, Plus, Trash2, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ServiceRecord {
@@ -53,8 +53,8 @@ const statusConfig = {
 export function ServiceOfProcessModule() {
     const [records, setRecords] = useState<ServiceRecord[]>(mockRecords);
     const [selectedRecord, setSelectedRecord] = useState<ServiceRecord | null>(null);
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [loading, setLoading] = useState(false);
+    // const [showAddModal, setShowAddModal] = useState(false);
+    // const [loading, setLoading] = useState(false);
 
     const getStatusInfo = (status: ServiceRecord['status']) => statusConfig[status];
 
@@ -77,7 +77,7 @@ export function ServiceOfProcessModule() {
                     </div>
                 </div>
                 <button
-                    onClick={() => setShowAddModal(true)}
+                    onClick={() => console.log("Add modal not implemented")}
                     className="flex items-center gap-2 px-4 py-2 bg-halo-cyan/20 hover:bg-halo-cyan/30 text-halo-cyan border border-halo-cyan/30 rounded-lg transition-all"
                 >
                     <Plus size={18} />
@@ -131,8 +131,8 @@ export function ServiceOfProcessModule() {
                                         transition={{ delay: idx * 0.05 }}
                                         onClick={() => setSelectedRecord(record)}
                                         className={`p-4 rounded-lg border cursor-pointer transition-all ${selectedRecord?.id === record.id
-                                                ? 'border-halo-cyan bg-halo-cyan/10'
-                                                : 'border-halo-border/50 bg-black/20 hover:border-halo-cyan/50'
+                                            ? 'border-halo-cyan bg-halo-cyan/10'
+                                            : 'border-halo-border/50 bg-black/20 hover:border-halo-cyan/50'
                                             }`}
                                     >
                                         <div className="flex items-start justify-between mb-2">

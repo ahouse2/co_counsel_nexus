@@ -89,6 +89,7 @@ export function JurySentimentModule() {
                                     value={juryProfile.age_range}
                                     onChange={(e) => setJuryProfile({ ...juryProfile, age_range: e.target.value })}
                                     className="w-full bg-black/50 border border-halo-border rounded px-3 py-2 text-sm mt-1"
+                                    title="Select age range"
                                 >
                                     <option value="18-34">18-34</option>
                                     <option value="35-55">35-55</option>
@@ -101,6 +102,7 @@ export function JurySentimentModule() {
                                     value={juryProfile.education}
                                     onChange={(e) => setJuryProfile({ ...juryProfile, education: e.target.value })}
                                     className="w-full bg-black/50 border border-halo-border rounded px-3 py-2 text-sm mt-1"
+                                    title="Select education level"
                                 >
                                     <option value="high_school">High School</option>
                                     <option value="college">College</option>
@@ -113,6 +115,7 @@ export function JurySentimentModule() {
                                     value={juryProfile.political_leaning}
                                     onChange={(e) => setJuryProfile({ ...juryProfile, political_leaning: e.target.value })}
                                     className="w-full bg-black/50 border border-halo-border rounded px-3 py-2 text-sm mt-1"
+                                    title="Select political leaning"
                                 >
                                     <option value="liberal">Liberal</option>
                                     <option value="moderate">Moderate</option>

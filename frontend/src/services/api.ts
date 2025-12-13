@@ -24,8 +24,8 @@ export const endpoints = {
     graph: {
         neighbors: (nodeId: string) => api.get(`/api/graph/neighbors/${nodeId}`),
         query: (cypher: string) => api.post('/api/graph/query', { query: cypher }),
+        agentQuery: (query: string, caseId: string = 'default_case') => api.post('/api/graph/agent', { query, case_id: caseId }),
     },
-    // Chat / Agents
     // Chat / Agents
     agents: {
         list: () => api.get('/agents/'),
@@ -37,6 +37,20 @@ export const endpoints = {
         list: (caseId: string) => api.get(`/api/documents/${caseId}/documents`, {
             timeout: 0 // No timeout - allows unlimited time for heavy processing
         }),
+        search: (query: string, topK: number = 10) => api.get('/api/documents/search', {
+            params: { query, top_k: topK }
+        }),
+        batchDelete: (docIds: string[], caseId: string = 'default_case') =>
+            api.post('/api/documents/batch/delete', { doc_ids: docIds }, { params: { case_id: caseId } }),
+        batchReprocess: (docIds: string[], caseId: string = 'default_case') =>
+            api.post('/api/documents/batch/reprocess', { doc_ids: docIds }, { params: { case_id: caseId } }),
+        batchDownload: (docIds: string[], caseId: string = 'default_case') =>
+            api.post('/api/documents/batch/download', { doc_ids: docIds }, {
+                params: { case_id: caseId },
+                responseType: 'blob'
+            }),
+        getGraph: (caseId: string, docId: string, hops: number = 1) =>
+            api.get(`/api/documents/${caseId}/documents/${docId}/graph`, { params: { hops } }),
         upload: (caseId: string, formData: FormData, relativePath?: string, apiKeys?: { gemini?: string, courtListener?: string }) => {
             let url = `/api/documents/upload?case_id=${caseId}&doc_type=my_documents`;
             if (relativePath) {
@@ -73,8 +87,10 @@ export const endpoints = {
         get: (caseId: string) => api.get(`/api/timeline/${caseId}`),
         list: (page = 1, pageSize = 10) => api.get(`/api/timeline?page=${page}&page_size=${pageSize}`),
         generate: (prompt: string, caseId: string) => api.post('/api/timeline/generate', { prompt, case_id: caseId }),
-        weave: (caseId: string) => api.post(`/api/timeline/${caseId}/weave`),
-        contradictions: (caseId: string) => api.get(`/api/timeline/${caseId}/contradictions`),
+        narrative: {
+            generate: (caseId: string) => api.get(`/api/narrative/${caseId}/generate`),
+            contradictions: (caseId: string) => api.get(`/api/narrative/${caseId}/contradictions`),
+        },
     },
     // Context
     context: {
@@ -106,16 +122,24 @@ export const endpoints = {
         simulateIndividuals: (argument: string, jurors: any[]) => api.post('/api/jury-sentiment/simulate-individuals', { argument, jurors }),
         scoreCredibility: (witnessId: string, testimony: string) => api.post('/api/jury-sentiment/score-credibility', { witness_id: witnessId, testimony }),
     },
+    // Financial Forensics
+    financial: {
+        traceCrypto: (address: string, chain: string) => api.post('/api/financial/crypto/trace', { address, chain }),
+        scanAssets: (caseId: string) => api.post(`/api/financial/assets/scan/${caseId}`),
+    },
     // Evidence Map
     evidenceMap: {
-        get: (caseId: string) => api.get(`/api/evidence-map/${caseId}`),
-        analyze: (caseId: string, data: any) => api.post(`/api/evidence-map/${caseId}/analyze`, data),
+        analyze: (caseId: string) => api.post(`/api/evidence-map/analyze/${caseId}`),
     },
     // Jury Sentiment
     jurySentiment: {
         analyzeArgument: (data: any) => api.post('/api/jury-sentiment/analyze-argument', data),
         simulateJury: (data: any) => api.post('/api/jury-sentiment/simulate-jury', data),
         getReport: (caseId: string) => api.get(`/api/jury-sentiment/${caseId}/report`),
+    },
+    // Adversarial
+    adversarial: {
+        challenge: (caseId: string, theory: string) => api.post(`/api/adversarial/${caseId}/challenge`, { theory }),
     },
     // Case Management
     cases: {

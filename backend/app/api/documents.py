@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Header, BackgroundTasks, Form
+from fastapi.responses import StreamingResponse
 from typing import List, Optional
+from pydantic import BaseModel
 import asyncio
 import logging
+import mimetypes
 
 from backend.app.services.document_service import DocumentService
 from backend.app.storage.document_store import DocumentStore
@@ -9,13 +12,19 @@ from backend.ingestion.loader_registry import LoaderRegistry
 from backend.ingestion.settings import build_runtime_config, build_ocr_config
 from backend.ingestion.ocr import OcrEngine
 from backend.app.config import Settings, get_settings
+from backend.app.services.vector import get_vector_service, VectorService
+from backend.app.services.graph import get_graph_service, GraphService
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-def get_document_service(settings: Settings = Depends(get_settings)) -> DocumentService:
+def get_document_service(
+    settings: Settings = Depends(get_settings),
+    vector_service: VectorService = Depends(get_vector_service),
+    graph_service: GraphService = Depends(get_graph_service)
+) -> DocumentService:
     """
     Dependency to get DocumentService instance.
     """
@@ -42,8 +51,23 @@ def get_document_service(settings: Settings = Depends(get_settings)) -> Document
         document_store=document_store,
         loader_registry=loader_registry,
         runtime_config=runtime_config,
-        materialized_root=materialized_root
+        materialized_root=materialized_root,
+        vector_service=vector_service,
+        graph_service=graph_service
     )
+
+@router.get("/search", summary="Search documents")
+async def search_documents(
+    query: str,
+    top_k: int = 10,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    """
+    Search for documents using hybrid retrieval (Vector + Graph + Keyword).
+    """
+    results = await document_service.search_documents(query, top_k, case_id)
+    return results
 
 @router.post("/upload", summary="Upload a new document for a case")
 async def upload_document(
@@ -449,3 +473,117 @@ async def update_document_metadata(
         }
     )
     return {"message": "Metadata updated"}
+
+
+@router.get("/{doc_id}/download", summary="Download document file")
+async def download_document(
+    doc_id: str,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    """
+    Download the raw document file by doc_id.
+    """
+    # Try both document types
+    for doc_type in ["my_documents", "opposition_documents"]:
+        try:
+            content = document_service.get_document_content(case_id, doc_type, doc_id)
+            if content is not None:
+                # Get metadata to determine content type
+                metadata = document_service.get_document_metadata(case_id, doc_type, doc_id)
+                filename = metadata.get("filename", f"{doc_id}.bin") if metadata else f"{doc_id}.bin"
+                content_type = metadata.get("content_type", "application/octet-stream") if metadata else "application/octet-stream"
+                
+                return StreamingResponse(
+                    iter([content]),
+                    media_type=content_type,
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{filename}"',
+                        "Content-Length": str(len(content))
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Document not found in {doc_type}: {e}")
+            continue
+    
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+
+@router.get("/{doc_id}/preview", summary="Preview document file")
+async def preview_document(
+    doc_id: str,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    """
+    Serve the raw document file for inline preview (PDF, images).
+    """
+    # Try both document types
+    for doc_type in ["my_documents", "opposition_documents"]:
+        try:
+            content = document_service.get_document_content(case_id, doc_type, doc_id)
+            if content is not None:
+                # Get metadata to determine content type
+                metadata = document_service.get_document_metadata(case_id, doc_type, doc_id)
+                filename = metadata.get("filename", f"{doc_id}.bin") if metadata else f"{doc_id}.bin"
+                content_type = metadata.get("content_type") if metadata else None
+                
+                # Guess content type from filename if not in metadata
+                if not content_type:
+                    guessed_type, _ = mimetypes.guess_type(filename)
+                    content_type = guessed_type or "application/octet-stream"
+                
+                return StreamingResponse(
+                    iter([content]),
+                    media_type=content_type,
+                    headers={
+                        "Content-Disposition": f'inline; filename="{filename}"',
+                        "Content-Length": str(len(content))
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Document not found in {doc_type}: {e}")
+            continue
+    
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+
+class BatchRequest(BaseModel):
+    doc_ids: List[str]
+
+@router.post("/batch/delete", summary="Batch delete documents")
+async def batch_delete(
+    request: BatchRequest,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    return await document_service.batch_delete_documents(case_id, request.doc_ids)
+
+@router.post("/batch/reprocess", summary="Batch reprocess documents")
+async def batch_reprocess(
+    request: BatchRequest,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    return await document_service.batch_reprocess_documents(case_id, request.doc_ids)
+
+@router.post("/batch/download", summary="Batch download documents")
+async def batch_download(
+    request: BatchRequest,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    zip_buffer = await document_service.create_document_archive(case_id, request.doc_ids)
+    return StreamingResponse(
+        iter([zip_buffer.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=documents_archive.zip"}
+    )
+@router.get("/{case_id}/documents/{doc_id}/graph", summary="Get document graph neighborhood")
+async def get_document_graph(
+    case_id: str,
+    doc_id: str,
+    hops: int = 1,
+    graph_service: GraphService = Depends(get_graph_service)
+):
+    return graph_service.get_document_neighborhood(case_id, doc_id, hops)

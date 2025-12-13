@@ -45,6 +45,25 @@
 
   .halo-viewport {
     @apply absolute inset-0 flex items-center justify-center overflow-hidden rounded-full;
+    -webkit-mask-image: radial-gradient(circle, white 60%, transparent 100%);
     mask-image: radial-gradient(circle, white 60%, transparent 100%);
+  }
+
+  .halo-border {
+    @apply border border-halo-cyan/30;
+  }
+
+  .halo-text-glow {
+    text-shadow: 0 0 5px rgba(0, 240, 255, 0.5);
+  }
+
+  .halo-panel {
+    @apply bg-black/80 backdrop-blur-md border border-halo-cyan/20 rounded-lg shadow-[0_0_15px_rgba(0, 240, 255, 0.1)];
+  }
+}
+
+@layer utilities {
+  .halo-glow {
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.3), 0 0 20px rgba(0, 240, 255, 0.1);
   }
 }
