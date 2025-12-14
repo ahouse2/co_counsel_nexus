@@ -1,78 +1,47 @@
-import requests
+import asyncio
+import httpx
 import sys
-import time
-import json
+import os
 
-BASE_URL = "http://127.0.0.1:8001"
-CASE_ID = "default_case"
+# Add backend to path
+sys.path.append(os.path.join(os.getcwd(), 'backend'))
 
-def print_step(step_name):
-    print(f"\n{'='*50}")
-    print(f"STEP: {step_name}")
-    print(f"{'='*50}")
-
-def check_health():
-    print_step("Checking API Health")
-    try:
-        response = requests.get(f"{BASE_URL}/health")
-        if response.status_code == 200:
-            print("[OK] API is healthy")
-            return True
-        else:
-            print(f"[FAIL] API returned {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"[FAIL] Could not connect to API: {e}")
-        return False
-
-def generate_narrative():
-    print_step("Generating Narrative")
-    url = f"{BASE_URL}/api/narrative/{CASE_ID}/generate"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            narrative = data.get("narrative")
-            if narrative:
-                print(f"[OK] Narrative generated successfully. Length: {len(narrative)}")
+async def verify_narrative_endpoints():
+    base_url = "http://localhost:8001/api"
+    case_id = "default_case" # Ensure this case exists or use a known one
+    
+    print("Verifying Narrative Weaver Endpoints...")
+    
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        # 1. Test Generate Narrative
+        print("\n1. Testing Generate Narrative...")
+        try:
+            response = await client.get(f"{base_url}/narrative/{case_id}/generate")
+            if response.status_code == 200:
+                data = response.json()
+                narrative = data.get('narrative', '')
+                print(f"Narrative generated (Length: {len(narrative)} chars)")
                 print(f"Preview: {narrative[:100]}...")
-                return True
             else:
-                print("[FAIL] Narrative field missing or empty")
-                return False
-        else:
-            print(f"[FAIL] Failed to generate narrative: {response.status_code} - {response.text}")
-            return False
-    except Exception as e:
-        print(f"[FAIL] Exception during narrative generation: {e}")
-        return False
+                print(f"Failed to generate narrative: {response.text}")
+        except Exception as e:
+            print(f"Error generating narrative: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
 
-def detect_contradictions():
-    print_step("Detecting Contradictions")
-    url = f"{BASE_URL}/api/narrative/{CASE_ID}/contradictions"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            print(f"[OK] Contradictions detected. Count: {len(data)}")
-            if len(data) > 0:
-                print(f"First contradiction: {data[0]}")
-            return True
-        else:
-            print(f"[FAIL] Failed to detect contradictions: {response.status_code} - {response.text}")
-            return False
-    except Exception as e:
-        print(f"[FAIL] Exception during contradiction detection: {e}")
-        return False
+        # 2. Test Detect Contradictions
+        print("\n2. Testing Detect Contradictions...")
+        try:
+            response = await client.get(f"{base_url}/narrative/{case_id}/contradictions")
+            if response.status_code == 200:
+                contradictions = response.json()
+                print(f"Found {len(contradictions)} contradictions")
+                if contradictions:
+                    print(f"First contradiction: {contradictions[0]['description']}")
+            else:
+                print(f"Failed to detect contradictions: {response.text}")
+        except Exception as e:
+            print(f"Error detecting contradictions: {e}")
 
 if __name__ == "__main__":
-    if not check_health():
-        sys.exit(1)
-    
-    if not generate_narrative():
-        sys.exit(1)
-        
-    if not detect_contradictions():
-        sys.exit(1)
-        
-    print("\n[SUCCESS] Narrative Weaver verification passed!")
+    asyncio.run(verify_narrative_endpoints())

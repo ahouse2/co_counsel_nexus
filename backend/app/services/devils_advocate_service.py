@@ -33,11 +33,11 @@ class DevilsAdvocateService:
         self.llm_service = get_llm_service()
         self.settings = get_settings()
 
-    async def review_case(self, case_id: str) -> List[CaseWeakness]:
+    async def review_case(self, case_id: str, case_theory: Optional[str] = None) -> List[CaseWeakness]:
         """
-        Analyzes the case timeline and key documents to find weaknesses.
+        Analyzes the case timeline and key documents to find weaknesses, acting as an autonomous opposing counsel.
         """
-        logger.info(f"Devil's Advocate reviewing case {case_id}")
+        logger.info(f"Devil's Advocate reviewing case {case_id} with theory: {case_theory[:50] if case_theory else 'None'}")
         
         # 1. Gather Context
         events = self.timeline_service.get_timeline(case_id)
@@ -55,23 +55,29 @@ class DevilsAdvocateService:
         context_str = "\n".join(context_lines)
         
         # 2. Prompt
+        theory_context = f"USER'S CASE THEORY:\n{case_theory}\n" if case_theory else "NO EXPLICIT THEORY PROVIDED. INFER THE PLAINTIFF/PROSECUTION THEORY FROM THE FACTS."
+
         prompt = f"""
-        You are a ruthless opposing counsel. Your job is to destroy the case presented below.
-        Identify the weakest points in the timeline and evidence. Look for:
-        - Logical gaps.
-        - Unreliable evidence.
-        - Alternative explanations for events.
-        - Missing critical information.
-        
-        Return a JSON list of objects with:
-        - "title": Short title of the weakness.
-        - "description": Detailed explanation.
-        - "severity": "critical", "high", "medium", or "low".
-        - "suggested_rebuttal": What the defense should say (or how the prosecution handles it).
-        - "related_evidence_ids": List of strings (optional).
-        
+        You are "The Devil's Advocate" — an autonomous, ruthless, and highly skilled opposing counsel.
+        Your goal is not just to find bugs, but to dismantle the case strategy.
+
+        {theory_context}
+
         CASE CONTEXT:
         {context_str}
+
+        INSTRUCTIONS:
+        1. Analyze the facts and the provided (or inferred) theory.
+        2. Identify the most critical legal and factual weaknesses.
+        3. "Litmus Test" the theory: Does the evidence actually support the claims? Are there alternative explanations?
+        4. Construct a strategic counter-narrative.
+        
+        Return a JSON list of objects with:
+        - "title": Short, punchy title of the weakness (e.g., "Lack of Causation", "Hearsay Evidence").
+        - "description": Detailed legal/factual analysis of why this is a weakness.
+        - "severity": "critical", "high", "medium", or "low".
+        - "suggested_rebuttal": Strategic advice on how to fix this or what the opposition will argue.
+        - "related_evidence_ids": List of strings (optional).
         
         JSON OUTPUT:
         """

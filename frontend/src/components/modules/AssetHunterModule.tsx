@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
+// @ts-ignore
 import { ForceGraph2D } from 'react-force-graph';
 import { Search, DollarSign, AlertTriangle, Wallet, Globe, Briefcase, FileText } from 'lucide-react';
 import { endpoints } from '../../services/api';
@@ -174,17 +175,12 @@ export function AssetHunterModule() {
                                 <ForceGraph2D
                                     ref={fgRef}
                                     graphData={cryptoResult.graph}
-                                    nodeLabel="label"
-                                    nodeColor={node => {
-                                        if (node.group === 'target') return '#ef4444';
-                                        if (node.group === 'mixer') return '#f97316';
-                                        if (node.group === 'exchange') return '#3b82f6';
-                                        return '#10b981';
-                                    }}
+                                    nodeLabel={(node: any) => node.id}
+                                    nodeColor={(node: any) => node.group === 'target' ? '#ef4444' : node.group === 'mixer' ? '#f97316' : node.group === 'exchange' ? '#3b82f6' : '#10b981'}
                                     nodeRelSize={6}
                                     linkColor={() => '#10b98140'}
                                     backgroundColor="#00000000"
-                                    onNodeClick={node => {
+                                    onNodeClick={(node: any) => {
                                         fgRef.current?.centerAt(node.x, node.y, 1000);
                                         fgRef.current?.zoom(8, 2000);
                                     }}

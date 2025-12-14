@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BookOpen, RefreshCw, AlertTriangle } from 'lucide-react';
+import api from '../../services/api';
 
 interface Contradiction {
   id: string;
@@ -25,13 +26,8 @@ export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActi
   const fetchNarrative = async () => {
     setIsLoading(true);
     try {
-      // Use direct fetch or api service if available. 
-      // Assuming proxy is set up to forward /api to backend
-      const res = await fetch(`/api/narrative/${caseId}/generate`);
-      if (res.ok) {
-        const data = await res.json();
-        setNarrative(data.narrative);
-      }
+      const res = await api.timeline.narrative.generate(caseId);
+      setNarrative(res.data.narrative);
     } catch (error) {
       console.error("Failed to fetch narrative", error);
     } finally {
@@ -42,11 +38,8 @@ export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActi
   const fetchContradictions = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/narrative/${caseId}/contradictions`);
-      if (res.ok) {
-        const data = await res.json();
-        setContradictions(data);
-      }
+      const res = await api.timeline.narrative.contradictions(caseId);
+      setContradictions(res.data);
     } catch (error) {
       console.error("Failed to fetch contradictions", error);
     } finally {

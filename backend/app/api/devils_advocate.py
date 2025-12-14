@@ -22,15 +22,19 @@ class CrossExamRequest(BaseModel):
     witness_statement: str
     witness_profile: str = ""
 
-@router.get("/{case_id}/review", response_model=List[CaseWeakness])
+class ReviewRequest(BaseModel):
+    case_theory: str = ""
+
+@router.post("/{case_id}/review", response_model=List[CaseWeakness])
 async def review_case(
     case_id: str,
+    request: ReviewRequest,
     service: DevilsAdvocateService = Depends(get_devils_advocate_service)
 ):
     """
-    Triggers a Devil's Advocate review of the case to find weaknesses.
+    Triggers a Devil's Advocate review of the case to find weaknesses, optionally based on a provided theory.
     """
-    return await service.review_case(case_id)
+    return await service.review_case(case_id, request.case_theory)
 
 @router.post("/cross-examine", response_model=List[CrossExamQuestion])
 async def generate_cross_examination(

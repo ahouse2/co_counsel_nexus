@@ -141,6 +141,11 @@ export const endpoints = {
     adversarial: {
         challenge: (caseId: string, theory: string) => api.post(`/api/adversarial/${caseId}/challenge`, { theory }),
     },
+    // Devil's Advocate
+    devilsAdvocate: {
+        review: (caseId: string, caseTheory: string = "") => api.post(`/api/devils-advocate/${caseId}/review`, { case_theory: caseTheory }),
+        crossExamine: (statement: string, profile: string = "") => api.post('/api/devils-advocate/cross-examine', { witness_statement: statement, witness_profile: profile }),
+    },
     // Case Management
     cases: {
         list: (skip = 0, limit = 100) => api.get(`/api/cases/?skip=${skip}&limit=${limit}`),

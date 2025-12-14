@@ -3,67 +3,29 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply bg-halo-bg text-halo-text font-sans antialiased overflow-hidden;
-    background-image: radial-gradient(circle at center, #0f0f0f 0%, #000000 100%);
-  }
+    body {
+        @apply bg-halo-bg text-halo-text font-sans antialiased overflow-hidden;
+        background-image: radial-gradient(circle at center, #0f0f0f 0%, #000000 100%);
+    }
 
-  /* Atmospheric Noise */
-  body::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    opacity: 0.03;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-    z-index: 0;
-  }
+    /* Atmospheric Noise */
+    body::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        opacity: 0.03;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        z-index: 0;
+    }
 }
 
 @layer components {
-  .halo-node {
-    @apply w-3 h-3 rounded-full bg-halo-bg border border-halo-cyan cursor-pointer transition-all duration-300;
-    box-shadow: 0 0 6px rgba(0, 240, 255, 0.3);
-  }
-
-  .halo-node:hover,
-  .halo-node.active {
-    @apply bg-halo-cyan scale-125;
-    box-shadow: 0 0 15px rgba(0, 240, 255, 0.6);
-  }
-
-  .halo-label {
-    @apply absolute text-xs font-mono uppercase tracking-widest text-halo-cyan opacity-0 transition-opacity duration-300 pointer-events-none whitespace-nowrap;
-  }
-
-  .halo-node:hover .halo-label {
-    @apply opacity-100;
-  }
-
-  .halo-viewport {
-    @apply absolute inset-0 flex items-center justify-center overflow-hidden rounded-full;
-    -webkit-mask-image: radial-gradient(circle, white 60%, transparent 100%);
-    mask-image: radial-gradient(circle, white 60%, transparent 100%);
-  }
-
-  .halo-border {
-    @apply border border-halo-cyan/30;
-  }
-
-  .halo-text-glow {
-    text-shadow: 0 0 5px rgba(0, 240, 255, 0.5);
-  }
-
-  .halo-panel {
-    @apply bg-black/80 backdrop-blur-md border border-halo-cyan/20 rounded-lg shadow-[0_0_15px_rgba(0, 240, 255, 0.1)];
-  }
-}
-
-@layer utilities {
-  .halo-glow {
-    box-shadow: 0 0 10px rgba(0, 240, 255, 0.3), 0 0 20px rgba(0, 240, 255, 0.1);
-  }
+    .halo-node {
+        @apply w-3 h-3 rounded-full bg-halo-bg border border-halo-cyan cursor-pointer transition-all duration-300;
+        box-shadow: 0 0 6px rgba(0, 240, 255, 0.3);
+    }
 }

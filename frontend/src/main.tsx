@@ -2,7 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
-import './styles/halo-edge-glow.css'
+
 import { HaloProvider } from './context/HaloContext'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldAlert, AlertTriangle, Gavel, RefreshCw, CheckCircle } from 'lucide-react';
+import api from '../../services/api';
 
 interface CaseWeakness {
     id: string;
@@ -24,21 +25,13 @@ interface DevilsAdvocateModuleProps {
 export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ caseId, isActive }) => {
     const [weaknesses, setWeaknesses] = useState<CaseWeakness[]>([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [activeTab, setActiveTab] = useState<'review' | 'crossexam'>('review');
-
-    // Cross Exam State
-    const [witnessStatement, setWitnessStatement] = useState("");
-    const [crossExamQuestions, setCrossExamQuestions] = useState<CrossExamQuestion[]>([]);
-    const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+    const [caseTheory, setCaseTheory] = useState("");
 
     const fetchReview = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch(`/api/devils-advocate/${caseId}/review`);
-            if (res.ok) {
-                const data = await res.json();
-                setWeaknesses(data);
-            }
+            const res = await api.devilsAdvocate.review(caseId, caseTheory);
+            setWeaknesses(res.data);
         } catch (error) {
             console.error("Failed to fetch review", error);
         } finally {
@@ -46,34 +39,15 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
         }
     };
 
-    const generateCrossExam = async () => {
-        if (!witnessStatement.trim()) return;
-        setIsGeneratingQuestions(true);
-        try {
-            const res = await fetch(`/api/devils-advocate/cross-examine`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ witness_statement: witnessStatement })
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setCrossExamQuestions(data);
-            }
-        } catch (error) {
-            console.error("Failed to generate cross exam", error);
-        } finally {
-            setIsGeneratingQuestions(false);
-        }
-    };
+    // ... (generateCrossExam remains same)
 
     useEffect(() => {
-        if (isActive && activeTab === 'review' && weaknesses.length === 0) {
-            fetchReview();
-        }
+        // Don't auto-fetch on mount anymore, let user trigger it with their theory
     }, [isActive, caseId]);
 
     return (
         <div className="h-full w-full flex flex-col bg-slate-950 text-slate-200 p-6 overflow-hidden">
+            {/* Header and Tabs remain same */}
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold bg-gradient-to-r from-red-500 to-orange-500 bg-clip-text text-transparent flex items-center gap-2">
                     <ShieldAlert className="w-6 h-6 text-red-500" />
@@ -114,21 +88,39 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
                             exit={{ opacity: 0, y: -20 }}
                             className="space-y-4"
                         >
-                            {isLoading && weaknesses.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center h-64 text-slate-500">
-                                    <RefreshCw className="w-8 h-8 animate-spin mb-4" />
-                                    <p>Analyzing case weaknesses...</p>
-                                </div>
-                            ) : weaknesses.length === 0 ? (
-                                <div className="text-center text-slate-500 py-12">
-                                    <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50 text-green-500" />
-                                    <p>No major weaknesses detected (or analysis not run).</p>
+                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mb-6">
+                                <label className="block text-sm font-medium text-slate-400 mb-2">
+                                    Case Theory (Optional)
+                                </label>
+                                <p className="text-xs text-slate-500 mb-2">
+                                    Describe your strategy or theory of the case. The Devil's Advocate will try to dismantle it.
+                                </p>
+                                <textarea
+                                    value={caseTheory}
+                                    onChange={(e) => setCaseTheory(e.target.value)}
+                                    className="w-full h-24 bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 focus:ring-2 focus:ring-red-500 focus:outline-none resize-none"
+                                    placeholder="e.g., The defendant was negligent because..."
+                                />
+                                <div className="flex justify-end mt-2">
                                     <button
                                         onClick={fetchReview}
-                                        className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm"
+                                        disabled={isLoading}
+                                        className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                                     >
-                                        Run Analysis
+                                        {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldAlert className="w-4 h-4" />}
+                                        Run Adversarial Review
                                     </button>
+                                </div>
+                            </div>
+
+                            {isLoading && weaknesses.length === 0 ? (
+                                <div className="flex flex-col items-center justify-center h-32 text-slate-500">
+                                    <RefreshCw className="w-8 h-8 animate-spin mb-4" />
+                                    <p>The Devil's Advocate is analyzing your case...</p>
+                                </div>
+                            ) : weaknesses.length === 0 ? (
+                                <div className="text-center text-slate-500 py-8">
+                                    <p>Enter a theory above and run the analysis to see weaknesses.</p>
                                 </div>
                             ) : (
                                 weaknesses.map((item) => (

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Library, Search, BookOpen, Scale, Loader2, Lightbulb, ListChecks, ShieldAlert, Globe, Clock, Plus, Trash2, Play, CheckCircle, FileText, AlertTriangle } from 'lucide-react';
 import { endpoints } from '../../services/api';
-import api from '../../services/api'; // Direct access for new endpoints
+
 
 interface LegalTheory {
     cause: string;
@@ -64,10 +64,10 @@ export function LegalResearchModule() {
         setError(null);
         try {
             if (activeTab === 'docket') {
-                const res = await api.research.listMonitors();
+                const res = await endpoints.research.listMonitors();
                 setMonitors(res.data);
             } else if (activeTab === 'scraper') {
-                const res = await api.research.listTriggers();
+                const res = await endpoints.research.listTriggers();
                 setTriggers(res.data);
             }
         } catch (err: any) {
@@ -114,7 +114,7 @@ export function LegalResearchModule() {
     const handleAddMonitor = async () => {
         if (!newMonitorValue) return;
         try {
-            await api.research.addMonitor({
+            await endpoints.research.addMonitor({
                 monitor_type: newMonitorType,
                 value: newMonitorValue,
                 requested_by: 'user',
@@ -129,7 +129,7 @@ export function LegalResearchModule() {
 
     const handleDeleteMonitor = async (id: string) => {
         try {
-            await api.research.removeMonitor(id);
+            await endpoints.research.removeMonitor(id);
             fetchData();
         } catch (err: any) {
             setError(err.message || 'Failed to delete monitor');
@@ -138,7 +138,7 @@ export function LegalResearchModule() {
 
     const handleExecuteMonitor = async (id: string) => {
         try {
-            await api.research.executeMonitor(id);
+            await endpoints.research.executeMonitor(id);
             fetchData();
         } catch (err: any) {
             setError(err.message || 'Failed to execute monitor');
@@ -148,7 +148,7 @@ export function LegalResearchModule() {
     const handleAddTrigger = async () => {
         if (!newScraperQuery) return;
         try {
-            await api.research.addTrigger({
+            await endpoints.research.addTrigger({
                 source: newScraperSource,
                 query: newScraperQuery,
                 frequency: 'on-demand',
@@ -163,7 +163,7 @@ export function LegalResearchModule() {
 
     const handleDeleteTrigger = async (id: string) => {
         try {
-            await api.research.removeTrigger(id);
+            await endpoints.research.removeTrigger(id);
             fetchData();
         } catch (err: any) {
             setError(err.message || 'Failed to delete trigger');
@@ -172,7 +172,7 @@ export function LegalResearchModule() {
 
     const handleExecuteTrigger = async (id: string) => {
         try {
-            await api.research.executeTrigger(id);
+            await endpoints.research.executeTrigger(id);
             fetchData();
         } catch (err: any) {
             setError(err.message || 'Failed to execute trigger');
@@ -183,7 +183,7 @@ export function LegalResearchModule() {
         if (!newScraperQuery) return;
         setLoading(true);
         try {
-            await api.research.manualScrape(newScraperSource, newScraperQuery);
+            await endpoints.research.manualScrape(newScraperSource, newScraperQuery);
             alert('Scrape completed and ingested!');
         } catch (err: any) {
             setError(err.message || 'Scrape failed');

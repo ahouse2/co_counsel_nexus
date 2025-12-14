@@ -691,7 +691,7 @@ export function DocumentModule() {
                                     onClick={() => setSelectedDoc(doc)}
                                     className={`p-3 rounded border cursor-pointer group transition-all
                                         ${selectedDoc?.id === doc.id
-                                            ? 'bg-halo-cyan/10 border-halo-cyan halo-glow'
+                                            ? 'bg-halo-cyan/10 border-halo-cyan'
                                             : 'bg-halo-card/50 halo-border hover:border-halo-cyan/50'
                                         }`}
                                 >

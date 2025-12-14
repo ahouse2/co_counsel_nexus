@@ -87,7 +87,7 @@ export function DashboardHub() {
                                 animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
                                 exit={{ opacity: 0, scale: 1.05, filter: 'blur(10px)' }}
                                 transition={{ duration: 0.3, ease: "circOut" }}
-                                className="w-[96vw] h-[94vh] bg-black/90 backdrop-blur-xl halo-border halo-glow rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col relative"
+                                className="w-[96vw] h-[94vh] bg-black/90 backdrop-blur-xl halo-border rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col relative"
                             >
                                 <div className="flex-1 overflow-hidden relative">
                                     {renderModule()}
