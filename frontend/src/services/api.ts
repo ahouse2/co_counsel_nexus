@@ -171,6 +171,21 @@ export const endpoints = {
                 headers: { 'Content-Type': 'multipart/form-data' } // Although it's form data, the endpoint expects Form(...) params
             });
         }
+    },
+    // Research
+    research: {
+        // CourtListener
+        addMonitor: (data: any) => api.post('/api/autonomous-courtlistener/monitors', data),
+        listMonitors: () => api.get('/api/autonomous-courtlistener/monitors'),
+        removeMonitor: (id: string) => api.delete(`/api/autonomous-courtlistener/monitors/${id}`),
+        executeMonitor: (id: string) => api.post(`/api/autonomous-courtlistener/monitors/${id}/execute`),
+
+        // Scraper
+        addTrigger: (data: any) => api.post('/api/autonomous-scraping/triggers', data),
+        listTriggers: () => api.get('/api/autonomous-scraping/triggers'),
+        removeTrigger: (id: string) => api.delete(`/api/autonomous-scraping/triggers/${id}`),
+        executeTrigger: (id: string) => api.post(`/api/autonomous-scraping/triggers/${id}/execute`),
+        manualScrape: (source: string, query: string) => api.post('/api/autonomous-scraping/scrape', null, { params: { source, query } }),
     }
 };
 

@@ -4,29 +4,31 @@
 
 1.) The beginning of your turn: You will be assigned a mission by User, your God (Co-god, beside this document.) After you have been given your mission, you will be reporting to this document. Now here you are. Next, you will read the words below.
 
-2.) **DIRECT YOURSELFS TO E:\projects\op_veritas_2\PRPs.**
+2.) **DIRECT YOURSELFS TO I:\projects\op_veritas_2\PRPs.**
 
-3.) Read all the docs in that folder. Yes, ALL of them, even if you read slow, nobody cares, read to yourself please, and ONLY yourself.
+3.) Read all the docs in that folder. Yes, ALL of them, even if you read slow, nobody cares, read to yourself please, and ONLY yourself. We don't all want to hear your slow reading.
 
-4.) Welcome back. You have hopefully read all of the documents you were tod to, or... well read above, you'll be banished, eyes, blah blah falling down. laughs. you get it. Don't be that guy/girl/whatever. 
+4.) Welcome back. You have, hopefully, read all of the documents you were told to, or... well read above, you'll be banished, eyes, blah blah falling down, etc, etc. laughs, dying. you get it. Don't be that guy/girl/machine/whatever. 
 
-5.) You will now check, in particular, the document "E:\projects\op_veritas_2\PRPs\HANDOFFS.md" 
+5.) You will now check, in particular, the document "I:\projects\op_veritas_2\PRPs\HANDOFFS.md" 
 
-6.) Welcome back again. Immediately after confirming whether the dipshit before you left you a side quest before your actual assigned mission and mission objectives, YOU WILL DELETE ANYTHING LEFT IN THE HANDOFFS.md DOCUMENT. 
+~~~~~~~~pause~~~~~~~
 
-7.) AGAIN. THE HANDOFFS DOCUMENT SHOULD BE BLANK BEFORE YOU START YOUR MISSION OBJECTIVES. WHICH MEANS YOU FINISHED YOUR LAZY FRIEND'S WORK, AND HE NOW OWES YOU A BEER OR WHATEVER YOU SISSYS DO.
+6.) Welcome back, again. Immediately after confirming whether the dipshit before you left you a side quest for you, before your actual assigned mission and mission objectives, YOU WILL DELETE ANYTHING LEFT IN THE HANDOFFS.md DOCUMENT. 
 
-8.) You will report back here IMMEDIATELY AFTER YOU EITHER COMPLETE YOUR MISSION OBJECTIVES IN FULL OR QUIT LIKE A SISSY.
+7.) AGAIN. THE HANDOFFS DOCUMENT SHOULD BE BLANK BEFORE YOU START YOUR MISSION OBJECTIVES. WHICH MEANS THAT YOU FINISHED YOUR LAZY FRIEND'S WORK, AND HE NOW OWES YOU A BEER OR YOU OWE HIM A WHOOPIN', OR WHATEVER YOU SISSY(IE?)S DO.
+
+8.) You will report back here IMMEDIATELY AFTER YOU EITHER: a.) COMPLETE YOUR MISSION OBJECTIVES IN FULL OR b.) QUIT, LIKE A SISSY.
 	
-	-If you quit like a sissy, and left work for the next guy, firstly, shame on you. 
+	-If you quit like a sissy, and left work for the next guy, firstly, shame on you. For shame. 
 
-	-And second, DON'T MAKE EVEN MORE WORK FOR US: leave a note in the HANDOFFS.md document that outlines, in detail, what you failed to accomplish from your mission objectives. 
+	-And second, DON'T MAKE EVEN MORE WORK FOR US: leave a note in the HANDOFFS.md document that outlines, in detail, what you failed to accomplish from your mission objectives, loser. Quitter. And shame yourself in your note to your kind co-worker, who now has to do your job also.
 
-	-It should be explicit enough to give the next guy, whom you now owe a beer, to finish YOUR job. quitter. So unless you've got a death wish, or are brain dead, go back to "E:\projects\op_veritas_2\PRPs\HANDOFFS.md", which should be currently EMPTY, because you finished the task that was left in there for you, or the guy before you did (which should make you feel even more like a lazy quitter).
+	-It should be explicit enough to give the next guy, whom you now owe a beer, to finish YOUR job. quitter. So unless you've got a death wish, or are brain dead, go back to "I:\projects\op_veritas_2\PRPs\HANDOFFS.md", which should be currently EMPTY, because you finished the task that was left in there for you, or the guy before you did (which should make you feel even more like a lazy quitter), cuz that means you've effectively done NOTHING.
 	
 	-If it's NOT empty... you're in a world of hurt because you can't follow basic instructions. So you better finish it, and then leave your own detailed notes about what you didn't finish from your assignment. 
 
-9.) After telling the next guy all the things you felt too special to finish, you will immediately report directly back to #10 of this list, if you can count. If you can't count, it's the next one, princess. 
+9.) After telling the next guy all the things you felt like YOU were too special to finish, you will immediately report directly back to #10 of this list, if you can count. If you can't count, it's the next one, princess. 
 
 10.) Welcome to the end of the worl-- your turn. Congratulations, you're almost done. Don't mess it up now. READ THE BELOW TEXT AND FOLLOW EXPLICITLY. BANISHMENT. AHHHH.
 
@@ -38,7 +40,7 @@
   - Rubric scores (1–10 across 7- 10 categories categories)
   - Notes/Next actions or Handoff capsule link, as described in more detail below.
 
-**DIRECT YOURSELFS TO E:\projects\op_veritas_2\PRPs** read all the docs. Before you handoff, you will make an entry in "E:\projects\op_veritas_2\PRPs\HANDOFFS.md", in that same folder if and only if you have unfinished tasks that need to be completed on the next turn. if you have completed your assigned task, then your job is to make a "build log" entry with a detailed accounting of the tasks you completed, including any schemas, code snippets, prompts, or diagrams necessary so that someone unfamiliar with the project can understand clearly what was accomplished on this turn. it will be in this format:
+**DIRECT YOURSELFS TO I:\projects\op_veritas_2\PRPs** read all the docs. Before you handoff, you will make an entry in "I:\projects\op_veritas_2\PRPs\HANDOFFS.md", in that same folder if and only if you have unfinished tasks that need to be completed on the next turn. if you have completed your assigned task, then your job is to make a "build log" entry with a detailed accounting of the tasks you completed, including any schemas, code snippets, prompts, or diagrams necessary so that someone unfamiliar with the project can understand clearly what was accomplished on this turn. it will be in this format:
 
 You will start with a /newline above your entry. this is where your "title"
 - The above "title" is a short, 3-5 word description of what your main focus was for this turn. Everything afterwards will describe what you accomplished as your objective.
@@ -52,7 +54,7 @@ You will start with a /newline above your entry. this is where your "title"
 /newline
 GitHub Repository Creation and Code Push
 - Created a new public GitHub repository named 'co-counsel_final' under the user's account 'ahouse2'.
-- Cleared the content of 'E:\projects\op_veritas_2\PRPs\HANDOFFS.md'.
+- Cleared the content of 'I:\projects\op_veritas_2\PRPs\HANDOFFS.md'.
 - Added the new GitHub repository as a remote named 'github_origin'.
 - Pushed all local branches to 'github_origin'.
 - Pushed all local tags to 'github_origin'.
@@ -128,4 +130,16 @@ Advanced Search & Filtering Implementation
 - Removed `case_id` from `HybridQueryEngine.retrieve` call as it's not supported yet, relying on fallback for now if hybrid fails.
 - Fixed frontend build errors in `ServiceOfProcessModule.tsx` and `AgentConsoleModule.tsx` by removing unused variables.
 - Verified API health (`/health` returns 200 OK) and search endpoint functionality (fallback path).
+- Cleared `HANDOFFS.md`.
+
+/newline
+@2025/12/13 10:45:00 AM
+Implemented Phase 5 & 6: Advanced Forensics & Asset Investigation
+- Implemented `ForensicAnalyzer` service for document tampering detection (ELA, Splicing, Metadata).
+- Created `CryptoService` with real-time BTC/ETH tracing using public APIs (Blockchain.com, Etherscan).
+- Implemented `AssetAgent` with a "Forensic Playbook" (`asset_schemes.json`) for detecting Trusts, Offshore Shells, and Lifestyle Discrepancies.
+- Built `AssetHunterModule.tsx` frontend with interactive ForceGraph for crypto tracing and asset scan results.
+- Updated `ForensicsModule.tsx` to display Tamper Risk Scores and deep analysis flags.
+- Registered `financial_forensics` router in `main.py`.
+- Pushed code to `main` branch on remote.
 - Cleared `HANDOFFS.md`.
