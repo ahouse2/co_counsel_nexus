@@ -224,6 +224,14 @@ export const endpoints = {
             });
         },
         getSession: (sessionId: string) => api.get(`/api/voice/sessions/${sessionId}`),
+    },
+    // Service of Process
+    serviceOfProcess: {
+        list: () => api.get('/api/service-of-process'),
+        create: (documentId: string, recipientId: string) => api.post('/api/service-of-process', { document_id: documentId, recipient_id: recipientId }),
+        listRecipients: () => api.get('/api/recipients'),
+        createRecipient: (name: string, address: string) => api.post('/api/recipients', { name, address }),
+        listDocuments: () => api.get('/api/documents'),
     }
 };
 

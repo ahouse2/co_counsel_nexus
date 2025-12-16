@@ -91,3 +91,19 @@ Phase 2.4.2: In-Court Presentation (Trial Director)
 - Features: playlist builder, exhibit search, presentation mode with slide navigation.
 - Backend `presentation.py` is a stub but unused - frontend uses existing `documents` API.
 - Phase 2.4.2 verification complete. Phase 2.4 (Courtroom & Presentation) now fully complete.
+
+2025/12/16 10:40:00 AM
+Phase 2.5.1: Trial Binder Module (Auto-Organization)
+- Backend `binder_preparation.py` uses real `document_generation_service.prepare_binder()`.
+- Backend `evidence_binder.py` uses real `ForensicsService` for document forensics.
+- Frontend `TrialBinderModule.tsx` (256 lines) uses real `endpoints.documents.list()` API.
+- No mock data generators - uses localStorage for pin persistence.
+- Phase 2.5.1 verification complete.
+
+2025/12/16 10:55:00 AM
+Phase 2.5.2: Service of Process (Real-world API)
+- Backend `service_of_process.py` uses real SQLAlchemy/Postgres for CRUD operations.
+- Added `serviceOfProcess` endpoints to `api.ts` (list, create, listRecipients, createRecipient).
+- Replaced `mockRecords` in `ServiceOfProcessModule.tsx` with real `endpoints.serviceOfProcess.list()` API call.
+- Added `useEffect` to fetch records on mount with proper error handling.
+- Phase 2.5.2 verification complete.

@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Send, MapPin, Check, Clock, AlertCircle, FileText, Plus, Trash2, Eye } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Send, MapPin, Check, Clock, AlertCircle, FileText, Plus, Trash2, Eye, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { endpoints } from '../../services/api';
 
 interface ServiceRecord {
     id: string;
@@ -14,35 +15,6 @@ interface ServiceRecord {
     createdAt: string;
 }
 
-const mockRecords: ServiceRecord[] = [
-    {
-        id: '1',
-        documentName: 'Summons and Complaint',
-        recipientName: 'John Defendant',
-        recipientAddress: '123 Main St, Los Angeles, CA 90001',
-        status: 'served',
-        servedDate: '2024-01-15',
-        servedBy: 'ABC Process Server',
-        createdAt: '2024-01-10'
-    },
-    {
-        id: '2',
-        documentName: 'Motion for Summary Judgment',
-        recipientName: 'Jane Corporate',
-        recipientAddress: '456 Business Ave, Suite 100, LA 90210',
-        status: 'in_transit',
-        createdAt: '2024-02-01'
-    },
-    {
-        id: '3',
-        documentName: 'Subpoena Duces Tecum',
-        recipientName: 'Records Custodian',
-        recipientAddress: '789 Hospital Way, LA 90012',
-        status: 'pending',
-        createdAt: '2024-02-10'
-    },
-];
-
 const statusConfig = {
     pending: { color: 'text-yellow-400', bg: 'bg-yellow-500/20', border: 'border-yellow-500/30', label: 'Pending', icon: Clock },
     in_transit: { color: 'text-blue-400', bg: 'bg-blue-500/20', border: 'border-blue-500/30', label: 'In Transit', icon: Send },
@@ -51,10 +23,38 @@ const statusConfig = {
 };
 
 export function ServiceOfProcessModule() {
-    const [records, setRecords] = useState<ServiceRecord[]>(mockRecords);
+    const [records, setRecords] = useState<ServiceRecord[]>([]);
+    const [loading, setLoading] = useState(true);
     const [selectedRecord, setSelectedRecord] = useState<ServiceRecord | null>(null);
-    // const [showAddModal, setShowAddModal] = useState(false);
-    // const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const fetchRecords = async () => {
+            try {
+                const response = await endpoints.serviceOfProcess.list();
+                const data = response.data || [];
+                // Map backend response to frontend interface
+                const mappedRecords: ServiceRecord[] = data.map((r: any) => ({
+                    id: r.id,
+                    documentName: r.document?.name || 'Unknown Document',
+                    recipientName: r.recipient?.name || 'Unknown Recipient',
+                    recipientAddress: r.recipient?.address || '',
+                    status: r.status?.toLowerCase() || 'pending',
+                    servedDate: r.served_date,
+                    servedBy: r.served_by,
+                    notes: r.notes,
+                    createdAt: r.created_at || new Date().toISOString()
+                }));
+                setRecords(mappedRecords);
+            } catch (error) {
+                console.error("Failed to fetch service records:", error);
+                // Service of Process records are optional - empty list is fine
+                setRecords([]);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchRecords();
+    }, []);
 
     const getStatusInfo = (status: ServiceRecord['status']) => statusConfig[status];
 
