@@ -162,3 +162,159 @@ class NarrativeService:
         except Exception as e:
             logger.error(f"Failed to detect contradictions: {e}")
             return []
+
+    async def generate_branching_narrative(
+        self, case_id: str, pivot_point: str, alternative_fact: str
+    ) -> Dict[str, Any]:
+        """
+        Generates an alternative narrative based on a 'what if' scenario.
+        """
+        logger.info(f"Generating branching narrative for case {case_id}")
+        
+        # 1. Gather Context
+        events = self.timeline_service.get_timeline(case_id)
+        sorted_events = sorted(events, key=lambda x: x.event_date)
+        
+        context_lines = ["ORIGINAL TIMELINE:"]
+        for event in sorted_events:
+            context_lines.append(f"- {event.event_date}: {event.title} - {event.description}")
+        
+        context_str = "\n".join(context_lines)
+        
+        # 2. Construct Prompt
+        prompt = f"""
+        You are an expert legal strategist. Analyze the following case timeline and generate an ALTERNATIVE narrative based on the "what if" scenario.
+        
+        PIVOT POINT: {pivot_point}
+        ALTERNATIVE FACT: {alternative_fact}
+        
+        Your task:
+        1. Re-imagine the case as if the alternative fact were true.
+        2. Describe how the narrative would change.
+        3. List 3-5 strategic implications for the case.
+        
+        Return the result as JSON with the following structure:
+        {{
+            "scenario_id": "scenario_<random_id>",
+            "narrative": "<alternative narrative text>",
+            "implications": ["<implication 1>", "<implication 2>", ...]
+        }}
+        
+        ORIGINAL CASE CONTEXT:
+        {context_str}
+        
+        JSON OUTPUT:
+        """
+        
+        # 3. Call LLM
+        try:
+            import json
+            import uuid
+            
+            response_text = await self.llm_service.generate_text(prompt)
+            response_text = response_text.strip()
+            
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            
+            try:
+                data = json.loads(response_text)
+                return {
+                    "scenario_id": data.get("scenario_id", f"scenario_{uuid.uuid4().hex[:8]}"),
+                    "narrative": data.get("narrative", "Unable to generate alternative narrative."),
+                    "implications": data.get("implications", [])
+                }
+            except json.JSONDecodeError:
+                # If JSON parsing fails, treat response as raw narrative
+                return {
+                    "scenario_id": f"scenario_{uuid.uuid4().hex[:8]}",
+                    "narrative": response_text,
+                    "implications": ["LLM response was not structured JSON"]
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to generate branching narrative: {e}")
+            return {
+                "scenario_id": "error",
+                "narrative": f"Failed to generate alternative narrative: {e}",
+                "implications": []
+            }
+
+    async def generate_story_arc(self, case_id: str) -> List[Dict[str, Any]]:
+        """
+        Generates story arc data points with tension levels for visualization.
+        """
+        logger.info(f"Generating story arc for case {case_id}")
+        
+        # 1. Gather Timeline Events
+        events = self.timeline_service.get_timeline(case_id)
+        sorted_events = sorted(events, key=lambda x: x.event_date)
+        
+        if not sorted_events:
+            return []
+        
+        # 2. Construct Prompt
+        event_list = []
+        for event in sorted_events:
+            event_list.append(f"- {event.event_date}: {event.title} - {event.description}")
+        
+        events_str = "\n".join(event_list)
+        
+        prompt = f"""
+        You are an expert narrative analyst. Analyze the following timeline events and assign a TENSION LEVEL (0.0 to 1.0) to each event based on its narrative significance.
+        
+        Guidelines for tension levels:
+        - 0.0-0.2: Routine events, setup, background
+        - 0.3-0.5: Rising action, complications developing
+        - 0.6-0.8: Conflict, confrontation, critical decisions
+        - 0.9-1.0: Climax, crisis, turning point
+        
+        Return the result as a JSON list with the following structure:
+        [
+            {{"timestamp": "<date>", "event": "<title>", "tension_level": <float>}},
+            ...
+        ]
+        
+        TIMELINE EVENTS:
+        {events_str}
+        
+        JSON OUTPUT:
+        """
+        
+        # 3. Call LLM
+        try:
+            import json
+            
+            response_text = await self.llm_service.generate_text(prompt)
+            response_text = response_text.strip()
+            
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            
+            try:
+                data = json.loads(response_text)
+                return data
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse story arc JSON: {response_text}")
+                # Fallback: assign linear tension
+                return [
+                    {
+                        "timestamp": str(event.event_date),
+                        "event": event.title,
+                        "tension_level": min(1.0, 0.2 + (i * 0.1))
+                    }
+                    for i, event in enumerate(sorted_events)
+                ]
+                
+        except Exception as e:
+            logger.error(f"Failed to generate story arc: {e}")
+            return []
+

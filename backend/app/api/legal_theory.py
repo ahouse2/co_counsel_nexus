@@ -124,24 +124,66 @@ async def match_precedents(
     _principal: Principal = Depends(authorize_query),
 ):
     """
-    Finds relevant precedents based on case facts.
+    Finds relevant precedents based on case facts using LLM.
     """
-    # Placeholder for actual retrieval logic (e.g., using vector search or LLM)
-    # For now, return mock data
-    return [
-        PrecedentMatchResult(
-            case_name="Smith v. Jones",
-            citation="123 F.3d 456 (2010)",
-            similarity_score=0.92,
-            reasoning="Similar fact pattern regarding breach of fiduciary duty in a close corporation."
-        ),
-        PrecedentMatchResult(
-            case_name="State v. Doe",
-            citation="456 U.S. 789 (2015)",
-            similarity_score=0.85,
-            reasoning="Establishes the standard for 'reasonable doubt' in similar contexts."
-        )
-    ]
+    from backend.app.services.llm_service import get_llm_service
+    import json
+    
+    llm_service = get_llm_service()
+    
+    prompt = f"""
+    You are an expert legal researcher. Based on the following case facts and jurisdiction, identify 3-5 relevant legal precedents.
+    
+    CASE FACTS:
+    {request.case_facts}
+    
+    JURISDICTION: {request.jurisdiction}
+    
+    For each precedent, provide:
+    - case_name: Full case name
+    - citation: Legal citation (e.g., "123 F.3d 456 (2010)")
+    - similarity_score: Float between 0.0 and 1.0 indicating relevance
+    - reasoning: Brief explanation of why this precedent is relevant
+    
+    Return the result as a JSON list.
+    
+    JSON OUTPUT:
+    """
+    
+    try:
+        response_text = await llm_service.generate_text(prompt)
+        response_text = response_text.strip()
+        
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        
+        try:
+            data = json.loads(response_text)
+            return [
+                PrecedentMatchResult(
+                    case_name=item.get("case_name", "Unknown Case"),
+                    citation=item.get("citation", "Unknown Citation"),
+                    similarity_score=float(item.get("similarity_score", 0.5)),
+                    reasoning=item.get("reasoning", "")
+                )
+                for item in data
+            ]
+        except json.JSONDecodeError:
+            # Fallback if JSON parsing fails
+            return [
+                PrecedentMatchResult(
+                    case_name="LLM Response Error",
+                    citation="N/A",
+                    similarity_score=0.0,
+                    reasoning=f"Failed to parse LLM response: {response_text[:200]}"
+                )
+            ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Precedent matching failed: {e}")
 
 class JuryResonanceRequest(BaseModel):
     argument: str
@@ -158,15 +200,67 @@ async def calculate_jury_resonance(
     _principal: Principal = Depends(authorize_query),
 ):
     """
-    Calculates how well an argument resonates with a specific jury demographic.
+    Calculates how well an argument resonates with a specific jury demographic using LLM.
     """
-    # Placeholder for actual sentiment analysis/LLM simulation
-    return JuryResonanceResult(
-        score=0.78,
-        feedback="The argument appeals strongly to logic but may alienate younger jurors who prioritize emotional impact.",
-        demographic_breakdown={
-            "18-30": 0.6,
-            "30-50": 0.8,
-            "50+": 0.9
-        }
-    )
+    from backend.app.services.llm_service import get_llm_service
+    import json
+    
+    llm_service = get_llm_service()
+    
+    # Format demographics for prompt
+    demographics_str = ", ".join([f"{k}: {v}" for k, v in request.jury_demographics.items()])
+    
+    prompt = f"""
+    You are an expert jury consultant. Analyze how well the following legal argument would resonate with a jury of the specified demographics.
+    
+    ARGUMENT:
+    {request.argument}
+    
+    JURY DEMOGRAPHICS:
+    {demographics_str}
+    
+    Provide your analysis in the following JSON format:
+    {{
+        "score": <float 0.0 to 1.0 overall resonance score>,
+        "feedback": "<brief analysis of argument strengths and weaknesses for this jury>",
+        "demographic_breakdown": {{
+            "<demographic_key_1>": <float 0.0 to 1.0>,
+            "<demographic_key_2>": <float 0.0 to 1.0>,
+            ...
+        }}
+    }}
+    
+    The demographic_breakdown should include an estimated resonance score for each demographic category provided.
+    
+    JSON OUTPUT:
+    """
+    
+    try:
+        response_text = await llm_service.generate_text(prompt)
+        response_text = response_text.strip()
+        
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+        
+        try:
+            data = json.loads(response_text)
+            return JuryResonanceResult(
+                score=float(data.get("score", 0.5)),
+                feedback=data.get("feedback", "Analysis unavailable."),
+                demographic_breakdown={
+                    k: float(v) for k, v in data.get("demographic_breakdown", {}).items()
+                }
+            )
+        except json.JSONDecodeError:
+            return JuryResonanceResult(
+                score=0.5,
+                feedback=f"Failed to parse LLM response: {response_text[:200]}",
+                demographic_breakdown={}
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Jury resonance analysis failed: {e}")
+

@@ -61,15 +61,15 @@ async def generate_branching_narrative(
     """
     Generates an alternative narrative based on a "what if" scenario.
     """
-    # Mock logic
+    result = await service.generate_branching_narrative(
+        case_id=case_id,
+        pivot_point=request.pivot_point,
+        alternative_fact=request.alternative_fact
+    )
     return BranchingNarrativeResponse(
-        scenario_id="scenario_1",
-        narrative=f"If {request.alternative_fact}, then the timeline shifts significantly. The defendant's alibi becomes credible...",
-        implications=[
-            "Weakens prosecution's timeline",
-            "Requires re-evaluation of witness testimony A",
-            "Opens new line of inquiry regarding the security footage"
-        ]
+        scenario_id=result.get("scenario_id", "unknown"),
+        narrative=result.get("narrative", ""),
+        implications=result.get("implications", [])
     )
 
 class StoryArcPoint(BaseModel):
@@ -88,13 +88,14 @@ async def get_story_arc(
     """
     Returns data points for visualizing the narrative arc (tension/drama over time).
     """
-    # Mock logic
-    return StoryArcResponse(
-        points=[
-            StoryArcPoint(timestamp="2023-01-01", event="Initial Meeting", tension_level=0.2),
-            StoryArcPoint(timestamp="2023-02-15", event="Contract Signed", tension_level=0.3),
-            StoryArcPoint(timestamp="2023-06-10", event="First Breach", tension_level=0.6),
-            StoryArcPoint(timestamp="2023-08-20", event="Confrontation", tension_level=0.9),
-            StoryArcPoint(timestamp="2023-09-01", event="Lawsuit Filed", tension_level=0.8)
-        ]
-    )
+    arc_data = await service.generate_story_arc(case_id)
+    points = [
+        StoryArcPoint(
+            timestamp=item.get("timestamp", ""),
+            event=item.get("event", ""),
+            tension_level=float(item.get("tension_level", 0.5))
+        )
+        for item in arc_data
+    ]
+    return StoryArcResponse(points=points)
+
