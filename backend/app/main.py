@@ -161,6 +161,7 @@ app.include_router(autonomous_scraping.router, prefix="/api", tags=["Autonomous 
 app.include_router(autonomous_courtlistener.router, prefix="/api", tags=["Autonomous CourtListener"])
 app.include_router(video_generation.router, prefix="/api", tags=["Video Generation"])
 app.include_router(context.router, prefix="/api/context", tags=["context"]) # Added
+app.include_router(simulation.router, prefix="/api", tags=["Simulation"]) # Added
 
 app.include_router(narrative.router, prefix="/api/narrative", tags=["Narrative"])
 app.include_router(adversarial.router, prefix="/api/adversarial", tags=["Adversarial"])

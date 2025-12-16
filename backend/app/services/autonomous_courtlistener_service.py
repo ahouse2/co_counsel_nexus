@@ -1,517 +1,167 @@
-"""
-Autonomous CourtListener Service
-
-Provides semi-autonomous monitoring of case law with automatic knowledge graph integration.
-
-Features:
-- Keyword-based opinion monitoring
-- Citation tracking for precedent monitoring
-- Automatic opinion download and ingestion
-- Alert system for relevant cases
-- Configurable check intervals (default: 6 hours)
-"""
-
-from __future__ import annotations
-
+import logging
+import aiohttp
 import asyncio
-import hashlib
-import os
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import List, Dict, Optional, Any
+from datetime import datetime
+from backend.app.config import get_settings
 
-import httpx
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-
-from ..config import get_settings
-from ..services.knowledge_graph_service import KnowledgeGraphService
-from ..utils.audit import AuditEvent, get_audit_trail
-
-
-class CourtListenerMonitor:
-    """Represents a monitoring configuration for CourtListener."""
-    
-    def __init__(
-        self,
-        monitor_id: str,
-        monitor_type: str,  # 'keyword' or 'citation'
-        value: str,  # keyword string or citation (e.g., "550 U.S. 544")
-        requested_by: str,
-        check_interval_hours: int = 6,
-        priority: str = 'normal',
-        metadata: Optional[Dict[str, Any]] = None
-    ):
-        self.monitor_id = monitor_id
-        self.monitor_type = monitor_type
-        self.value = value
-        self.requested_by = requested_by
-        self.check_interval_hours = check_interval_hours
-        self.priority = priority
-        self.metadata = metadata or {}
-        self.created_at = datetime.now(timezone.utc)
-        self.last_check: Optional[datetime] = None
-        self.last_results_count = 0
-        self.enabled = True
-
+logger = logging.getLogger(__name__)
 
 class AutonomousCourtListenerService:
     """
-    Manages autonomous CourtListener monitoring with KG integration.
-    
-    Features:
-    - Monitor keywords for new opinions
-    - Track citations to specific precedents
-    - Auto-download opinion full text
-    - Extract entities and add to knowledge graph
-    - Alert on relevant new cases
+    Service for autonomously monitoring CourtListener for case updates.
     """
-    
-    def __init__(
-        self,
-        kg_service: Optional[KnowledgeGraphService] = None,
-        scheduler: Optional[AsyncIOScheduler] = None
-    ):
+    def __init__(self):
         self.settings = get_settings()
-        self.kg_service = kg_service or KnowledgeGraphService()
-        self.scheduler = scheduler or AsyncIOScheduler()
-        
-        # CourtListener API configuration
-        self.api_base = "https://www.courtlistener.com/api/rest/v3"
-        # Fallback to COURTLISTENER_API_KEY if COURTLISTENER_TOKEN is not set
-        self.api_token = getattr(self.settings, 'courtlistener_token', None) or os.environ.get('COURTLISTENER_API_KEY')
-        
-        # Track monitors and processed opinions
-        self.monitors: Dict[str, CourtListenerMonitor] = {}
-        self.processed_opinions: Set[str] = set()
-        
-        self.audit = get_audit_trail()
-        self._scheduler_started = False
-    
-    def start_scheduler(self) -> None:
-        """Start the background scheduler."""
-        if not self._scheduler_started:
-            self.scheduler.start()
-            self._scheduler_started = True
-    
-    def stop_scheduler(self) -> None:
-        """Stop the background scheduler."""
-        if self._scheduler_started:
-            self.scheduler.shutdown()
-            self._scheduler_started = False
-    
-    async def add_monitor(
-        self,
-        monitor_type: str,
-        value: str,
-        requested_by: str,
-        check_interval_hours: int = 6,
-        priority: str = 'normal',
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> CourtListenerMonitor:
+        self.base_url = "https://www.courtlistener.com/api/rest/v3"
+        self.monitors = [] # In-memory store for now
+        # Structure: { "monitor_id": str, "monitor_type": str, "value": str, ... }
+
+    async def add_monitor(self, monitor_type: str, value: str, requested_by: str, 
+                         check_interval_hours: int, priority: str, metadata: Optional[Dict] = None):
         """
-        Add a new CourtListener monitor.
-        
-        Args:
-            monitor_type: 'keyword' or 'citation'
-            value: Keyword string or citation
-            requested_by: Team/user requesting monitoring
-            check_interval_hours: How often to check (default 6)
-            priority: 'high', 'normal', 'low'
-            metadata: Additional context
+        Adds a new monitor.
         """
-        monitor_id = self._generate_monitor_id(monitor_type, value, requested_by)
+        import uuid
+        monitor_id = str(uuid.uuid4())
         
-        monitor = CourtListenerMonitor(
-            monitor_id=monitor_id,
-            monitor_type=monitor_type,
-            value=value,
-            requested_by=requested_by,
-            check_interval_hours=check_interval_hours,
-            priority=priority,
-            metadata=metadata
-        )
-        
-        self.monitors[monitor_id] = monitor
-        
-        # Schedule periodic checks
-        self._schedule_monitor(monitor)
-        
-        # Audit the monitor creation
-        self._audit_monitor_event(
-            monitor_id=monitor_id,
-            action='courtlistener.monitor.created',
-            outcome='success',
-            metadata={
-                'type': monitor_type,
-                'value': value,
-                'interval': check_interval_hours,
-                'requested_by': requested_by
-            }
-        )
-        
-        return monitor
-    
-    async def execute_monitor(self, monitor_id: str) -> Dict[str, Any]:
-        """
-        Execute a monitoring check.
-        
-        Returns:
-            Results dict with new opinions found and ingested
-        """
-        monitor = self.monitors.get(monitor_id)
-        if not monitor:
-            return {'error': f'Monitor {monitor_id} not found', 'success': False}
-        
-        if not monitor.enabled:
-            return {'error': 'Monitor is disabled', 'success': False}
-        
-        # Execute monitoring based on type
-        if monitor.monitor_type == 'keyword':
-            results = await self._monitor_keywords(monitor)
-        elif monitor.monitor_type == 'citation':
-            results = await self._monitor_citation(monitor)
-        else:
-            return {'error': f'Unknown monitor type: {monitor.monitor_type}', 'success': False}
-        
-        # Update monitor
-        monitor.last_check = datetime.now(timezone.utc)
-        monitor.last_results_count = results.get('new_opinions', 0)
-        
-        return results
-    
-    async def _monitor_keywords(self, monitor: CourtListenerMonitor) -> Dict[str, Any]:
-        """Monitor for new opinions matching keywords."""
-        if not self.api_token:
-            return {'error': 'CourtListener API token not configured', 'success': False}
-        
-        try:
-            # Calculate date range (since last check or last 24h)
-            if monitor.last_check:
-                date_filed_after = monitor.last_check.date().isoformat()
-            else:
-                date_filed_after = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
-            
-            # Search CourtListener API
-            params = {
-                'q': monitor.value,
-                'type': 'o',  # Opinions
-                'order_by': 'dateFiled desc',
-                'filed_after': date_filed_after
-            }
-            
-            headers = {'Authorization': f'Token {self.api_token}'}
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f'{self.api_base}/search/',
-                    params=params,
-                    headers=headers
-                )
-                response.raise_for_status()
-                data = response.json()
-            
-            results = data.get('results', [])
-            new_opinions = 0
-            ingested = 0
-            
-            for result in results:
-                opinion_id = str(result.get('id'))
-                
-                # Check if already processed
-                if opinion_id in self.processed_opinions:
-                    continue
-                
-                new_opinions += 1
-                
-                # Download full opinion and ingest
-                await self._download_and_ingest_opinion(
-                    opinion_id=opinion_id,
-                    result=result,
-                    monitor=monitor
-                )
-                
-                self.processed_opinions.add(opinion_id)
-                ingested += 1
-            
-            # Audit the check
-            self._audit_monitor_check(
-                monitor_id=monitor.monitor_id,
-                new_opinions=new_opinions,
-                ingested=ingested
-            )
-            
-            return {
-                'success': True,
-                'monitor_id': monitor.monitor_id,
-                'monitor_type': 'keyword',
-                'value': monitor.value,
-                'new_opinions': new_opinions,
-                'ingested': ingested,
-                'total_results': len(results)
-            }
-            
-        except Exception as exc:
-            error_msg = f"Monitoring failed: {str(exc)}"
-            self._audit_monitor_check(
-                monitor_id=monitor.monitor_id,
-                error=error_msg
-            )
-            return {'error': error_msg, 'success': False}
-    
-    async def _monitor_citation(self, monitor: CourtListenerMonitor) -> Dict[str, Any]:
-        """Monitor for new opinions citing a specific case."""
-        if not self.api_token:
-            return {'error': 'CourtListener API token not configured', 'success': False}
-        
-        try:
-            # Search for opinions citing this case
-            if monitor.last_check:
-                date_filed_after = monitor.last_check.date().isoformat()
-            else:
-                date_filed_after = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
-            
-            # Search by citation
-            params = {
-                'cites': monitor.value,
-                'type': 'o',
-                'order_by': 'dateFiled desc',
-                'filed_after': date_filed_after
-            }
-            
-            headers = {'Authorization': f'Token {self.api_token}'}
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    f'{self.api_base}/search/',
-                    params=params,
-                    headers=headers
-                )
-                response.raise_for_status()
-                data = response.json()
-            
-            results = data.get('results', [])
-            new_opinions = 0
-            ingested = 0
-            
-            for result in results:
-                opinion_id = str(result.get('id'))
-                
-                if opinion_id in self.processed_opinions:
-                    continue
-                
-                new_opinions += 1
-                
-                # Download and ingest
-                await self._download_and_ingest_opinion(
-                    opinion_id=opinion_id,
-                    result=result,
-                    monitor=monitor
-                )
-                
-                self.processed_opinions.add(opinion_id)
-                ingested += 1
-            
-            self._audit_monitor_check(
-                monitor_id=monitor.monitor_id,
-                new_opinions=new_opinions,
-                ingested=ingested
-            )
-            
-            return {
-                'success': True,
-                'monitor_id': monitor.monitor_id,
-                'monitor_type': 'citation',
-                'value': monitor.value,
-                'new_opinions': new_opinions,
-                'ingested': ingested,
-                'total_results': len(results)
-            }
-            
-        except Exception as exc:
-            error_msg = f"Citation monitoring failed: {str(exc)}"
-            self._audit_monitor_check(
-                monitor_id=monitor.monitor_id,
-                error=error_msg
-            )
-            return {'error': error_msg, 'success': False}
-    
-    async def _download_and_ingest_opinion(
-        self,
-        opinion_id: str,
-        result: Dict[str, Any],
-        monitor: CourtListenerMonitor
-    ) -> None:
-        """Download opinion full text and ingest to knowledge graph."""
-        # Extract metadata
-        case_name = result.get('caseName', 'Unknown Case')
-        court = result.get('court', 'Unknown Court')
-        date_filed = result.get('dateFiled', '')
-        citation = result.get('citation', [])
-        snippet = result.get('snippet', '')
-        
-        # Create CaseOpinion entity in KG
-        entity_id = f"opinion:courtlistener:{opinion_id}"
-        
-        # Create CaseOpinion entity in KG
-        entity_id = f"opinion:courtlistener:{opinion_id}"
-        
-        properties = {
-            "id": entity_id,
-            "case_name": case_name,
-            "court": court,
-            "date_filed": date_filed,
-            "citation": citation if isinstance(citation, list) else [citation],
-            "snippet": snippet[:1000],  # Limit snippet
-            "courtlistener_id": opinion_id,
-            "monitor_type": monitor.monitor_type,
-            "monitor_value": monitor.value,
-            "ingested_at": datetime.now(timezone.utc).isoformat()
+        # Map to internal structure
+        monitor = {
+            "monitor_id": monitor_id,
+            "monitor_type": monitor_type,
+            "value": value,
+            "requested_by": requested_by,
+            "check_interval_hours": check_interval_hours,
+            "priority": priority,
+            "metadata": metadata or {},
+            "enabled": True,
+            "last_check": None,
+            "last_results_count": 0,
+            "created_at": datetime.now()
         }
-
-        await self.kg_service.add_entity(
-            entity_type="CaseOpinion",
-            properties=properties
-        )
         
-        # If citation monitor, create CITES relationship
-        if monitor.monitor_type == 'citation':
-            citing_case_id = f"precedent:{self._sanitize_id(monitor.value)}"
-            
-            # Create precedent node if doesn't exist
-            precedent_props = {
-                "id": citing_case_id,
-                "citation": monitor.value,
-                "tracked": True
-            }
-            await self.kg_service.add_entity(
-                entity_type="Precedent",
-                properties=precedent_props
-            )
-            
-            # Create CITES relationship
-            await self.kg_service.add_relationship(
-                source_id=entity_id,
-                relationship_type="CITES",
-                target_id=citing_case_id,
-                properties={"detected_at": datetime.now(timezone.utc).isoformat()}
-            )
-    
-    def _schedule_monitor(self, monitor: CourtListenerMonitor) -> None:
-        """Schedule periodic monitoring checks."""
-        self.scheduler.add_job(
-            func=self._execute_monitor_wrapper,
-            trigger=IntervalTrigger(hours=monitor.check_interval_hours),
-            args=[monitor.monitor_id],
-            id=monitor.monitor_id,
-            replace_existing=True
-        )
-    
-    async def _execute_monitor_wrapper(self, monitor_id: str) -> None:
-        """Wrapper for scheduler to execute monitors."""
-        await self.execute_monitor(monitor_id)
-    
+        # In a real app, save to DB
+        self.monitors.append(monitor)
+        logger.info(f"Added CourtListener monitor: {value} ({monitor_type})")
+        
+        # Return object with attribute access (Pydantic model in API expects attributes)
+        class MonitorObj:
+            def __init__(self, d): self.__dict__ = d
+        return MonitorObj(monitor)
+
+    def list_monitors(self) -> List[Dict]:
+        return self.monitors
+
     def remove_monitor(self, monitor_id: str) -> bool:
-        """Remove a monitor and its schedule."""
-        if monitor_id not in self.monitors:
-            return False
+        initial_len = len(self.monitors)
+        self.monitors = [m for m in self.monitors if m["monitor_id"] != monitor_id]
+        return len(self.monitors) < initial_len
+
+    async def execute_monitor(self, monitor_id: str) -> Dict:
+        """
+        Manually triggers a monitor check.
+        """
+        monitor = next((m for m in self.monitors if m["monitor_id"] == monitor_id), None)
+        if not monitor:
+            return {"success": False, "error": "Monitor not found"}
+
+        logger.info(f"Executing monitor {monitor_id}: {monitor['value']}")
         
-        # Remove from scheduler
+        api_key = self.settings.courtlistener_api_key
+        if not api_key:
+             raise ValueError("CourtListener API key not configured. Cannot execute real monitor.")
+
         try:
-            self.scheduler.remove_job(monitor_id)
-        except:
-            pass
-        
-        # Remove monitor
-        del self.monitors[monitor_id]
-        
-        self._audit_monitor_event(
-            monitor_id=monitor_id,
-            action='courtlistener.monitor.removed',
-            outcome='success',
-            metadata={}
-        )
-        
-        return True
-    
-    def list_monitors(self) -> List[Dict[str, Any]]:
-        """List all active monitors."""
-        return [
-            {
-                'monitor_id': m.monitor_id,
-                'monitor_type': m.monitor_type,
-                'value': m.value,
-                'requested_by': m.requested_by,
-                'check_interval_hours': m.check_interval_hours,
-                'priority': m.priority,
-                'enabled': m.enabled,
-                'last_check': m.last_check.isoformat() if m.last_check else None,
-                'last_results_count': m.last_results_count,
-                'created_at': m.created_at.isoformat()
+            results = await self._fetch_from_api(monitor["monitor_type"], monitor["value"], api_key)
+            
+            ingested_count = 0
+            for result in results:
+                await self._ingest_opinion(result)
+                ingested_count += 1
+
+            monitor["last_check"] = datetime.now()
+            monitor["last_results_count"] = len(results)
+            
+            return {
+                "success": True,
+                "monitor_id": monitor_id,
+                "monitor_type": monitor["monitor_type"],
+                "value": monitor["value"],
+                "new_opinions": len(results),
+                "ingested": ingested_count,
+                "total_results": len(results)
             }
-            for m in self.monitors.values()
-        ]
-    
-    def _generate_monitor_id(self, monitor_type: str, value: str, requested_by: str) -> str:
-        """Generate unique monitor ID."""
-        content = f"{monitor_type}:{value}:{requested_by}:{datetime.now().isoformat()}"
-        return hashlib.md5(content.encode()).hexdigest()[:16]
-    
-    def _sanitize_id(self, text: str) -> str:
-        """Sanitize text for use in entity IDs."""
-        return text.lower().replace(' ', '_').replace('.', '_')[:100]
-    
-    def _audit_monitor_event(
-        self,
-        monitor_id: str,
-        action: str,
-        outcome: str,
-        metadata: Dict[str, Any]
-    ) -> None:
-        """Audit monitor lifecycle events."""
-        event = AuditEvent(
-            category='autonomous_courtlistener',
-            action=action,
-            actor={'id': 'system', 'type': 'autonomous_service'},
-            subject={'monitor_id': monitor_id},
-            outcome=outcome,
-            severity='info',
-            metadata=metadata
+        except Exception as e:
+            logger.error(f"Monitor execution failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _fetch_from_api(self, monitor_type: str, value: str, api_key: str) -> List[Dict]:
+        """
+        Fetches opinions from CourtListener API.
+        """
+        url = f"{self.base_url}/search/"
+        params = {"q": value, "type": "o", "order_by": "dateFiled desc"}
+        
+        # Add date filter if we have a last check time? 
+        # For now, just getting recent ones.
+        
+        headers = {"Authorization": f"Token {api_key}"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, headers=headers) as response:
+                if response.status != 200:
+                    text = await response.text()
+                    raise RuntimeError(f"CourtListener API error: {response.status} - {text}")
+                
+                data = await response.json()
+                return data.get("results", [])
+
+    async def _ingest_opinion(self, opinion_data: Dict):
+        """
+        Ingests a single opinion into the Knowledge Graph.
+        """
+        from backend.app.services.knowledge_graph_service import get_knowledge_graph_service
+        kg_service = get_knowledge_graph_service()
+        
+        # Create Case Node
+        case_name = opinion_data.get("caseName", "Unknown Case")
+        case_id = f"cl_{opinion_data.get('id', 'unknown')}"
+        
+        case_props = {
+            "id": case_id,
+            "name": case_name,
+            "docket_number": opinion_data.get("docketNumber", ""),
+            "court": opinion_data.get("court", ""),
+            "date_filed": opinion_data.get("dateFiled", ""),
+            "judge": opinion_data.get("judge", ""),
+            "source": "CourtListener"
+        }
+        
+        await kg_service.add_entity("Case", case_props)
+        
+        # Create Document Node for the opinion text
+        # (In a real scenario, we might download the PDF, but here we use the snippet or plain text)
+        doc_id = f"doc_{case_id}"
+        doc_props = {
+            "id": doc_id,
+            "title": f"Opinion: {case_name}",
+            "type": "Opinion",
+            "snippet": opinion_data.get("snippet", "")
+        }
+        await kg_service.add_entity("Document", doc_props)
+        
+        # Link Case -> Document
+        await kg_service.add_relationship(
+            from_entity_id=case_id, from_entity_type="Case",
+            to_entity_id=doc_id, to_entity_type="Document",
+            relationship_type="HAS_OPINION"
         )
-        self.audit.append(event)
-    
-    def _audit_monitor_check(
-        self,
-        monitor_id: str,
-        new_opinions: int = 0,
-        ingested: int = 0,
-        error: Optional[str] = None
-    ) -> None:
-        """Audit monitoring check execution."""
-        event = AuditEvent(
-            category='autonomous_courtlistener',
-            action='courtlistener.check',
-            actor={'id': 'system', 'type': 'autonomous_service'},
-            subject={'monitor_id': monitor_id},
-            outcome='success' if not error else 'error',
-            severity='info' if not error else 'warning',
-            metadata={
-                'new_opinions': new_opinions,
-                'ingested': ingested,
-                'error': error
-            }
-        )
-        self.audit.append(event)
 
 
-# Singleton instance
-_autonomous_courtlistener_service: Optional[AutonomousCourtListenerService] = None
+_courtlistener_service = None
 
-
-async def get_autonomous_courtlistener_service() -> AutonomousCourtListenerService:
-    """Get or create the autonomous CourtListener service singleton."""
-    global _autonomous_courtlistener_service
-    if _autonomous_courtlistener_service is None:
-        _autonomous_courtlistener_service = AutonomousCourtListenerService()
-        _autonomous_courtlistener_service.start_scheduler()
-    return _autonomous_courtlistener_service
+def get_autonomous_courtlistener_service():
+    global _courtlistener_service
+    if not _courtlistener_service:
+        _courtlistener_service = AutonomousCourtListenerService()
+    return _courtlistener_service

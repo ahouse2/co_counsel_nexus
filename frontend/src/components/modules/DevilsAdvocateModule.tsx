@@ -40,6 +40,21 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
     };
 
     // ... (generateCrossExam remains same)
+    const [activeTab, setActiveTab] = useState<'review' | 'crossexam' | 'motion'>('review');
+    const [motionGrounds, setMotionGrounds] = useState<string[]>([]);
+    const [motionDraft, setMotionDraft] = useState<any | null>(null);
+
+    const generateMotion = async () => {
+        setIsLoading(true);
+        try {
+            const res = await api.devilsAdvocate.motionToDismiss(caseId, motionGrounds.length ? motionGrounds : ["Lack of Evidence", "Procedural Error"]);
+            setMotionDraft(res.data);
+        } catch (error) {
+            console.error("Failed to generate motion", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
         // Don't auto-fetch on mount anymore, let user trigger it with their theory
@@ -75,6 +90,16 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
                 >
                     <Gavel className="w-4 h-4" />
                     Cross-Examination Sim
+                </button>
+                <button
+                    onClick={() => setActiveTab('motion')}
+                    className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'motion'
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50'
+                        : 'hover:bg-slate-800 text-slate-400'
+                        }`}
+                >
+                    <CheckCircle className="w-4 h-4" />
+                    Motion to Dismiss
                 </button>
             </div>
 
@@ -150,7 +175,7 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
                                 ))
                             )}
                         </motion.div>
-                    ) : (
+                    ) : activeTab === 'crossexam' ? (
                         <motion.div
                             key="crossexam"
                             initial={{ opacity: 0, y: 20 }}
@@ -194,6 +219,55 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
                                     </div>
                                 ))}
                             </div>
+                        </motion.div>
+                    ) : (
+                        <motion.div
+                            key="motion"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="flex flex-col h-full"
+                        >
+                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mb-6">
+                                <h3 className="font-semibold text-blue-300 mb-4">Draft Motion to Dismiss</h3>
+                                <div className="space-y-2 mb-4">
+                                    <label className="block text-sm text-slate-400">Grounds for Dismissal</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {["Lack of Evidence", "Procedural Error", "Lack of Jurisdiction", "Failure to State a Claim"].map(ground => (
+                                            <button
+                                                key={ground}
+                                                onClick={() => setMotionGrounds(prev => prev.includes(ground) ? prev.filter(g => g !== ground) : [...prev, ground])}
+                                                className={`px-3 py-1 rounded-full text-xs border transition-colors ${motionGrounds.includes(ground)
+                                                    ? 'bg-blue-500/20 border-blue-500 text-blue-300'
+                                                    : 'bg-slate-950 border-slate-700 text-slate-500 hover:border-slate-600'
+                                                    }`}
+                                            >
+                                                {ground}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={generateMotion}
+                                    disabled={isLoading}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                                >
+                                    {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                                    Generate Draft
+                                </button>
+                            </div>
+
+                            {motionDraft && (
+                                <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 font-mono text-sm leading-relaxed whitespace-pre-wrap text-slate-300">
+                                    {motionDraft.motion_text}
+                                    <div className="mt-4 pt-4 border-t border-slate-800 flex justify-between items-center">
+                                        <span className="text-slate-500">Likelihood of Success</span>
+                                        <span className={`font-bold ${motionDraft.likelihood_of_success > 0.7 ? 'text-green-400' : motionDraft.likelihood_of_success > 0.4 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                            {(motionDraft.likelihood_of_success * 100).toFixed(0)}%
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                         </motion.div>
                     )}
                 </AnimatePresence>

@@ -53,8 +53,12 @@ export function DocumentDraftingModule() {
         if (!contextQuery.trim()) return;
         setIsAiThinking(true);
         try {
-            const response = await endpoints.agents.chat(`Draft a legal clause or paragraph based on this request: ${contextQuery}. Return ONLY the drafted text, no conversational filler.`);
-            const text = response.data.response || response.data.answer || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
+            // Use autocomplete endpoint if it's a continuation, or generic chat if it's a new instruction
+            // For now, let's assume "Magic Insert" is context-aware generation
+            // We'll use the autocomplete endpoint but pass the query as context
+            const cursorPosition = editorRef.current?.selectionStart || editorContent.length;
+            const res = await endpoints.drafting.autocomplete(editorContent, cursorPosition, contextQuery);
+            const text = res.data.completion;
 
             // Insert at cursor or append
             if (editorRef.current) {
@@ -77,10 +81,18 @@ export function DocumentDraftingModule() {
         if (!selectedText) return;
         setIsAiThinking(true);
         try {
-            const response = await endpoints.agents.chat(`Rewrite the following text to be ${instruction}. Return ONLY the rewritten text.\n\nTEXT: "${selectedText}"`);
-            const text = response.data.response || response.data.answer || (typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
+            // Map instruction to tone
+            let targetTone = "professional";
+            if (instruction.includes("formal")) targetTone = "highly formal legal";
+            if (instruction.includes("concise")) targetTone = "concise and direct";
+            if (instruction.includes("aggressive")) targetTone = "assertive and aggressive";
+            if (instruction.includes("simpler")) targetTone = "plain english";
 
-            setAiSuggestions([text]);
+            const res = await endpoints.drafting.toneCheck(selectedText, targetTone);
+
+            // Show critique and revised text
+            setAiSuggestions([res.data.revised_text]);
+            // You could also show res.data.critique in a toast or UI element
         } catch (error) {
             console.error("Refine failed:", error);
         } finally {

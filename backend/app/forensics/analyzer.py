@@ -38,7 +38,7 @@ from ..forensics.models import (
     AntiScanAlterRescanResult,
     CloneSplicingResult,
     ElaResult,
-    FontObjectAnalysisResult,
+    PdfStructureAnalysisResult,
     ForensicAnalysisResult,
     TamperScoreResult,
     ScreeningResult,
@@ -90,7 +90,7 @@ class ForensicAnalyzer:
         clone_splicing_result = self._detect_clone_splicing(document_content, metadata)
 
         # PDF forensics
-        font_object_result = self._analyze_font_object(document_content, metadata)
+        pdf_structure_result = self._analyze_pdf_structure(document_content, metadata)
 
         # Scan pattern analysis
         anti_scan_alter_rescan_result = self._detect_anti_scan_alter_rescan(document_content, metadata)
@@ -102,7 +102,7 @@ class ForensicAnalyzer:
             tamper_score=tamper_score_result,
             ela_analysis=ela_result,
             clone_splicing_detection=clone_splicing_result,
-            font_object_analysis=font_object_result,
+            pdf_structure_analysis=pdf_structure_result,
             anti_scan_alter_rescan=anti_scan_alter_rescan_result,
             overall_verdict=overall_verdict,
         )
@@ -248,9 +248,9 @@ class ForensicAnalyzer:
         except Exception as exc:
             return CloneSplicingResult(detected=False, details=f"Clone detection failed: {str(exc)}", regions=[])
 
-    def _analyze_font_object(self, document_content: bytes, metadata: Dict[str, Any]) -> Optional[FontObjectAnalysisResult]:
+    def _analyze_pdf_structure(self, document_content: bytes, metadata: Dict[str, Any]) -> Optional[PdfStructureAnalysisResult]:
         """
-        Analyzes PDF for font inconsistencies that indicate editing.
+        Analyzes PDF for structural inconsistencies, incremental updates, and metadata anomalies.
         """
         if not PYMUPDF_AVAILABLE:
             return None
@@ -259,55 +259,89 @@ class ForensicAnalyzer:
             # Open PDF
             doc = fitz.open(stream=document_content, filetype="pdf")
             
-            all_fonts = {}
+            anomalies = []
+            metadata_inconsistencies = []
+            suspicious_tags = []
             
+            # 1. Incremental Update Detection (Multiple EOFs)
+            # Simple check: count %%EOF in raw bytes
+            eof_count = document_content.count(b'%%EOF')
+            incremental_updates_detected = eof_count > 1
+            if incremental_updates_detected:
+                anomalies.append(f"Multiple EOF markers found ({eof_count}), indicating incremental updates/modifications.")
+            
+            # 2. Metadata Consistency
+            pdf_metadata = doc.metadata
+            creation_date = pdf_metadata.get("creationDate", "")
+            mod_date = pdf_metadata.get("modDate", "")
+            producer = pdf_metadata.get("producer", "")
+            creator = pdf_metadata.get("creator", "")
+            
+            # Basic date format check (D:YYYYMMDD...)
+            if creation_date and mod_date:
+                # Simple string comparison works for ISO-like PDF dates if formats match
+                # Ideally parse, but raw string check is often enough for obvious mismatches
+                if mod_date < creation_date:
+                    metadata_inconsistencies.append(f"Modification Date ({mod_date}) is earlier than Creation Date ({creation_date}).")
+            
+            if producer and creator and producer != creator:
+                 # Not necessarily an error, but worth noting if they are vastly different tools
+                 pass 
+                 
+            # 3. Suspicious Tags/Actions
+            # Scan raw content for JS/Launch actions (simple heuristic)
+            # PyMuPDF can also traverse objects, but regex on bytes is a good catch-all for hidden stuff
+            suspicious_patterns = [b'/JS', b'/JavaScript', b'/AA', b'/OpenAction', b'/Launch']
+            for pattern in suspicious_patterns:
+                if pattern in document_content:
+                    tag = pattern.decode('utf-8')
+                    suspicious_tags.append(tag)
+                    anomalies.append(f"Suspicious tag found: {tag}")
+
+            # 4. Font Analysis (Existing Logic)
+            all_fonts = {}
             for page_num in range(len(doc)):
                 page = doc[page_num]
                 fonts = page.get_fonts()
-                
                 for font in fonts:
-                    font_name = font[3]  # Font name
-                    font_type = font[1]   # Font type
-                    
+                    font_name = font[3]
                     if font_name not in all_fonts:
-                        all_fonts[font_name] = {
-                            "type": font_type,
-                            "pages": [page_num],
-                            "count": 1
-                        }
+                        all_fonts[font_name] = 1
                     else:
-                        all_fonts[font_name]["count"] += 1
-                        all_fonts[font_name]["pages"].append(page_num)
+                        all_fonts[font_name] += 1
             
-            # Detect inconsistencies
-            inconsistencies = []
             unique_fonts = len(all_fonts)
-            
-            # Flag if too many different fonts (unusual for authentic document)
             if unique_fonts > 10:
-                inconsistencies.append(f"Unusually high font count: {unique_fonts}")
+                anomalies.append(f"Unusually high font count: {unique_fonts}")
             
-            # Flag rare/suspicious font names
-            for font_name, info in all_fonts.items():
-                if "Arial" not in font_name and "Times" not in font_name and "Courier" not in font_name:
-                    if info["count"] < 3:  # Rarely used font
-                        inconsistencies.append(f"Rare font '{font_name}' used sparingly")
+            confidence = min(len(anomalies) / 5, 1.0)
+            detected = len(anomalies) > 0 or incremental_updates_detected
             
-            confidence = min(len(inconsistencies) / 5, 1.0)
-            detected = confidence > 0.0
-            
-            return FontObjectAnalysisResult(
+            return PdfStructureAnalysisResult(
                 inconsistencies_detected=detected,
-                details=f"Analyzed {unique_fonts} unique fonts. {len(inconsistencies)} inconsistencies found.",
-                anomalies=inconsistencies
+                details=f"Analyzed PDF Structure. {len(anomalies)} anomalies found. Incremental Updates: {incremental_updates_detected}",
+                anomalies=anomalies,
+                incremental_updates_detected=incremental_updates_detected,
+                metadata_inconsistencies=metadata_inconsistencies,
+                suspicious_tags=suspicious_tags
             )
             
         except Exception as exc:
-            return FontObjectAnalysisResult(inconsistencies_detected=False, details=f"Font analysis failed: {str(exc)}", anomalies=[])
+            return PdfStructureAnalysisResult(
+                inconsistencies_detected=False, 
+                details=f"PDF analysis failed: {str(exc)}", 
+                anomalies=[],
+                incremental_updates_detected=False,
+                metadata_inconsistencies=[],
+                suspicious_tags=[]
+            )
 
     def _detect_anti_scan_alter_rescan(self, document_content: bytes, metadata: Dict[str, Any]) -> Optional[AntiScanAlterRescanResult]:
         """
         Detects scan→alter→rescan pattern through noise and compression analysis.
+        Implements:
+        1. Moiré Pattern Detection (FFT analysis for double halftoning)
+        2. Digital Silence Detection (Zero-noise regions indicating digital overlays)
         """
         if not PIL_AVAILABLE:
             return None
@@ -315,57 +349,106 @@ class ForensicAnalyzer:
         try:
             img = Image.open(BytesIO(document_content))
             
-            if img.format != 'JPEG':
-                return None
-            
             # Convert to grayscale numpy array
-            gray = np.array(img.convert('L'))
+            if img.mode != 'L':
+                img = img.convert('L')
+            gray = np.array(img)
             
-            # Analyze noise characteristics using Laplacian
-            laplacian = ndimage.laplace(gray)
-            noise_variance = np.var(laplacian)
+            # --- 1. Moiré Pattern Detection (Frequency Domain) ---
+            # Real scans of printed documents have specific halftone frequencies.
+            # Rescanning creates interference (Moiré) which shows as competing peaks in FFT.
             
-            # Check for double JPEG compression artifacts
-            # Rescan typically shows lower noise variance
-            threshold_low_noise = 100  # Unusually clean for a scan
-            
-            # Detect periodic artifacts (printer patterns)
             fft = np.fft.fft2(gray)
             fft_shift = np.fft.fftshift(fft)
             magnitude = np.abs(fft_shift)
+            magnitude_log = np.log(1 + magnitude)
             
-            # Check for peaks in frequency domain (printer grids)
-            magnitude_sorted = np.sort(magnitude.flatten())
-            peak_threshold = magnitude_sorted[-100]  # Top peaks
-            strong_peaks = np.sum(magnitude > peak_threshold)
+            # Normalize
+            magnitude_norm = (magnitude_log - np.min(magnitude_log)) / (np.max(magnitude_log) - np.min(magnitude_log))
             
-            confidence = 0.0
-            indicators = []
+            # Threshold to find peaks
+            # We look for distinct high-energy points away from the center (DC component)
+            h, w = magnitude_norm.shape
+            center_y, center_x = h // 2, w // 2
             
-            if noise_variance < threshold_low_noise:
-                confidence += 0.4
-                indicators.append("Unusually low noise for authentic scan")
+            # Mask out the center (low frequencies)
+            mask_radius = min(h, w) // 10
+            y, x = np.ogrid[:h, :w]
+            mask = (x - center_x)**2 + (y - center_y)**2 > mask_radius**2
             
-            if strong_peaks > 20:
-                confidence += 0.3
-                indicators.append("Periodic patterns suggest re-scanning")
+            peaks = magnitude_norm * mask
+            peak_count = np.sum(peaks > 0.85) # High energy peaks
             
-            confidence = min(confidence, 1.0)
-            detected = confidence > 0.5
+            moire_detected = peak_count > 50 # Heuristic threshold for complex interference patterns
             
+            # --- 2. Digital Silence Detection (Spatial Domain) ---
+            # Real scans have sensor noise everywhere. 
+            # Digital overlays (e.g. white box to hide text) have mathematically zero variance.
+            
+            # Split image into 16x16 blocks
+            block_size = 16
+            h_blocks = h // block_size
+            w_blocks = w // block_size
+            
+            silent_blocks = 0
+            total_blocks = h_blocks * w_blocks
+            
+            # We can use view_as_windows or simple reshaping if dimensions allow, 
+            # but standard loop with stride is robust enough for now or reshaping.
+            # Let's use reshaping for speed.
+            
+            # Crop to multiple of block_size
+            h_crop = h_blocks * block_size
+            w_crop = w_blocks * block_size
+            gray_crop = gray[:h_crop, :w_crop]
+            
+            # Reshape to (n_blocks, block_size, block_size)
+            # This is a bit complex with numpy reshape, let's do a simpler variance map
+            
+            # Calculate local variance using a sliding window or block processing
+            # Faster approach:
+            # 1. Square the image
+            # 2. Box filter the image and the squared image
+            # 3. Var = E[X^2] - (E[X])^2
+            
+            img_f = gray.astype(float)
+            mu = ndimage.uniform_filter(img_f, size=block_size)
+            sq_mu = ndimage.uniform_filter(img_f**2, size=block_size)
+            variance_map = sq_mu - mu**2
+            
+            # "Digital Silence" is variance < 0.5 (allowing for tiny floating point errors/compression artifacts)
+            # Real sensor noise usually has variance > 5-10 depending on ISO.
+            silent_pixels = np.sum(variance_map < 0.5)
+            silent_ratio = silent_pixels / variance_map.size
+            
+            digital_overlays_detected = silent_ratio > 0.01 # If more than 1% of the image is perfectly silent
+            
+            # --- Verdict ---
+            detected = moire_detected or digital_overlays_detected
+            
+            details = []
+            if moire_detected:
+                details.append(f"Moiré patterns detected (Peak count: {peak_count})")
+            if digital_overlays_detected:
+                details.append(f"Digital overlays detected ({silent_ratio*100:.1f}% of area is silent)")
+                
+            if not details:
+                details.append("No scan-alter-rescan anomalies detected")
+                
             return AntiScanAlterRescanResult(
                 detected=detected,
-                details=f"Noise variance: {noise_variance:.2f}, Strong peaks: {strong_peaks}",
-                # indicators field missing in model? models.py has 'details' but no 'indicators'?
-                # Wait, models.py Step 654:
-                # class AntiScanAlterRescanResult(BaseModel):
-                #     detected: bool
-                #     details: str
-                # No indicators field!
+                details="; ".join(details),
+                moire_detected=moire_detected,
+                digital_overlays_detected=digital_overlays_detected
             )
             
         except Exception as exc:
-            return AntiScanAlterRescanResult(detected=False, details=f"Scan analysis failed: {str(exc)}")
+            return AntiScanAlterRescanResult(
+                detected=False, 
+                details=f"Scan analysis failed: {str(exc)}",
+                moire_detected=False,
+                digital_overlays_detected=False
+            )
 
     def _determine_overall_verdict(self, tamper_score: TamperScoreResult) -> str:
         if tamper_score.score >= 0.7:

@@ -18,27 +18,39 @@ class SandboxExecutionResult:
         return {"success": self.success, "workspace_id": self.workspace_id, "commands": []}
 
 class SandboxExecutionHarness:
-    def __init__(self, repo_root, commands):
+    def __init__(self, repo_root: Path, commands: List[List[str]]):
         self.repo_root = repo_root
         self.commands = commands
     
-    def execute(self, *args, **kwargs):
-        """Execute commands in subprocess safely."""
+    def execute(self, *args, **kwargs) -> SandboxExecutionResult:
+        """Execute commands in the containerized environment."""
         import subprocess
         import uuid
+        import os
         
         workspace_id = str(uuid.uuid4())
         results = []
         success = True
         
+        # Ensure we are in the repo root
+        cwd = str(self.repo_root)
+        
+        # If we are in the API container, /src/repo is the mount point for the full repo
+        if os.path.exists("/src/repo"):
+            cwd = "/src/repo"
+
         for cmd in self.commands:
             try:
+                # Log the command being executed
+                print(f"Executing: {' '.join(cmd)} in {cwd}")
+                
                 result = subprocess.run(
                     cmd,
-                    cwd=self.repo_root,
+                    cwd=cwd,
                     capture_output=True,
                     text=True,
-                    timeout=300  # 5 minute timeout per command
+                    timeout=300,  # 5 minute timeout
+                    env={**os.environ, "PYTHONPATH": "/src"} # Ensure python path is set
                 )
                 
                 command_result = type('obj', (object,), {
@@ -49,8 +61,8 @@ class SandboxExecutionHarness:
                     'to_json': lambda self: {
                         'command': self.command,
                         'return_code': self.return_code,
-                        'stdout': self.stdout[:500],  # Limit output
-                        'stderr': self.stderr[:500]
+                        'stdout': self.stdout[:2000],  # Increased limit
+                        'stderr': self.stderr[:2000]
                     }
                 })()
                 
@@ -58,13 +70,29 @@ class SandboxExecutionHarness:
                 
                 if result.returncode != 0:
                     success = False
-                    break  # Stop on first failure
+                    # Don't break immediately, run cleanup/diagnostic commands if any
+                    # But for now, we stop to prevent cascading errors
+                    break
                     
             except subprocess.TimeoutExpired:
                 success = False
+                results.append(type('obj', (object,), {
+                    'command': ' '.join(cmd),
+                    'return_code': -1,
+                    'stdout': "",
+                    'stderr': "Command timed out",
+                    'to_json': lambda self: {'command': self.command, 'return_code': -1, 'stdout': "", 'stderr': "Timeout"}
+                })())
                 break
-            except Exception:
+            except Exception as e:
                 success = False
+                results.append(type('obj', (object,), {
+                    'command': ' '.join(cmd),
+                    'return_code': -1,
+                    'stdout': "",
+                    'stderr': str(e),
+                    'to_json': lambda self: {'command': self.command, 'return_code': -1, 'stdout': "", 'stderr': str(e)}
+                })())
                 break
         
         execution = SandboxExecutionResult()
@@ -369,6 +397,139 @@ class DevAgentService:
             "stages": stages,
         }
 
+
+    async def generate_proposal_content(self, task: ImprovementTaskRecord) -> ProposalContext:
+        """Generates a patch proposal using the LLM."""
+        from .llm_service import get_llm_service
+        import json
+        import re
+        
+        llm = get_llm_service()
+        
+        prompt = f"""
+        You are an expert software engineer working on the Op Veritas codebase.
+        
+        Task Title: {task.title}
+        Task Description: {task.description}
+        
+        Context:
+        The codebase is a Python FastAPI backend and React frontend.
+        
+        Please propose a code change to address this task.
+        You must return a valid JSON object with the following structure:
+        {{
+            "title": "Short title of the change",
+            "summary": "Detailed summary of what this change does",
+            "diff": "The unified diff of the changes. Must be valid diff format.",
+            "rationale": ["Reason 1", "Reason 2"]
+        }}
+        
+        If you need to create a new file, the diff should show /dev/null as the source.
+        Ensure the JSON is valid. Do not include markdown formatting around the JSON.
+        """
+        
+        try:
+            response = await llm.generate_text(prompt)
+            
+            # Extract JSON if wrapped in code blocks
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                json_str = response
+                
+            data = json.loads(json_str)
+            
+            return ProposalContext(
+                title=data.get("title", f"Fix for {task.title}"),
+                summary=data.get("summary", "Generated by DevAgent"),
+                diff=data.get("diff", ""),
+                rationale=data.get("rationale", []),
+                validation_preview={"source": "llm_generated"}
+            )
+        except Exception as e:
+            print(f"Error generating proposal: {e}")
+            # Return a placeholder context on error
+            return ProposalContext(
+                title=f"Failed to generate: {task.title}",
+                summary=f"Error: {str(e)}",
+                diff="",
+                rationale=["Generation failed"]
+            )
+
+    async def scan_and_execute_next_task(self, task_file_path: str = "/src/repo/task.md") -> Dict[str, Any]:
+        """Scans the task list and attempts to execute the next available task."""
+        import os
+        import re
+        
+        if not os.path.exists(task_file_path):
+            return {"status": "error", "message": f"Task file not found at {task_file_path}"}
+            
+        with open(task_file_path, 'r') as f:
+            content = f.read()
+            
+        # Find first unchecked task marked with [AUTO] or just the first unchecked task if we want to be aggressive
+        # For safety, let's look for a specific tag or just the next item in Phase 1.1
+        # Regex for "- [ ] Task Name <!-- id: X -->"
+        # We'll look for items explicitly tagged for auto-execution or just pick the next one.
+        # Let's pick the next one but require a specific comment tag [AUTO] to be safe?
+        # The user asked for "semi-autonomous".
+        # Let's look for "- [ ] ... [AUTO]"
+        
+        match = re.search(r'- \[ \] (.*?) \[AUTO\]', content)
+        if not match:
+             # Fallback: Look for the specific "Self-Improvement" task we added
+             match = re.search(r'- \[ \] (Create "Self-Improvement" loop)', content)
+        
+        if not match:
+            return {"status": "idle", "message": "No auto-tasks found"}
+            
+        task_title = match.group(1).strip()
+        
+        # Create a feature request
+        request_id = f"auto-{int(datetime.now().timestamp())}"
+        task_record = self.record_feature_request(
+            request_id=request_id,
+            title=task_title,
+            description=f"Autonomous execution of task: {task_title}",
+            priority="medium",
+            requested_by={"client_id": "system", "subject": "dev_agent"},
+            tags=["auto", "self-improvement"]
+        )
+        
+        # Generate Proposal
+        proposal_context = await self.generate_proposal_content(task_record)
+        
+        if not proposal_context.diff:
+             return {"status": "failed", "message": "Could not generate valid diff"}
+             
+        # Register Proposal
+        proposal = self.create_proposal(
+            task_record.task_id,
+            {"client_id": "system", "subject": "dev_agent"},
+            title=proposal_context.title,
+            summary=proposal_context.summary,
+            diff=proposal_context.diff,
+            rationale=proposal_context.rationale
+        )
+        
+        # Validate
+        execution = self.agent.validate_proposal(proposal)
+        
+        # Apply (if valid)
+        # Note: apply_proposal calls validate again, but that's fine.
+        # We need a Principal object for application
+        from ..security.authz import Principal
+        system_principal = Principal(client_id="system", subject="dev_agent", roles=["admin"], tenant_id="system")
+        
+        result = self.apply_proposal(proposal.proposal_id, system_principal)
+        
+        return {
+            "status": "success" if result.execution.success else "failed",
+            "task": task_title,
+            "proposal_id": proposal.proposal_id,
+            "execution": result.execution.to_json()
+        }
 
 _dev_agent_service: DevAgentService | None = None
 

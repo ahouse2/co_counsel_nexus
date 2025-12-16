@@ -81,6 +81,10 @@ export const endpoints = {
         pendingReview: (caseId: string) => api.get(`/api/documents/pending_review?case_id=${caseId}`),
         approveClassification: (docId: string) => api.post(`/api/documents/${docId}/approve`),
         updateMetadata: (docId: string, metadata: any) => api.post(`/api/documents/${docId}/update_metadata`, metadata),
+        getEntities: (docId: string) => api.get(`/api/documents/${docId}/entities`),
+        getOCR: (docId: string) => api.get(`/api/documents/${docId}/ocr`),
+        triggerOCR: (docId: string) => api.post(`/api/documents/${docId}/ocr`),
+        getClustering: (limit: number = 1000) => api.get('/api/documents/clustering', { params: { limit } }),
     },
     // Timeline
     timeline: {
@@ -90,6 +94,8 @@ export const endpoints = {
         narrative: {
             generate: (caseId: string) => api.get(`/api/narrative/${caseId}/generate`),
             contradictions: (caseId: string) => api.get(`/api/narrative/${caseId}/contradictions`),
+            branching: (caseId: string, pivot: string, fact: string) => api.post(`/api/narrative/${caseId}/branching`, { pivot_point: pivot, alternative_fact: fact }),
+            storyArc: (caseId: string) => api.get(`/api/narrative/${caseId}/story_arc`),
         },
     },
     // Context
@@ -110,10 +116,13 @@ export const endpoints = {
     legalTheory: {
         suggestions: (caseId: string) => api.get(`/api/legal_theory/suggestions?case_id=${caseId}`),
         subgraph: (cause: string) => api.get(`/api/legal_theory/${cause}/subgraph`),
+        matchPrecedents: (facts: string) => api.post('/api/legal_theory/match_precedents', { case_facts: facts }),
+        juryResonance: (argument: string, demographics: any) => api.post('/api/legal_theory/jury_resonance', { argument, jury_demographics: demographics }),
     },
     // Simulation
     simulation: {
         mootCourt: (data: any) => api.post('/api/simulation/moot_court', data),
+        chatWithJuror: (data: any) => api.post('/api/simulation/juror_chat', data),
     },
     // Jury
     jury: {
@@ -145,6 +154,12 @@ export const endpoints = {
     devilsAdvocate: {
         review: (caseId: string, caseTheory: string = "") => api.post(`/api/devils-advocate/${caseId}/review`, { case_theory: caseTheory }),
         crossExamine: (statement: string, profile: string = "") => api.post('/api/devils-advocate/cross-examine', { witness_statement: statement, witness_profile: profile }),
+        motionToDismiss: (caseId: string, grounds: string[]) => api.post(`/api/devils-advocate/${caseId}/motion_to_dismiss`, { grounds }),
+    },
+    // Document Drafting
+    drafting: {
+        autocomplete: (currentText: string, cursorPosition: number, context: string = "") => api.post('/api/drafting/autocomplete', { current_text: currentText, cursor_position: cursorPosition, context }),
+        toneCheck: (text: string, targetTone: string) => api.post('/api/drafting/tone-check', { text, target_tone: targetTone }),
     },
     // Case Management
     cases: {
@@ -191,6 +206,24 @@ export const endpoints = {
         removeTrigger: (id: string) => api.delete(`/api/autonomous-scraping/triggers/${id}`),
         executeTrigger: (id: string) => api.post(`/api/autonomous-scraping/triggers/${id}/execute`),
         manualScrape: (source: string, query: string) => api.post('/api/autonomous-scraping/scrape', null, { params: { source, query } }),
+
+        // Advanced Research
+        shepardizeCase: (citation: string) => api.post('/api/shepardize', { citation }),
+        profileJudge: (judgeName: string, jurisdiction: string) => api.post('/api/judge-profile', { judge_name: judgeName, jurisdiction }),
+    },
+    // Voice
+    voice: {
+        listPersonas: () => api.get('/api/voice/personas'),
+        createSession: (caseId: string, personaId: string) => api.post('/api/voice/sessions', { case_id: caseId, persona_id: personaId }),
+        processTurn: (sessionId: string, audioBlob: Blob) => {
+            const formData = new FormData();
+            formData.append('audio', audioBlob);
+            return api.post(`/api/voice/sessions/${sessionId}/turn`, formData, {
+                responseType: 'blob',
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+        },
+        getSession: (sessionId: string) => api.get(`/api/voice/sessions/${sessionId}`),
     }
 };
 

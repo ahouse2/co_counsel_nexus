@@ -181,6 +181,60 @@ class VectorService:
             with_payload=True,
         )
 
+    def get_all_embeddings(self, limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Retrieves all embeddings from the vector store for clustering.
+        Returns a list of dicts: {'id': str, 'vector': List[float], 'payload': Dict}
+        """
+        results = []
+        
+        if self.mode == "memory":
+            assert self._memory_index is not None
+            for point_id, (vector, payload) in self._memory_index._store.items():
+                results.append({
+                    "id": point_id,
+                    "vector": vector,
+                    "payload": payload
+                })
+                if len(results) >= limit:
+                    break
+                    
+        elif self.mode == "chroma":
+            # Chroma get()
+            data = self._chroma_collection.get(
+                include=["embeddings", "metadatas"],
+                limit=limit
+            )
+            ids = data.get("ids", [])
+            embeddings = data.get("embeddings", [])
+            metadatas = data.get("metadatas", [])
+            
+            for i, point_id in enumerate(ids):
+                results.append({
+                    "id": point_id,
+                    "vector": embeddings[i] if embeddings else [],
+                    "payload": metadatas[i] if metadatas else {}
+                })
+
+        else: # qdrant
+            assert self.client is not None
+            # Use scroll API
+            response, _ = self.client.scroll(
+                collection_name=self.settings.qdrant_collection,
+                limit=limit,
+                with_payload=True,
+                with_vectors=True
+            )
+            
+            for point in response:
+                results.append({
+                    "id": str(point.id),
+                    "vector": point.vector,
+                    "payload": point.payload
+                })
+                
+        return results
+
 
 _vector_service: VectorService | None = None
 

@@ -1,7 +1,9 @@
 from typing import Dict, Any, List, Set
 import requests
 import datetime
+import json
 from backend.app.config import get_settings
+from backend.app.services.llm_service import get_llm_service
 
 class CryptoService:
     """
@@ -10,6 +12,7 @@ class CryptoService:
     Implements Dynamic Clustering Algorithms:
     1. Common Input Ownership Heuristic
     2. Change Address Detection Heuristic
+    3. LLM-based Entity Attribution & Pattern Recognition
     """
     
     # Real known addresses (Publicly available data)
@@ -23,10 +26,15 @@ class CryptoService:
         "16rCmCmbuWDhPjWTrpQGaU3EPdZF7MTdUk": {"label": "Poloniex Cold Wallet", "group": "exchange"},
         "3Nxwenay9Z8Lc9JBiywExpnEFiLp6Afp8v": {"label": "Kraken Cold Wallet", "group": "exchange"},
         
-        # ETH Exchanges
+        # ETH Exchanges & Services
         "0x3f5CE5FBFe3E9af3971dD833D26bA9b5C936f0bE": {"label": "Binance Hot Wallet", "group": "exchange"},
         "0x71eCf1168E265dc63E67360288890633074272c6": {"label": "Coinbase Hot Wallet", "group": "exchange"},
+        "0x503828976D22510aad0201ac7EC88293211D23Da": {"label": "Coinbase Cold Wallet", "group": "exchange"},
+        "0xA090e606E30bD747d4E6245a1517Ebe430F0057e": {"label": "Ethermine", "group": "mining_pool"},
         "0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b": {"label": "Bitfinex Hot Wallet", "group": "exchange"},
+        "0x28C6c06298d514Db089934071355E5743bf21d60": {"label": "Binance 14", "group": "exchange"},
+        "0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549": {"label": "Binance 15", "group": "exchange"},
+        "0x0A869d79a7052C7f1b55a8EbAa7427785B553d16": {"label": "KuCoin 6", "group": "exchange"},
         
         # Tornado Cash (Mixers)
         "0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b": {"label": "Tornado Cash Router", "group": "mixer"},
@@ -39,6 +47,69 @@ class CryptoService:
     def __init__(self):
         self.settings = get_settings()
         self.etherscan_key = self.settings.blockchain_api_key_ethereum
+        self.llm_service = get_llm_service()
+
+    async def analyze_with_llm(self, graph_data: Dict[str, Any]) -> str:
+        """
+        Uses LLM to analyze the transaction graph for patterns, structuring, and ownership.
+        """
+        try:
+            # Summarize graph for LLM to reduce token count
+            nodes = graph_data.get("graph", {}).get("nodes", [])
+            links = graph_data.get("graph", {}).get("links", [])
+            
+            target_node = next((n for n in nodes if n.get("group") == "target"), None)
+            target_id = target_node.get("id") if target_node else "Unknown"
+            
+            summary = {
+                "target_address": target_id,
+                "chain": graph_data.get("chain"),
+                "total_nodes": len(nodes),
+                "total_transactions": len(links),
+                "risk_score": graph_data.get("risk_score"),
+                "flags": graph_data.get("flags"),
+                "significant_flows": []
+            }
+            
+            # Extract significant flows (> 0.1 value)
+            for link in links:
+                if link.get("value", 0) > 0.1:
+                    summary["significant_flows"].append({
+                        "from": link.get("source"),
+                        "to": link.get("target"),
+                        "value": link.get("value"),
+                        "type": link.get("type"),
+                        "currency": link.get("currency", "Native")
+                    })
+            
+            # Identify interactions with known entities
+            known_interactions = []
+            for node in nodes:
+                if node.get("group") in ["exchange", "mixer", "mining_pool"]:
+                    known_interactions.append(f"{node.get('label')} ({node.get('group')})")
+            summary["known_interactions"] = list(set(known_interactions))
+
+            prompt = f"""
+            You are an expert financial forensic analyst specializing in cryptocurrency investigations.
+            Analyze the following transaction graph summary for a target wallet: {target_id}
+            
+            Graph Summary:
+            {json.dumps(summary, indent=2)}
+            
+            Your task:
+            1. Identify the likely source of funds (e.g., mining, exchange withdrawal, mixer).
+            2. Detect any patterns of 'structuring' or 'layering' (splitting funds to hide origin).
+            3. Flag any suspicious connections to high-risk entities (mixers, darknet).
+            4. Provide a concise, professional assessment of the wallet's activity and intent.
+            
+            Format your response as a single paragraph suitable for a legal report.
+            """
+            
+            analysis = await self.llm_service.generate_text(prompt)
+            return analysis
+        except Exception as e:
+            print(f"LLM Analysis failed: {e}")
+            return "AI Analysis unavailable at this time."
 
     def trace_address(self, address: str, chain: str = "BTC") -> Dict[str, Any]:
         """

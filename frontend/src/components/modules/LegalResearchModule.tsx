@@ -32,7 +32,7 @@ interface Trigger {
 }
 
 export function LegalResearchModule() {
-    const [activeTab, setActiveTab] = useState<'research' | 'docket' | 'scraper'>('research');
+    const [activeTab, setActiveTab] = useState<'research' | 'docket' | 'scraper' | 'advanced'>('research');
 
     // Legacy Research State
     const [query, setQuery] = useState('');
@@ -231,6 +231,14 @@ export function LegalResearchModule() {
                         <Globe className="w-4 h-4" />
                         Scraper
                     </button>
+                    <button
+                        onClick={() => setActiveTab('advanced')}
+                        className={`px-4 py-2 rounded-md flex items-center gap-2 transition-colors ${activeTab === 'advanced' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-halo-muted hover:text-halo-text'
+                            }`}
+                    >
+                        <ShieldAlert className="w-4 h-4" />
+                        Advanced
+                    </button>
                 </div>
             </div>
 
@@ -379,6 +387,7 @@ export function LegalResearchModule() {
                                     value={newMonitorType}
                                     onChange={(e) => setNewMonitorType(e.target.value as any)}
                                     className="w-full bg-black border border-halo-border rounded-lg px-3 py-2 focus:ring-1 focus:ring-blue-500 outline-none text-halo-text"
+                                    aria-label="Monitor Type"
                                 >
                                     <option value="keyword">Keyword Search</option>
                                     <option value="citation">Citation Tracker</option>
@@ -477,6 +486,7 @@ export function LegalResearchModule() {
                                     value={newScraperSource}
                                     onChange={(e) => setNewScraperSource(e.target.value)}
                                     className="w-full bg-black border border-halo-border rounded-lg px-3 py-2 focus:ring-1 focus:ring-emerald-500 outline-none text-halo-text"
+                                    aria-label="Scraper Source"
                                 >
                                     <option value="california_codes">California Codes</option>
                                     <option value="ecfr">eCFR (Federal Regs)</option>
@@ -562,6 +572,92 @@ export function LegalResearchModule() {
                                 No saved scraping triggers. Use "Scrape Now" for one-off tasks.
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* 4. ADVANCED TOOLS */}
+            {activeTab === 'advanced' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-300">
+                    {/* Shepardizing Agent */}
+                    <div className="halo-card border-halo-border bg-halo-card p-6 rounded-xl border">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-amber-400">
+                            <ShieldAlert className="w-5 h-5" />
+                            Shepardizing Agent
+                        </h3>
+                        <p className="text-sm text-halo-muted mb-4">Check if a case citation is still good law.</p>
+                        <div className="space-y-4">
+                            <input
+                                type="text"
+                                placeholder="Enter citation (e.g., 347 U.S. 483)"
+                                className="w-full bg-black border border-halo-border rounded-lg px-3 py-2 focus:ring-1 focus:ring-amber-500 outline-none text-halo-text"
+                                id="shep-input"
+                            />
+                            <button
+                                onClick={async () => {
+                                    const input = (document.getElementById('shep-input') as HTMLInputElement).value;
+                                    if (!input) return;
+                                    setLoading(true);
+                                    try {
+                                        const res = await endpoints.research.shepardizeCase(input);
+                                        alert(`Status: ${res.data.status}\nReasoning: ${res.data.reasoning}`);
+                                    } catch (e: any) {
+                                        setError(e.message);
+                                    } finally {
+                                        setLoading(false);
+                                    }
+                                }}
+                                disabled={loading}
+                                className="w-full bg-amber-600/20 hover:bg-amber-600/40 border border-amber-500/50 text-amber-400 px-4 py-2 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
+                            >
+                                {loading ? <Loader2 className="animate-spin w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                                Check Citation
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Judge Profiler */}
+                    <div className="halo-card border-halo-border bg-halo-card p-6 rounded-xl border">
+                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-pink-400">
+                            <Scale className="w-5 h-5" />
+                            Judge Profiler
+                        </h3>
+                        <p className="text-sm text-halo-muted mb-4">Analyze ruling tendencies and judicial philosophy.</p>
+                        <div className="space-y-4">
+                            <input
+                                type="text"
+                                placeholder="Judge Name"
+                                className="w-full bg-black border border-halo-border rounded-lg px-3 py-2 focus:ring-1 focus:ring-pink-500 outline-none text-halo-text"
+                                id="judge-name"
+                            />
+                            <input
+                                type="text"
+                                placeholder="Jurisdiction"
+                                className="w-full bg-black border border-halo-border rounded-lg px-3 py-2 focus:ring-1 focus:ring-pink-500 outline-none text-halo-text"
+                                id="judge-jur"
+                            />
+                            <button
+                                onClick={async () => {
+                                    const name = (document.getElementById('judge-name') as HTMLInputElement).value;
+                                    const jur = (document.getElementById('judge-jur') as HTMLInputElement).value;
+                                    if (!name || !jur) return;
+                                    setLoading(true);
+                                    try {
+                                        const res = await endpoints.research.profileJudge(name, jur);
+                                        alert(`Judge: ${res.data.judge_name}\nBio: ${res.data.biography}`);
+                                    } catch (e: any) {
+                                        setError(e.message);
+                                    } finally {
+                                        setLoading(false);
+                                    }
+                                }}
+                                disabled={loading}
+                                className="w-full bg-pink-600/20 hover:bg-pink-600/40 border border-pink-500/50 text-pink-400 px-4 py-2 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
+                            >
+                                {loading ? <Loader2 className="animate-spin w-4 h-4" /> : <Search className="w-4 h-4" />}
+                                Generate Profile
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

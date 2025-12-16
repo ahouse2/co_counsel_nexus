@@ -61,31 +61,24 @@ services:
     networks:
       - backend
     volumes:
-      # - ./backend:/src/backend
-      # - ./data:/data
-
-      - voice_models:/models
-      - storage_documents:/var/cocounsel/documents
-      - storage_graphs:/var/cocounsel/graphs
-      - storage_telemetry:/var/cocounsel/telemetry
-      - models_huggingface:/var/cocounsel/models/huggingface
-      - models_whisper:/var/cocounsel/models/whisper
-      - models_tts:/var/cocounsel/models/tts
-      # - ./backend:/src/backend # Disabled due to volume mount issues
+      - ./backend:/src/backend
+      - ./:/src/repo
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    command: [ "tail", "-f", "/dev/null" ]
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 12G
+          cpus: '4'
+          memory: 16G
         reservations:
-          cpus: '0.5'
-          memory: 2G
+          cpus: '1'
+          memory: 4G
 
   frontend:
     build:
@@ -146,6 +139,15 @@ services:
     networks:
       - backend
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+
   stt:
     image: fedirz/faster-whisper-server:latest-cuda
     runtime: runc
@@ -193,16 +195,15 @@ services:
       # - ./var/audio:/output  # Commented out - causing mount path error
     networks:
       - backend
-
-  otel-collector:
-    build:
-      context: ./infra
-      dockerfile: Dockerfile.otel
-    ports:
-      - "4317:4317"
-      - "9464:9464"
-    networks:
-      - backend
+  # otel-collector:
+  #   build:
+  #     context: ./infra
+  #     dockerfile: Dockerfile.otel
+  #   ports:
+  #     - "4317:4317"
+  #     - "9464:9464"
+  #   networks:
+  #     - backend
   # Temporarily disabled due to Windows Docker Desktop mount path issues
   # storage-backup:
   #   image: ghcr.io/offen/docker-volume-backup:latest
@@ -227,6 +228,7 @@ volumes:
 
   voice_models:
   postgres_data:
+  redis_data:
   storage_documents:
   storage_graphs:
   storage_telemetry:

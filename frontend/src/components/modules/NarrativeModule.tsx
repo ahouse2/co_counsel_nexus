@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BookOpen, RefreshCw, AlertTriangle } from 'lucide-react';
-import api from '../../services/api';
+import { endpoints as api } from '../../services/api';
 
 interface Contradiction {
   id: string;
@@ -21,7 +21,7 @@ export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActi
   const [narrative, setNarrative] = useState<string>("");
   const [contradictions, setContradictions] = useState<Contradiction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'narrative' | 'contradictions'>('narrative');
+  const [activeTab, setActiveTab] = useState<'narrative' | 'contradictions' | 'branching' | 'story_arc'>('narrative');
 
   const fetchNarrative = async () => {
     setIsLoading(true);
@@ -42,6 +42,39 @@ export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActi
       setContradictions(res.data);
     } catch (error) {
       console.error("Failed to fetch contradictions", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Branching Narrative State
+  const [branching, setBranching] = useState<any | null>(null);
+  const [pivotPoint, setPivotPoint] = useState('');
+  const [altFact, setAltFact] = useState('');
+
+  const fetchBranching = async () => {
+    if (!pivotPoint || !altFact) return;
+    setIsLoading(true);
+    try {
+      const res = await api.timeline.narrative.branching(caseId, pivotPoint, altFact);
+      setBranching(res.data);
+    } catch (error) {
+      console.error("Failed to fetch branching narrative", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Story Arc State
+  const [storyArc, setStoryArc] = useState<any | null>(null);
+
+  const fetchStoryArc = async () => {
+    setIsLoading(true);
+    try {
+      const res = await api.timeline.narrative.storyArc(caseId);
+      setStoryArc(res.data);
+    } catch (error) {
+      console.error("Failed to fetch story arc", error);
     } finally {
       setIsLoading(false);
     }
@@ -95,6 +128,24 @@ export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActi
               {contradictions.length}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setActiveTab('branching')}
+          className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'branching'
+            ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50'
+            : 'hover:bg-slate-800 text-slate-400'
+            }`}
+        >
+          Branching Narratives
+        </button>
+        <button
+          onClick={() => { setActiveTab('story_arc'); fetchStoryArc(); }}
+          className={`px-4 py-2 rounded-lg transition-all ${activeTab === 'story_arc'
+            ? 'bg-green-500/20 text-green-300 border border-green-500/50'
+            : 'hover:bg-slate-800 text-slate-400'
+            }`}
+        >
+          Story Arc
         </button>
       </div>
 

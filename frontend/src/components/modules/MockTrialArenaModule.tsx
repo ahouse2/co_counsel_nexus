@@ -1,14 +1,43 @@
 import { useState, useEffect, useRef } from 'react';
 import { Gavel, Users, Play, Brain, Sword, Shield } from 'lucide-react';
 import { endpoints } from '../../services/api';
+import { VoiceConsole } from '../voice/VoiceConsole';
 
 interface SimulationStep {
     id: string;
-    role: 'prosecution' | 'defense' | 'judge';
+    role: 'prosecution' | 'defense' | 'judge' | 'opposing_counsel';
+    type?: 'statement' | 'objection' | 'ruling';
     content: string;
     tool?: string;
     timestamp: number;
+    jury_reactions?: any[];
+    data?: any;
 }
+
+const JuryHeatmap = ({ reactions }: { reactions: any[] }) => {
+    if (!reactions || reactions.length === 0) return null;
+    return (
+        <div className="flex gap-2 mt-3 bg-black/40 p-2 rounded-lg border border-white/5 w-fit">
+            <span className="text-[10px] text-halo-muted uppercase tracking-wider self-center mr-2">Jury Reaction</span>
+            {reactions.map((r, i) => (
+                <div key={i} className="relative group cursor-help">
+                    <div
+                        className={`w-3 h-3 rounded-full transition-all duration-500 ${r.sentiment_score > 0.6 ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' :
+                            r.sentiment_score < 0.4 ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]' :
+                                'bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.6)]'
+                            }`}
+                    />
+                    {/* Tooltip */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-slate-900 border border-halo-border p-3 rounded-lg text-xs w-48 z-50 shadow-xl pointer-events-none">
+                        <div className="font-bold text-halo-cyan mb-1">Juror {i + 1} ({Math.round(r.sentiment_score * 100)}%)</div>
+                        <div className="text-white mb-1">{r.reaction}</div>
+                        <div className="text-halo-muted italic">"{r.internal_thought}"</div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+};
 
 export function MockTrialArenaModule() {
     const [activeSimulation, setActiveSimulation] = useState(false);
@@ -21,6 +50,9 @@ export function MockTrialArenaModule() {
     const [showOpposingConfig, setShowOpposingConfig] = useState(false);
     const [juryDemographics, setJuryDemographics] = useState({ education: 'Mixed', age: '30-50', bias: 'Neutral' });
     const [opposingStyle, setOpposingStyle] = useState('Aggressive');
+
+    // Juror Chat State
+    const [activeJurorChat, setActiveJurorChat] = useState(false);
 
     useEffect(() => {
         // Fetch case context on mount
@@ -108,6 +140,46 @@ export function MockTrialArenaModule() {
         }
     }, [simulationSteps]);
 
+    if (activeJurorChat) {
+        return (
+            <div className="flex-1 flex flex-col h-full bg-black/80 relative">
+                {/* Header */}
+                <div className="p-4 border-b border-halo-border bg-halo-bg/50 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <Users className="text-halo-cyan" />
+                        <div>
+                            <span className="font-mono text-sm uppercase tracking-wider text-halo-text block">Juror Persona Chat</span>
+                            <span className="text-xs text-halo-muted">
+                                {juryDemographics.education} • {juryDemographics.age} • {juryDemographics.bias}
+                            </span>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => setActiveJurorChat(false)}
+                        className="text-xs text-halo-muted hover:text-white uppercase tracking-wider"
+                    >
+                        End Chat
+                    </button>
+                </div>
+
+                {/* Voice Console Integration */}
+                <div className="flex-1 flex items-center justify-center p-6">
+                    <div className="w-full max-w-2xl space-y-8">
+                        <div className="text-center">
+                            <h3 className="text-2xl font-light text-halo-text mb-2">Voice Interface Active</h3>
+                            <p className="text-halo-muted">Speak naturally to argue your case. The jury is listening.</p>
+                        </div>
+
+                        <VoiceConsole caseId="simulation" personaId="juror_composite" />
+
+                        {/* Transcript / History Display could go here if needed, 
+                            but VoiceConsole handles the immediate interaction */}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     if (!activeSimulation) {
         return (
             <div className="flex-1 flex items-center justify-center p-6 h-full relative">
@@ -129,6 +201,16 @@ export function MockTrialArenaModule() {
                             <div className="text-center">
                                 <span className="block text-sm uppercase tracking-wider font-bold text-halo-text">Jury Selection</span>
                                 <span className="text-xs text-halo-muted mt-1">Configure Demographics</span>
+                            </div>
+                        </button>
+                        <button
+                            onClick={() => setActiveJurorChat(true)}
+                            className="halo-card hover:bg-halo-cyan/10 transition-all group py-8 flex flex-col items-center gap-4"
+                        >
+                            <Brain className="text-halo-cyan group-hover:scale-110 transition-transform" size={32} />
+                            <div className="text-center">
+                                <span className="block text-sm uppercase tracking-wider font-bold text-halo-text">Juror Chat</span>
+                                <span className="text-xs text-halo-muted mt-1">Test Arguments (Voice)</span>
                             </div>
                         </button>
                         <button
@@ -254,31 +336,50 @@ export function MockTrialArenaModule() {
             {/* Simulation Stream */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar" ref={scrollRef}>
                 {simulationSteps.map((step) => (
-                    <div key={step.id} className={`flex gap-4 ${step.role === 'judge' ? 'justify-center' : ''} animate-in fade-in slide-in-from-bottom-2`}>
-                        {step.role !== 'judge' && (
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 
-                                ${step.role === 'prosecution' ? 'bg-red-500/10 text-red-500 border border-red-500/30' : 'bg-blue-500/10 text-blue-500 border border-blue-500/30'}`}>
-                                {step.role === 'prosecution' ? <Sword size={20} /> : <Shield size={20} />}
+                    <div key={step.id} className={`flex gap-4 ${step.role === 'judge' || step.type === 'objection' ? 'justify-center' : ''} animate-in fade-in slide-in-from-bottom-2`}>
+                        {step.type === 'objection' ? (
+                            <div className="w-full max-w-2xl my-4 animate-in zoom-in duration-300">
+                                <div className="bg-red-950/40 border-2 border-red-500/50 px-8 py-6 rounded-xl relative overflow-hidden backdrop-blur-sm">
+                                    <div className="absolute inset-0 bg-red-500/5 animate-pulse" />
+                                    <h3 className="text-3xl font-black text-red-500 uppercase tracking-widest relative z-10 flex items-center justify-center gap-4 mb-2">
+                                        <Gavel size={32} /> Objection!
+                                    </h3>
+                                    <p className="text-red-200 text-center font-mono relative z-10 text-lg">{step.content.replace("Objection! ", "")}</p>
+                                </div>
                             </div>
+                        ) : (
+                            <>
+                                {step.role !== 'judge' && (
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 
+                                        ${step.role === 'prosecution' ? 'bg-red-500/10 text-red-500 border border-red-500/30' :
+                                            step.role === 'opposing_counsel' ? 'bg-red-500/10 text-red-500 border border-red-500/30' :
+                                                'bg-blue-500/10 text-blue-500 border border-blue-500/30'}`}>
+                                        {step.role === 'prosecution' || step.role === 'opposing_counsel' ? <Sword size={20} /> : <Shield size={20} />}
+                                    </div>
+                                )}
+
+                                <div className={`max-w-3xl ${step.role === 'judge' ? 'w-full' : ''}`}>
+                                    <div className={`mb-1 flex items-center gap-2 ${step.role === 'judge' ? 'justify-center' : ''}`}>
+                                        <span className={`text-xs font-bold uppercase tracking-wider 
+                                            ${step.role === 'prosecution' || step.role === 'opposing_counsel' ? 'text-red-500' :
+                                                step.role === 'defense' ? 'text-blue-500' : 'text-yellow-500'}`}>
+                                            {step.role === 'opposing_counsel' ? 'Opposing Counsel' : step.role}
+                                        </span>
+                                        <span className="text-[10px] text-halo-muted">{new Date(step.timestamp).toLocaleTimeString()}</span>
+                                    </div>
+
+                                    <div className={`p-4 rounded border ${step.role === 'judge'
+                                        ? 'bg-yellow-500/5 border-yellow-500/20 text-center'
+                                        : 'bg-halo-card border-halo-border'}`}>
+                                        {step.role === 'judge' && <Gavel className="mx-auto mb-2 text-yellow-500" size={24} />}
+                                        <p className="text-halo-text leading-relaxed whitespace-pre-wrap">{step.content}</p>
+
+                                        {/* Render Jury Heatmap if reactions exist */}
+                                        {step.jury_reactions && <JuryHeatmap reactions={step.jury_reactions} />}
+                                    </div>
+                                </div>
+                            </>
                         )}
-
-                        <div className={`max-w-3xl ${step.role === 'judge' ? 'w-full' : ''}`}>
-                            <div className={`mb-1 flex items-center gap-2 ${step.role === 'judge' ? 'justify-center' : ''}`}>
-                                <span className={`text-xs font-bold uppercase tracking-wider 
-                                    ${step.role === 'prosecution' ? 'text-red-500' :
-                                        step.role === 'defense' ? 'text-blue-500' : 'text-yellow-500'}`}>
-                                    {step.role}
-                                </span>
-                                <span className="text-[10px] text-halo-muted">{new Date(step.timestamp).toLocaleTimeString()}</span>
-                            </div>
-
-                            <div className={`p-4 rounded border ${step.role === 'judge'
-                                ? 'bg-yellow-500/5 border-yellow-500/20 text-center'
-                                : 'bg-halo-card border-halo-border'}`}>
-                                {step.role === 'judge' && <Gavel className="mx-auto mb-2 text-yellow-500" size={24} />}
-                                <p className="text-halo-text leading-relaxed">{step.content}</p>
-                            </div>
-                        </div>
                     </div>
                 ))}
             </div>

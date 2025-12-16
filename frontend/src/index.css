@@ -29,3 +29,17 @@
         box-shadow: 0 0 6px rgba(0, 240, 255, 0.3);
     }
 }
+
+@layer utilities {
+    .animate-delay-0 {
+        animation-delay: 0ms;
+    }
+
+    .animate-delay-150 {
+        animation-delay: 150ms;
+    }
+
+    .animate-delay-300 {
+        animation-delay: 300ms;
+    }
+}

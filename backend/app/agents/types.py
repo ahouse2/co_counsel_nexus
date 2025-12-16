@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 
@@ -73,4 +73,28 @@ class AgentThread:
             "telemetry": self.telemetry,
             "errors": [error.to_dict() if hasattr(error, "to_dict") else error for error in self.errors],
             "memory": self.memory,
+        }
+@dataclass(slots=True)
+class AgentMessage:
+    """Standardized message format for inter-agent communication."""
+    
+    message_id: str
+    sender: str
+    recipient: str
+    intent: str  # e.g., "REQUEST_INFO", "PROVIDE_CONTEXT", "TASK_ASSIGNMENT"
+    payload: Dict[str, Any]
+    context: Dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    correlation_id: str | None = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "message_id": self.message_id,
+            "sender": self.sender,
+            "recipient": self.recipient,
+            "intent": self.intent,
+            "payload": self.payload,
+            "context": self.context,
+            "timestamp": self.timestamp.isoformat(),
+            "correlation_id": self.correlation_id,
         }

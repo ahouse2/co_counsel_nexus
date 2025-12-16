@@ -9,7 +9,7 @@ __all__ = ["MicrosoftAgentsOrchestrator", "get_orchestrator"]
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-__all__ = ["AdaptiveAgentsOrchestrator", "get_orchestrator"]
+__all__ = ["AdaptiveAgentsOrchestrator", "get_orchestrator", "CommunicationsOfficerAgent", "get_communications_officer"]
 
 
 if TYPE_CHECKING:  # pragma: no cover - import only for static analysis
@@ -19,5 +19,11 @@ if TYPE_CHECKING:  # pragma: no cover - import only for static analysis
 def __getattr__(name: str) -> Any:  # pragma: no cover - thin proxy
     if name in {"AdaptiveAgentsOrchestrator", "get_orchestrator"}:
         module = import_module(".runner", __name__)
+        return getattr(module, name)
+    if name == "CommunicationsOfficerAgent":
+        module = import_module(".communications_officer", __name__)
+        return getattr(module, name)
+    if name == "get_communications_officer":
+        module = import_module(".communications_officer", __name__)
         return getattr(module, name)
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

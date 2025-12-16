@@ -58,6 +58,7 @@ pybreaker>=1.0.0
 locust
 eth-typing>=4.2.0
 web3>=6.20.0 # Added for Ethereum blockchain interaction
+redis>=5.0.0 # Added for Message Bus
 
 beautifulsoup4==4.12.3 # Added for web scraping
 lxml==5.2.2 # Added for parsing HTML and XML

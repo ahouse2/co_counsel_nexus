@@ -12,9 +12,9 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({ analysisResult, on
     const tamperDetails = analysisResult.tamper_score?.details;
     const tamperFlags = analysisResult.tamper_score?.flags || [];
 
-    const ela = analysisResult.ela;
+    const ela = analysisResult.ela_analysis;
     const clone = analysisResult.clone_splicing_detection;
-    const font = analysisResult.font_object_analysis;
+    const font = analysisResult.pdf_structure_analysis;
     const scan = analysisResult.anti_scan_alter_rescan;
     const verdict = analysisResult.overall_verdict || "UNKNOWN";
 
@@ -107,18 +107,43 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({ analysisResult, on
                             </div>
                         )}
 
-                        {/* Font Analysis */}
+                        {/* PDF Structure Analysis */}
                         {font && (
                             <div className="bg-black/30 p-4 rounded border border-white/5">
                                 <h4 className="text-sm text-purple-300 uppercase mb-3 flex items-center gap-2">
-                                    <Type size={16} /> Font & Object Analysis
+                                    <Type size={16} /> PDF Structure & Metadata
                                 </h4>
                                 <div className="space-y-2 text-sm">
                                     <div className="flex justify-between">
                                         <span className="text-halo-muted">Inconsistencies</span>
                                         <span className={font.inconsistencies_detected ? "text-red-400" : "text-green-400"}>{font.inconsistencies_detected ? "YES" : "NO"}</span>
                                     </div>
-                                    <p className="text-xs text-halo-muted leading-relaxed">{font.details}</p>
+
+                                    {font.incremental_updates_detected && (
+                                        <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/10 p-1 rounded">
+                                            <AlertTriangle size={10} /> Incremental Updates Detected
+                                        </div>
+                                    )}
+
+                                    {font.metadata_inconsistencies?.length > 0 && (
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-red-400 font-semibold">Metadata Mismatches:</p>
+                                            {font.metadata_inconsistencies.map((m: string, i: number) => (
+                                                <div key={i} className="text-xs text-red-300 pl-2 border-l-2 border-red-500/30">{m}</div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {font.suspicious_tags?.length > 0 && (
+                                        <div className="space-y-1">
+                                            <p className="text-xs text-red-400 font-semibold">Suspicious Tags:</p>
+                                            {font.suspicious_tags.map((t: string, i: number) => (
+                                                <div key={i} className="text-xs text-red-300 pl-2 border-l-2 border-red-500/30">{t}</div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <p className="text-xs text-halo-muted leading-relaxed mt-2">{font.details}</p>
                                     {font.anomalies?.map((a: string, i: number) => (
                                         <div key={i} className="text-xs text-red-300 bg-red-500/5 p-1 rounded mt-1">{a}</div>
                                     ))}
@@ -137,6 +162,16 @@ export const MetadataPanel: React.FC<MetadataPanelProps> = ({ analysisResult, on
                                         <span className="text-halo-muted">Rescan Detected</span>
                                         <span className={scan.detected ? "text-red-400" : "text-green-400"}>{scan.detected ? "YES" : "NO"}</span>
                                     </div>
+                                    {scan.moire_detected && (
+                                        <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/10 p-1 rounded">
+                                            <AlertTriangle size={10} /> Moiré Patterns (Double Halftoning)
+                                        </div>
+                                    )}
+                                    {scan.digital_overlays_detected && (
+                                        <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/10 p-1 rounded">
+                                            <AlertTriangle size={10} /> Digital Overlays (Zero Noise)
+                                        </div>
+                                    )}
                                     <p className="text-xs text-halo-muted leading-relaxed">{scan.details}</p>
                                 </div>
                             </div>

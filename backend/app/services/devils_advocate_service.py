@@ -84,7 +84,9 @@ class DevilsAdvocateService:
         
         # 3. Call LLM
         try:
+            logger.info("Devil's Advocate calling LLM for review...")
             response_text = await self.llm_service.generate_text(prompt)
+            logger.info(f"Devil's Advocate LLM response received (Length: {len(response_text)})")
             
             # Clean JSON
             response_text = response_text.strip()
@@ -95,7 +97,11 @@ class DevilsAdvocateService:
                 
             import json
             import uuid
-            data = json.loads(response_text)
+            try:
+                data = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from Devil's Advocate LLM: {e}. Response: {response_text}")
+                return []
             
             weaknesses = []
             for item in data:
@@ -107,7 +113,8 @@ class DevilsAdvocateService:
                     suggested_rebuttal=item.get("suggested_rebuttal", ""),
                     related_evidence_ids=item.get("related_evidence_ids", [])
                 ))
-                
+            
+            logger.info(f"Devil's Advocate found {len(weaknesses)} weaknesses.")
             return weaknesses
         except Exception as e:
             logger.error(f"Devil's Advocate review failed: {e}")

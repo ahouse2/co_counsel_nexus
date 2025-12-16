@@ -24,6 +24,13 @@ class CrossExamQuestion:
     difficulty: str
     expected_answer_type: str
 
+@dataclass
+class Objection:
+    is_objection: bool
+    basis: str
+    explanation: str
+    likelihood_of_success: float
+
 class OpposingCounselAgent:
     """
     Agent that simulates an adversarial opposing counsel.
@@ -32,6 +39,50 @@ class OpposingCounselAgent:
 
     def __init__(self, llm_service: Any) -> None:
         self.llm_service = llm_service
+
+    def check_objection(
+        self, 
+        statement: str, 
+        context: AgentContext
+    ) -> Objection:
+        """
+        Checks if a statement or question is objectionable.
+        """
+        prompt = f"""
+        You are an opposing counsel monitoring the court proceedings.
+        Determine if the following statement/question is objectionable.
+        
+        STATEMENT:
+        "{statement}"
+        
+        Common Objections: Hearsay, Leading Question, Relevance, Speculation, Argumentative, Asked and Answered.
+        
+        TASK:
+        1. Decide if an objection is warranted.
+        2. Identify the legal basis.
+        3. Estimate likelihood of judge sustaining it (0.0-1.0).
+        
+        OUTPUT FORMAT (JSON):
+        {{
+            "is_objection": true/false,
+            "basis": "Hearsay",
+            "explanation": "The witness is testifying to an out-of-court statement...",
+            "likelihood_of_success": 0.8
+        }}
+        """
+        
+        try:
+            response = self.llm_service.complete(prompt)
+            data = self._parse_json(response.text)
+            return Objection(
+                is_objection=data.get("is_objection", False),
+                basis=data.get("basis", ""),
+                explanation=data.get("explanation", ""),
+                likelihood_of_success=float(data.get("likelihood_of_success", 0.0))
+            )
+        except Exception as e:
+            print(f"Error checking objection: {e}")
+            return Objection(False, "", "", 0.0)
 
     def generate_counter_arguments(
         self, 

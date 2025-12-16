@@ -126,7 +126,9 @@ class NarrativeService:
         
         # 3. Call LLM
         try:
+            logger.info("Calling LLM for contradiction detection...")
             response_text = await self.llm_service.generate_text(prompt)
+            logger.info(f"LLM response received (Length: {len(response_text)})")
             
             # Clean up response to ensure it's valid JSON
             response_text = response_text.strip()
@@ -137,7 +139,11 @@ class NarrativeService:
             
             import json
             import uuid
-            data = json.loads(response_text)
+            try:
+                data = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from LLM: {e}. Response: {response_text}")
+                return []
             
             contradictions = []
             for item in data:
@@ -150,6 +156,7 @@ class NarrativeService:
                     severity=item.get("severity", "medium")
                 ))
                 
+            logger.info(f"Detected {len(contradictions)} contradictions.")
             return contradictions
             
         except Exception as e:

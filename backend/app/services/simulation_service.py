@@ -17,8 +17,17 @@ class SimulationService:
         """
         from backend.app.agents.opposing_counsel import OpposingCounselAgent
         from backend.app.agents.context import AgentContext
+        from backend.app.services.jury_sentiment import get_jury_sentiment_service, JurorPersona
         
         opposing_counsel = OpposingCounselAgent(self.llm_service)
+        jury_service = get_jury_sentiment_service()
+        
+        # Default Jurors if not provided
+        jurors = [
+            JurorPersona("j1", "Juror 1", "College Educated, 30s", "Teacher", "Liberal", "Empathetic"),
+            JurorPersona("j2", "Juror 2", "High School, 50s", "Mechanic", "Conservative", "Skeptical"),
+            JurorPersona("j3", "Juror 3", "Post-Grad, 40s", "Accountant", "Moderate", "Logical"),
+        ]
         
         simulation_log = []
         current_state = {"turn": 0, "agent_statement": scenario.get("initial_statement", "")}
@@ -30,19 +39,54 @@ class SimulationService:
             # Agent's turn (simulated by LLM based on objectives)
             agent_prompt = f"You are the {scenario['agent_role']}. The case brief is: {scenario['case_brief']}. Your objectives are: {', '.join(scenario['objectives'])}. Current simulation state: {json.dumps(current_state)}. What is your next statement or action?"
             agent_response = await self.llm_service.generate_text(agent_prompt)
-            simulation_log.append({"role": scenario['agent_role'], "statement": agent_response})
+            
+            # Analyze Agent Statement with Jury
+            agent_jury_reactions = await jury_service.simulate_individual_jurors(agent_response, jurors)
+            
+            simulation_log.append({
+                "role": scenario['agent_role'], 
+                "statement": agent_response,
+                "jury_reactions": [r.__dict__ for r in agent_jury_reactions]
+            })
             current_state["agent_statement"] = agent_response
             
-            # Opposing counsel's turn using the specialized agent
+            # Check for Objection
             # We create a dummy context for now
             context = AgentContext(
                 case_id="simulation",
                 question=agent_response,
+                top_k=5,
                 actor={"id": "simulation", "roles": ["user"]},
                 memory=None, # type: ignore
                 telemetry={}
             )
             
+            objection = opposing_counsel.check_objection(agent_response, context)
+            
+            if objection.is_objection and objection.likelihood_of_success > 0.6:
+                simulation_log.append({
+                    "role": "opposing_counsel",
+                    "type": "objection",
+                    "content": f"Objection! {objection.basis}. {objection.explanation}",
+                    "data": objection.__dict__
+                })
+                
+                # Simulate Judge Ruling
+                judge_prompt = f"You are the judge. Opposing counsel objected: '{objection.basis}: {objection.explanation}'. The statement was: '{agent_response}'. Rule on the objection (Sustained/Overruled) and briefly explain."
+                judge_ruling = await self.llm_service.generate_text(judge_prompt)
+                
+                simulation_log.append({
+                    "role": "judge",
+                    "type": "ruling",
+                    "content": judge_ruling
+                })
+                
+                if "sustained" in judge_ruling.lower():
+                    # If sustained, maybe agent needs to rephrase? For now, we just continue but note it.
+                    current_state["last_ruling"] = "Sustained"
+                    continue # Skip opposing counsel's normal response if objection sustained (simplified flow)
+            
+            # Opposing counsel's turn using the specialized agent
             # Use generate_counter_arguments to formulate a response strategy
             counter_args = opposing_counsel.generate_counter_arguments(
                 argument=agent_response,
@@ -66,10 +110,14 @@ class SimulationService:
             """
             opposing_counsel_response = await self.llm_service.generate_text(opposing_counsel_prompt)
             
+            # Analyze Opposing Counsel Statement with Jury
+            oc_jury_reactions = await jury_service.simulate_individual_jurors(opposing_counsel_response, jurors)
+            
             simulation_log.append({
                 "role": "opposing_counsel", 
                 "statement": opposing_counsel_response,
-                "internal_strategy": [ca.__dict__ for ca in counter_args]
+                "internal_strategy": [ca.__dict__ for ca in counter_args],
+                "jury_reactions": [r.__dict__ for r in oc_jury_reactions]
             })
             current_state["opposing_counsel_statement"] = opposing_counsel_response
             
@@ -111,3 +159,35 @@ class SimulationService:
             pass # LLM didn't return JSON, proceed with raw text
 
         return {"compliant": "unknown", "reasoning": compliance_check}
+
+    async def chat_with_juror(self, juror_profile: Dict[str, Any], chat_history: List[Dict[str, str]], user_message: str, case_context: str) -> str:
+        """
+        Simulates a chat with a specific juror persona.
+        """
+        system_prompt = f"""
+You are a virtual juror in a mock trial.
+Your profile is:
+- Education: {juror_profile.get('education', 'Unknown')}
+- Age: {juror_profile.get('age', 'Unknown')}
+- Bias/Leanings: {juror_profile.get('bias', 'Neutral')}
+- Occupation: {juror_profile.get('occupation', 'Unknown')}
+
+CASE CONTEXT:
+{case_context}
+
+INSTRUCTIONS:
+1. Adopt the persona described above completely. Use appropriate vocabulary and tone.
+2. React to the user's arguments based on your profile and bias.
+3. Be honest about your impressions. If an argument is confusing or unconvincing, say so.
+4. Keep responses relatively concise (1-3 sentences) unless asked to elaborate.
+5. Do NOT break character. You are the juror.
+
+CHAT HISTORY:
+"""
+        for msg in chat_history[-5:]: # Keep last 5 turns for context
+            system_prompt += f"{msg['role'].upper()}: {msg['content']}\n"
+            
+        system_prompt += f"USER (Attorney): {user_message}\nJUROR:"
+        
+        response = await self.llm_service.generate_text(system_prompt)
+        return response.strip()

@@ -18,6 +18,8 @@ import { TrialBinderModule } from './modules/TrialBinderModule';
 import { ClassificationStationModule } from './modules/ClassificationStationModule';
 import { NarrativeModule } from './modules/NarrativeModule';
 import { DevilsAdvocateModule } from './modules/DevilsAdvocateModule';
+import { DashboardModule } from './modules/DashboardModule';
+import { CommandPalette } from './ui/CommandPalette';
 
 export function DashboardHub() {
     const { activeModule } = useHalo();
@@ -26,6 +28,8 @@ export function DashboardHub() {
         switch (activeModule) {
             case 'graph':
                 return null;
+            case 'dashboard':
+                return <DashboardModule />;
             case 'theory':
                 return <LegalTheoryModule />;
             case 'forensics':
@@ -59,12 +63,14 @@ export function DashboardHub() {
             case 'devils_advocate':
                 return <DevilsAdvocateModule caseId="default_case" isActive={activeModule === 'devils_advocate'} />;
             default:
-                return null;
+                return <DashboardModule />;
         }
     };
 
     return (
         <div className="relative w-screen h-screen bg-black overflow-hidden text-halo-text font-sans selection:bg-halo-cyan/30 selection:text-white">
+            <CommandPalette />
+
             {/* Background Graph Layer */}
             <div className="absolute inset-0 z-0">
                 <HaloGraph />

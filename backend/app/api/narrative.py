@@ -42,3 +42,59 @@ async def detect_case_contradictions(
     """
     contradictions = await service.detect_contradictions(case_id)
     return contradictions
+
+class BranchingNarrativeRequest(BaseModel):
+    pivot_point: str
+    alternative_fact: str
+
+class BranchingNarrativeResponse(BaseModel):
+    scenario_id: str
+    narrative: str
+    implications: List[str]
+
+@router.post("/{case_id}/branching", response_model=BranchingNarrativeResponse)
+async def generate_branching_narrative(
+    case_id: str,
+    request: BranchingNarrativeRequest,
+    service: NarrativeService = Depends(get_narrative_service)
+):
+    """
+    Generates an alternative narrative based on a "what if" scenario.
+    """
+    # Mock logic
+    return BranchingNarrativeResponse(
+        scenario_id="scenario_1",
+        narrative=f"If {request.alternative_fact}, then the timeline shifts significantly. The defendant's alibi becomes credible...",
+        implications=[
+            "Weakens prosecution's timeline",
+            "Requires re-evaluation of witness testimony A",
+            "Opens new line of inquiry regarding the security footage"
+        ]
+    )
+
+class StoryArcPoint(BaseModel):
+    timestamp: str
+    event: str
+    tension_level: float # 0.0 to 1.0
+
+class StoryArcResponse(BaseModel):
+    points: List[StoryArcPoint]
+
+@router.get("/{case_id}/story_arc", response_model=StoryArcResponse)
+async def get_story_arc(
+    case_id: str,
+    service: NarrativeService = Depends(get_narrative_service)
+):
+    """
+    Returns data points for visualizing the narrative arc (tension/drama over time).
+    """
+    # Mock logic
+    return StoryArcResponse(
+        points=[
+            StoryArcPoint(timestamp="2023-01-01", event="Initial Meeting", tension_level=0.2),
+            StoryArcPoint(timestamp="2023-02-15", event="Contract Signed", tension_level=0.3),
+            StoryArcPoint(timestamp="2023-06-10", event="First Breach", tension_level=0.6),
+            StoryArcPoint(timestamp="2023-08-20", event="Confrontation", tension_level=0.9),
+            StoryArcPoint(timestamp="2023-09-01", event="Lawsuit Filed", tension_level=0.8)
+        ]
+    )

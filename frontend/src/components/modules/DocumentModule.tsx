@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, Search, Filter, Upload, Loader2, File, FolderUp, Terminal, Play, Pause, X, Download, Import, RefreshCw, ShieldCheck, List, Trash2 } from 'lucide-react';
 import ForceGraph2D from 'react-force-graph-2d';
+import ForceGraph3D from 'react-force-graph-3d';
 import { endpoints } from '../../services/api';
 import { useHalo } from '../../context/HaloContext';
 import { useUploadManager } from '../../hooks/useUploadManager';
@@ -55,6 +56,108 @@ const DocumentGraph = ({ docId, caseId }: { docId: string, caseId: string }) => 
     );
 };
 
+const EntitiesView = ({ docId }: { docId: string }) => {
+    const [data, setData] = useState<{ entities: any[], keywords: string[] } | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const res = await endpoints.documents.getEntities(docId);
+                setData(res.data);
+            } catch (e) {
+                console.error(e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, [docId]);
+
+    if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-halo-cyan" /></div>;
+    if (!data) return <div className="text-center p-8 text-halo-muted">No entities found.</div>;
+
+    return (
+        <div className="w-full h-full p-4 overflow-auto custom-scrollbar">
+            <h3 className="text-lg font-semibold text-halo-cyan mb-4">Extracted Entities</h3>
+            <div className="space-y-4">
+                {data.entities && data.entities.length > 0 ? (
+                    <div className="grid gap-2">
+                        {data.entities.map((e: any, i: number) => (
+                            <div key={i} className="p-2 bg-halo-card/50 border border-halo-border rounded flex justify-between">
+                                <span className="text-halo-text">{e.name || e}</span>
+                                <span className="text-xs text-halo-muted uppercase">{e.type || 'Entity'}</span>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <p className="text-halo-muted">No named entities extracted.</p>
+                )}
+
+                <h3 className="text-lg font-semibold text-halo-cyan mt-6 mb-4">Keywords</h3>
+                <div className="flex flex-wrap gap-2">
+                    {data.keywords && data.keywords.map((k, i) => (
+                        <span key={i} className="px-2 py-1 bg-halo-cyan/10 text-halo-cyan rounded text-xs border border-halo-cyan/30">
+                            {k}
+                        </span>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const OCRView = ({ docId }: { docId: string }) => {
+    const [text, setText] = useState<string>("");
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchText = async () => {
+            try {
+                const res = await endpoints.documents.getOCR(docId);
+                setText(res.data.text);
+            } catch (e) {
+                console.error(e);
+                setText("Failed to load text.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchText();
+    }, [docId]);
+
+    const handleTriggerOCR = async () => {
+        setLoading(true);
+        try {
+            await endpoints.documents.triggerOCR(docId);
+            alert("OCR triggered. Check back later.");
+        } catch (e) {
+            alert("Failed to trigger OCR");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-halo-cyan" /></div>;
+
+    return (
+        <div className="w-full h-full p-4 flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold text-halo-cyan">OCR Text Content</h3>
+                <button
+                    onClick={handleTriggerOCR}
+                    className="px-3 py-1 bg-halo-cyan/20 text-halo-cyan border border-halo-cyan/50 rounded hover:bg-halo-cyan/40 transition-colors text-xs"
+                >
+                    Re-run OCR
+                </button>
+            </div>
+            <div className="flex-1 bg-black/30 border border-halo-border rounded p-4 overflow-auto custom-scrollbar font-mono text-sm text-halo-text whitespace-pre-wrap">
+                {text}
+            </div>
+        </div>
+    );
+};
+
 export function DocumentModule() {
     const { activeSubmodule, setActiveSubmodule } = useHalo();
 
@@ -80,7 +183,7 @@ export function DocumentModule() {
     const [uploading, setUploading] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
     const [syncMode, setSyncMode] = useState(false);
-    const [activeTab, setActiveTab] = useState<'preview' | 'graph'>('preview');
+    const [activeTab, setActiveTab] = useState<'preview' | 'graph' | 'entities' | 'ocr' | 'clustering'>('preview');
     const [logs, setLogs] = useState<string[]>([
         "[SYSTEM] Document Ingestion Pipeline Initialized",
         "[SYSTEM] Connected to Qdrant Vector Store",
@@ -324,7 +427,7 @@ export function DocumentModule() {
 
     // Sparkline Component
     const Sparkline = ({ data, width = 120, height = 40, color = "#00f0ff" }: { data: number[], width?: number, height?: number, color?: string }) => {
-        if (data.length < 2) return <div style={{ width, height }} className="bg-halo-card/30 rounded flex items-center justify-center text-[10px] text-halo-muted">WAITING FOR DATA</div>;
+        if (data.length < 2) return <div style={{ '--w': `${width}px`, '--h': `${height}px` } as React.CSSProperties} className="w-[var(--w)] h-[var(--h)] bg-halo-card/30 rounded flex items-center justify-center text-[10px] text-halo-muted">WAITING FOR DATA</div>;
 
         const max = Math.max(...data, 0.1); // Avoid div by zero
         const points = data.map((d, i) => {
@@ -514,12 +617,12 @@ export function DocumentModule() {
                                     </span>
                                     <div className="w-full h-1 bg-halo-card rounded-full overflow-hidden mt-1">
                                         <div
-                                            className="h-full bg-halo-cyan transition-all duration-300 ease-out"
+                                            className="h-full bg-halo-cyan transition-all duration-300 ease-out w-[var(--progress)]"
                                             style={{
-                                                width: `${uploadManager.state.totalFiles > 0
+                                                '--progress': `${uploadManager.state.totalFiles > 0
                                                     ? (uploadManager.state.completedFiles / uploadManager.state.totalFiles) * 100
                                                     : 0}%`
-                                            }}
+                                            } as React.CSSProperties}
                                         />
                                     </div>
                                 </div>
@@ -760,40 +863,25 @@ export function DocumentModule() {
                                         >
                                             Graph
                                         </button>
-                                    </div>
-                                </div>
-
-                                <div className="flex-1 overflow-auto custom-scrollbar flex items-center justify-center p-4">
-                                    {activeTab === 'preview' ? (
-                                        selectedDoc.content_type.startsWith('image/') ? (
-                                            /* Image Preview */
-                                            <img
-                                                src={`/api/documents/${selectedDoc.id}/preview`}
-                                                alt={selectedDoc.filename}
-                                                className="max-w-full max-h-full object-contain"
-                                            />
-                                        ) : selectedDoc.content_type.startsWith('text/') || selectedDoc.content_type === 'application/json' ? (
-                                            /* Text Preview */
-                                            <div className="p-4 font-mono text-sm text-halo-text w-full h-full overflow-auto custom-scrollbar bg-black/30">
-                                                <pre className="whitespace-pre-wrap break-words">Loading text preview...</pre>
-                                            </div>
-                                        ) : (
-                                            /* Fallback */
-                                            <div className="text-center space-y-4">
-                                                <File size={64} className="mx-auto text-halo-muted" />
+                                        <button
+                                            onClick={() => setActiveTab('entities')}
                                                 <p className="text-halo-text">Preview not available for {selectedDoc.content_type}</p>
-                                                <button
-                                                    onClick={() => window.open(`/api/documents/${selectedDoc.id}/download`, '_blank')}
-                                                    className="px-4 py-2 border border-halo-cyan text-halo-cyan rounded hover:bg-halo-cyan hover:text-black transition-colors"
-                                                >
-                                                    Download to View
-                                                </button>
-                                            </div>
-                                        )
+                                        <button
+                                            onClick={() => window.open(`/api/documents/${selectedDoc.id}/download`, '_blank')}
+                                            className="px-4 py-2 border border-halo-cyan text-halo-cyan rounded hover:bg-halo-cyan hover:text-black transition-colors"
+                                        >
+                                            Download to View
+                                        </button>
+                                    </div>
+                                    )
+                                    ) : activeTab === 'graph' ? (
+                                    <div className="w-full h-full bg-black/20 rounded border border-halo-border overflow-hidden">
+                                        <DocumentGraph docId={selectedDoc.id} caseId="default_case" />
+                                    </div>
+                                    ) : activeTab === 'entities' ? (
+                                    <EntitiesView docId={selectedDoc.id} />
                                     ) : (
-                                        <div className="w-full h-full bg-black/20 rounded border border-halo-border overflow-hidden">
-                                            <DocumentGraph docId={selectedDoc.id} caseId="default_case" />
-                                        </div>
+                                    <OCRView docId={selectedDoc.id} />
                                     )}
                                 </div>
 

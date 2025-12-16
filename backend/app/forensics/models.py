@@ -21,21 +21,26 @@ class CloneSplicingResult(BaseModel):
     details: str = Field(..., description="Details about detected clone/splicing.")
     regions: List[str] = Field(default_factory=list, description="List of regions where tampering was detected.")
 
-class FontObjectAnalysisResult(BaseModel):
-    inconsistencies_detected: bool = Field(..., description="True if font or object inconsistencies detected.")
-    details: str = Field(..., description="Details about font and object inconsistencies.")
+class PdfStructureAnalysisResult(BaseModel):
+    inconsistencies_detected: bool = Field(..., description="True if structural inconsistencies detected.")
+    details: str = Field(..., description="Details about the analysis.")
     anomalies: List[str] = Field(default_factory=list, description="List of specific anomalies found.")
+    incremental_updates_detected: bool = Field(False, description="True if multiple EOF markers found.")
+    metadata_inconsistencies: List[str] = Field(default_factory=list, description="List of metadata mismatches.")
+    suspicious_tags: List[str] = Field(default_factory=list, description="List of suspicious PDF tags found.")
 
 class AntiScanAlterRescanResult(BaseModel):
     detected: bool = Field(..., description="True if scan-alter-rescan pattern detected.")
     details: str = Field(..., description="Details about the detected pattern.")
+    moire_detected: bool = Field(False, description="True if Moiré patterns (double halftoning) are detected.")
+    digital_overlays_detected: bool = Field(False, description="True if 'digital silence' (zero noise regions) is detected.")
 
 class ForensicAnalysisResult(BaseModel):
     document_id: str
     tamper_score: TamperScoreResult
     ela_analysis: Optional[ElaResult] = None
     clone_splicing_detection: Optional[CloneSplicingResult] = None
-    font_object_analysis: Optional[FontObjectAnalysisResult] = None
+    pdf_structure_analysis: Optional[PdfStructureAnalysisResult] = None
     anti_scan_alter_rescan: Optional[AntiScanAlterRescanResult] = None
     overall_verdict: str = Field(..., description="Overall verdict on document authenticity.")
 

@@ -45,3 +45,25 @@ async def generate_cross_examination(
     Generates cross-examination questions for a witness statement.
     """
     return await service.generate_cross_examination(request.witness_statement, request.witness_profile)
+
+class MotionToDismissRequest(BaseModel):
+    grounds: List[str]
+
+class MotionToDismissResponse(BaseModel):
+    motion_text: str
+    likelihood_of_success: float
+
+@router.post("/{case_id}/motion_to_dismiss", response_model=MotionToDismissResponse)
+async def generate_motion_to_dismiss(
+    case_id: str,
+    request: MotionToDismissRequest,
+    service: DevilsAdvocateService = Depends(get_devils_advocate_service)
+):
+    """
+    Generates a draft Motion to Dismiss based on identified weaknesses/grounds.
+    """
+    # Mock logic
+    return MotionToDismissResponse(
+        motion_text=f"COMES NOW the Defendant, by and through undersigned counsel, and moves this Court to dismiss... based on {', '.join(request.grounds)}...",
+        likelihood_of_success=0.45
+    )

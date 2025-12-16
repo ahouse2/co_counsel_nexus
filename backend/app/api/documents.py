@@ -587,3 +587,156 @@ async def get_document_graph(
     graph_service: GraphService = Depends(get_graph_service)
 ):
     return graph_service.get_document_neighborhood(case_id, doc_id, hops)
+
+@router.get("/{doc_id}/entities", summary="Get extracted entities for a document")
+async def get_document_entities(
+    doc_id: str,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    """
+    Retrieve entities extracted from the document (people, organizations, locations, etc.).
+    """
+    # This would typically query the graph or metadata
+    # For now, let's return what's in the metadata
+    metadata = document_service.get_document_metadata(case_id, "my_documents", doc_id) or \
+               document_service.get_document_metadata(case_id, "opposition_documents", doc_id)
+    
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    return {
+        "entities": metadata.get("custom_metadata", {}).get("key_entities", []),
+        "keywords": metadata.get("keywords", [])
+    }
+
+@router.post("/{doc_id}/ocr", summary="Trigger OCR for a document")
+async def trigger_ocr(
+    doc_id: str,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    """
+    Manually trigger OCR for a document.
+    """
+    # This would re-queue the document for ingestion with OCR enabled
+    # For now, we can just return a stub or actually call the service if it supports it
+    # document_service.reprocess_document(case_id, doc_id, force_ocr=True)
+    return {"message": "OCR triggered (stub)"}
+
+@router.get("/{doc_id}/ocr", summary="Get OCR text for a document")
+async def get_ocr_text(
+    doc_id: str,
+    case_id: str = "default_case",
+    document_service: DocumentService = Depends(get_document_service)
+):
+    """
+    Retrieve the raw text content extracted via OCR/Text extraction.
+    """
+    # This is essentially getting the document content if it's text
+    # Or reading a specific .txt file if we store OCR separately
+    # For now, let's return the main content if it's text
+    content = document_service.get_document_content(case_id, "my_documents", doc_id) or \
+              document_service.get_document_content(case_id, "opposition_documents", doc_id)
+              
+    if not content:
+        raise HTTPException(status_code=404, detail="Document content not found")
+        
+    try:
+        text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        text = "[Binary Content - OCR not available or not text]"
+        
+    return {"text": text}
+
+@router.get("/clustering", summary="Get 3D clustering data for documents")
+async def get_document_clustering(
+    limit: int = 1000,
+    vector_service: VectorService = Depends(get_vector_service)
+):
+    """
+    Retrieves document embeddings and reduces them to 3D coordinates using PCA.
+    Returns a list of nodes for 3D visualization.
+    """
+    try:
+        # 1. Fetch embeddings
+        points = vector_service.get_all_embeddings(limit=limit)
+        
+        if not points:
+            return []
+
+        # 2. Prepare data for PCA
+        ids = []
+        vectors = []
+        payloads = []
+        
+        for p in points:
+            if p.get("vector"):
+                ids.append(p["id"])
+                vectors.append(p["vector"])
+                payloads.append(p["payload"])
+        
+        if not vectors:
+            return []
+            
+        # 3. Run PCA (if enough points)
+        import numpy as np
+        from sklearn.decomposition import PCA
+        
+        n_samples = len(vectors)
+        n_components = 3
+        
+        coords = []
+        
+        if n_samples < 3:
+            # Fallback for few documents: Random or simple projection
+            # Just use first 3 dims or random
+            import random
+            for _ in range(n_samples):
+                coords.append([
+                    random.uniform(-100, 100),
+                    random.uniform(-100, 100),
+                    random.uniform(-100, 100)
+                ])
+        else:
+            pca = PCA(n_components=n_components)
+            reduced = pca.fit_transform(vectors)
+            
+            # Normalize to -500 to 500 range for visualization
+            # Find max abs value to scale
+            max_val = np.max(np.abs(reduced))
+            if max_val > 0:
+                scale_factor = 500.0 / max_val
+                coords = (reduced * scale_factor).tolist()
+            else:
+                coords = reduced.tolist()
+                
+        # 4. Format response
+        nodes = []
+        for i, doc_id in enumerate(ids):
+            payload = payloads[i]
+            x, y, z = coords[i]
+            
+            # Determine color/group based on metadata
+            doc_type = payload.get("doc_type", "unknown")
+            color = "#00f0ff" # Default Cyan
+            if doc_type == "opposition_documents":
+                color = "#ff003c" # Red
+            
+            nodes.append({
+                "id": doc_id,
+                "label": payload.get("file_name", "Unknown Document"),
+                "filename": payload.get("file_name", "Unknown"),
+                "x": x,
+                "y": y,
+                "z": z,
+                "color": color,
+                "size": 5,
+                "payload": payload
+            })
+            
+        return nodes
+
+    except Exception as e:
+        logger.error(f"Clustering failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Clustering failed: {str(e)}")

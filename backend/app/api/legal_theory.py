@@ -107,3 +107,66 @@ async def get_legal_theory_subgraph(
         raise HTTPException(status_code=500, detail=f"An error occurred while retrieving subgraph: {e}")
     finally:
         engine.close()
+
+class PrecedentMatchRequest(BaseModel):
+    case_facts: str
+    jurisdiction: str = "federal"
+
+class PrecedentMatchResult(BaseModel):
+    case_name: str
+    citation: str
+    similarity_score: float
+    reasoning: str
+
+@router.post("/legal_theory/match_precedents", response_model=List[PrecedentMatchResult])
+async def match_precedents(
+    request: PrecedentMatchRequest,
+    _principal: Principal = Depends(authorize_query),
+):
+    """
+    Finds relevant precedents based on case facts.
+    """
+    # Placeholder for actual retrieval logic (e.g., using vector search or LLM)
+    # For now, return mock data
+    return [
+        PrecedentMatchResult(
+            case_name="Smith v. Jones",
+            citation="123 F.3d 456 (2010)",
+            similarity_score=0.92,
+            reasoning="Similar fact pattern regarding breach of fiduciary duty in a close corporation."
+        ),
+        PrecedentMatchResult(
+            case_name="State v. Doe",
+            citation="456 U.S. 789 (2015)",
+            similarity_score=0.85,
+            reasoning="Establishes the standard for 'reasonable doubt' in similar contexts."
+        )
+    ]
+
+class JuryResonanceRequest(BaseModel):
+    argument: str
+    jury_demographics: Dict[str, str]
+
+class JuryResonanceResult(BaseModel):
+    score: float
+    feedback: str
+    demographic_breakdown: Dict[str, float]
+
+@router.post("/legal_theory/jury_resonance", response_model=JuryResonanceResult)
+async def calculate_jury_resonance(
+    request: JuryResonanceRequest,
+    _principal: Principal = Depends(authorize_query),
+):
+    """
+    Calculates how well an argument resonates with a specific jury demographic.
+    """
+    # Placeholder for actual sentiment analysis/LLM simulation
+    return JuryResonanceResult(
+        score=0.78,
+        feedback="The argument appeals strongly to logic but may alienate younger jurors who prioritize emotional impact.",
+        demographic_breakdown={
+            "18-30": 0.6,
+            "30-50": 0.8,
+            "50+": 0.9
+        }
+    )

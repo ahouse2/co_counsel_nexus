@@ -114,6 +114,38 @@ export function LegalTheoryModule() {
         }
     };
 
+    // Precedent Matcher State
+    const [precedents, setPrecedents] = useState<any[] | null>(null);
+    const [loadingPrecedents, setLoadingPrecedents] = useState(false);
+
+    const handleMatchPrecedents = async () => {
+        setLoadingPrecedents(true);
+        try {
+            const res = await endpoints.legalTheory.matchPrecedents(facts || "Breach of contract and fiduciary duty.");
+            setPrecedents(res.data);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoadingPrecedents(false);
+        }
+    };
+
+    // Jury Resonance State
+    const [resonance, setResonance] = useState<any | null>(null);
+    const [loadingResonance, setLoadingResonance] = useState(false);
+
+    const handleJuryResonance = async () => {
+        setLoadingResonance(true);
+        try {
+            const res = await endpoints.legalTheory.juryResonance(strategies || "The defendant acted in good faith.", { education: "Mixed" });
+            setResonance(res.data);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoadingResonance(false);
+        }
+    };
+
     // Submodule Views
     if (activeSubmodule === 'strategy') {
         return (
@@ -190,6 +222,102 @@ export function LegalTheoryModule() {
                         <div className="h-full flex flex-col items-center justify-center text-halo-muted opacity-50">
                             <Scale size={48} className="mb-4" />
                             <p className="text-center max-w-xs">Map available evidence to specific legal elements (Duty, Breach, Causation, Damages).</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    if (activeSubmodule === 'precedents') {
+        return (
+            <div className="w-full h-full flex flex-col p-8 text-halo-text overflow-hidden">
+                <div className="flex items-center justify-between mb-6 shrink-0">
+                    <div className="flex items-center gap-3 text-halo-cyan">
+                        <FileText size={24} />
+                        <h3 className="text-lg font-mono uppercase tracking-wide">Precedent Matcher</h3>
+                    </div>
+                    <button
+                        onClick={handleMatchPrecedents}
+                        disabled={loadingPrecedents}
+                        className="flex items-center gap-2 px-4 py-2 bg-halo-cyan/10 hover:bg-halo-cyan/20 text-halo-cyan border border-halo-cyan/30 rounded transition-all disabled:opacity-50 text-sm uppercase tracking-wider"
+                    >
+                        {loadingPrecedents ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                        {loadingPrecedents ? 'Matching...' : 'Find Precedents'}
+                    </button>
+                </div>
+                <div className="flex-1 bg-black/30 rounded-lg p-6 border border-halo-border overflow-y-auto custom-scrollbar">
+                    {precedents ? (
+                        <div className="space-y-4">
+                            {precedents.map((p, i) => (
+                                <div key={i} className="p-4 bg-halo-card border border-halo-border rounded hover:border-halo-cyan transition-colors">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <h4 className="font-bold text-halo-cyan">{p.case_name}</h4>
+                                        <span className="text-xs bg-halo-cyan/20 text-halo-cyan px-2 py-1 rounded">{Math.round(p.similarity_score * 100)}% Match</span>
+                                    </div>
+                                    <p className="text-xs text-halo-muted mb-2 font-mono">{p.citation}</p>
+                                    <p className="text-sm text-halo-text/90">{p.reasoning}</p>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-halo-muted opacity-50">
+                            <FileText size={48} className="mb-4" />
+                            <p className="text-center max-w-xs">Find relevant case law precedents based on the current fact pattern.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    if (activeSubmodule === 'resonance') {
+        return (
+            <div className="w-full h-full flex flex-col p-8 text-halo-text overflow-hidden">
+                <div className="flex items-center justify-between mb-6 shrink-0">
+                    <div className="flex items-center gap-3 text-halo-cyan">
+                        <Target size={24} />
+                        <h3 className="text-lg font-mono uppercase tracking-wide">Jury Resonance</h3>
+                    </div>
+                    <button
+                        onClick={handleJuryResonance}
+                        disabled={loadingResonance}
+                        className="flex items-center gap-2 px-4 py-2 bg-halo-cyan/10 hover:bg-halo-cyan/20 text-halo-cyan border border-halo-cyan/30 rounded transition-all disabled:opacity-50 text-sm uppercase tracking-wider"
+                    >
+                        {loadingResonance ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                        {loadingResonance ? 'Analyzing...' : 'Analyze Resonance'}
+                    </button>
+                </div>
+                <div className="flex-1 bg-black/30 rounded-lg p-6 border border-halo-border overflow-y-auto custom-scrollbar">
+                    {resonance ? (
+                        <div className="space-y-6">
+                            <div className="flex items-center gap-4 mb-6">
+                                <div className="w-24 h-24 rounded-full border-4 border-halo-cyan flex items-center justify-center relative">
+                                    <span className="text-2xl font-bold text-halo-cyan">{Math.round(resonance.score * 100)}</span>
+                                    <span className="absolute bottom-2 text-[10px] text-halo-muted uppercase">Score</span>
+                                </div>
+                                <div className="flex-1">
+                                    <h4 className="text-lg font-bold text-halo-text mb-2">Resonance Analysis</h4>
+                                    <p className="text-sm text-halo-text/80">{resonance.feedback}</p>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h5 className="text-sm font-bold text-halo-cyan mb-3 uppercase tracking-wider">Demographic Breakdown</h5>
+                                <div className="grid grid-cols-3 gap-4">
+                                    {Object.entries(resonance.demographic_breakdown).map(([key, val]: [string, any]) => (
+                                        <div key={key} className="bg-halo-card p-3 rounded border border-halo-border text-center">
+                                            <span className="block text-xs text-halo-muted uppercase mb-1">{key}</span>
+                                            <span className="block text-lg font-bold text-halo-text">{Math.round(val * 100)}%</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-halo-muted opacity-50">
+                            <Target size={48} className="mb-4" />
+                            <p className="text-center max-w-xs">Analyze how well your legal strategy resonates with different jury demographics.</p>
                         </div>
                     )}
                 </div>

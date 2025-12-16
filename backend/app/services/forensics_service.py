@@ -58,7 +58,13 @@ class ForensicsService:
                         pass
                 
                 # 3. Save Results
-                updates = {"forensic_analysis": result.dict()}
+                # Convert Pydantic model to dict
+                analysis_dict = result.dict()
+                
+                # Update metadata with the forensic analysis
+                # We need to fetch current metadata first to merge, or use a specific update method if available
+                # DocumentStore.update_document_metadata usually merges
+                updates = {"forensic_analysis": analysis_dict}
                 self.document_store.update_document_metadata(doc_type, case_id, doc_id, updates)
                 
                 logger.info(f"Deep forensic analysis completed for {doc_id}")

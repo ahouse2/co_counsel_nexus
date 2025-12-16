@@ -69,43 +69,18 @@ async def get_hex_view(
 async def trigger_deep_analysis(
     doc_id: str,
     case_id: str = "default_case",
+    settings: Settings = Depends(get_settings),
     store: DocumentStore = Depends(get_document_store)
 ):
     """
-    Triggers deep forensic analysis (Tampering Detection, Metadata Anomalies).
+    Triggers deep forensic analysis (Tampering Detection, Metadata Anomalies) using the real ForensicAnalyzer.
     """
-    from backend.app.services.forensic_analyzer import ForensicAnalyzer
+    from backend.app.services.forensics_service import ForensicsService
     
-    analyzer = ForensicAnalyzer()
+    service = ForensicsService(settings, store)
+    result = await service.run_deep_forensics(doc_id, case_id)
     
-    # Find document content and metadata
-    for doc_type in ["my_documents", "opposition_documents"]:
-        try:
-            # Get Content
-            content = store.get_document_content(doc_type, case_id, doc_id)
-            if not content:
-                continue
-                
-            if isinstance(content, str):
-                content = content.encode('utf-8')
-
-            # Get Metadata
-            versions = store.list_document_versions(doc_type, case_id, doc_id)
-            if not versions:
-                continue
-            
-            meta_path = store._get_storage_path(doc_type, case_id, doc_id, version=versions[0]).with_suffix(".meta")
-            metadata = {}
-            if meta_path.exists():
-                with open(meta_path, "r") as f:
-                    metadata = json.load(f)
-
-            # Run Analysis
-            result = analyzer.analyze_manipulation(metadata, content)
-            return result
-            
-        except Exception as e:
-            print(f"Error accessing doc {doc_id}: {e}")
-            continue
-
-    raise HTTPException(status_code=404, detail="Document not found")
+    if not result:
+        raise HTTPException(status_code=404, detail="Document not found or analysis failed")
+        
+    return result
