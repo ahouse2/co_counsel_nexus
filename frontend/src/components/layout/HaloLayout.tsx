@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useHalo, ModuleId } from '../../context/HaloContext';
 import { Settings, Menu, Activity } from 'lucide-react';
+import { SettingsPanel } from '../SettingsPanel';
 
 // Module definitions - Complete list from Halo spec
 const PRIMARY_MODULES: { id: ModuleId; label: string }[] = [
@@ -117,16 +118,8 @@ const SUBMODULES: Record<ModuleId, { id: string; label: string }[]> = {
 
 export function HaloLayout({ children }: { children: React.ReactNode }) {
     const { activeModule, setActiveModule, activeSubmodule, setActiveSubmodule, isSettingsOpen, setIsSettingsOpen } = useHalo();
-    const [courtListenerKey, setCourtListenerKey] = React.useState(localStorage.getItem('courtlistener_key') || '');
-    const [geminiKey, setGeminiKey] = React.useState(localStorage.getItem('gemini_key') || '');
 
     const [isMainMenuOpen, setIsMainMenuOpen] = React.useState(false);
-
-    const handleSaveSettings = () => {
-        localStorage.setItem('courtlistener_key', courtListenerKey);
-        localStorage.setItem('gemini_key', geminiKey);
-        setIsSettingsOpen(false);
-    };
 
     // Zoom state derived from active module
     const isZoomed = activeModule !== 'graph';
@@ -218,72 +211,8 @@ export function HaloLayout({ children }: { children: React.ReactNode }) {
                 </div>
             </div>
 
-            {/* Settings Modal */}
-            {isSettingsOpen && (
-                <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center">
-                    <div className="bg-halo-card border border-halo-cyan/30 p-8 rounded-xl w-full max-w-md shadow-[0_0_50px_rgba(0,240,255,0.2)]">
-                        <h2 className="text-xl font-mono text-halo-cyan mb-6 uppercase tracking-wider flex items-center gap-2">
-                            <Settings size={20} /> System Configuration
-                        </h2>
-
-                        <div className="space-y-6">
-                            <div title="API Key for CourtListener service to fetch legal documents and case metadata.">
-                                <label className="block text-xs font-mono text-halo-muted mb-2 uppercase">CourtListener API Key</label>
-                                <input
-                                    type="password"
-                                    value={courtListenerKey}
-                                    onChange={(e) => setCourtListenerKey(e.target.value)}
-                                    className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white"
-                                    placeholder="Enter API Key..."
-                                />
-                            </div>
-
-                            <div title="API Key for Google Gemini LLM to power the Context Engine and Agents.">
-                                <label className="block text-xs font-mono text-halo-muted mb-2 uppercase">Google Gemini API Key</label>
-                                <input
-                                    type="password"
-                                    value={geminiKey}
-                                    onChange={(e) => setGeminiKey(e.target.value)}
-                                    className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white"
-                                    placeholder="Enter API Key..."
-                                />
-                            </div>
-
-                            <div title="Select the visual theme for the Halo interface.">
-                                <label className="block text-xs font-mono text-halo-muted mb-2 uppercase">Interface Theme</label>
-                                <select className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white" title="Select theme">
-                                    <option>Cyberpunk (Default)</option>
-                                    <option>Minimalist</option>
-                                    <option>High Contrast</option>
-                                </select>
-                            </div>
-
-                            <div title="Adjust animation complexity and background processes to save resources.">
-                                <label className="block text-xs font-mono text-halo-muted mb-2 uppercase">Performance Mode</label>
-                                <select className="w-full bg-black/50 border border-halo-border rounded p-2 text-sm focus:border-halo-cyan focus:outline-none text-white" title="Select performance mode">
-                                    <option>High Performance</option>
-                                    <option>Battery Saver</option>
-                                </select>
-                            </div>
-
-                            <div className="pt-4 flex justify-end gap-4">
-                                <button
-                                    onClick={() => setIsSettingsOpen(false)}
-                                    className="px-4 py-2 text-xs font-mono text-halo-muted hover:text-white transition-colors"
-                                >
-                                    CANCEL
-                                </button>
-                                <button
-                                    onClick={handleSaveSettings}
-                                    className="px-6 py-2 bg-halo-cyan/20 border border-halo-cyan/50 rounded text-halo-cyan hover:bg-halo-cyan hover:text-black transition-all text-xs font-bold tracking-wider"
-                                >
-                                    SAVE CONFIGURATION
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Settings Panel */}
+            <SettingsPanel isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
 
             {/* The Halo Container - Dynamically sized to fit viewport */}
             <motion.div

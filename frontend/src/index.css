@@ -61,4 +61,15 @@
     .dynamic-line-width {
         width: var(--line-width, 100px);
     }
+
+    /* Dynamic progress bar */
+    .dynamic-progress {
+        width: var(--progress, 0%);
+    }
+
+    /* Dynamic sparkline sizing */
+    .dynamic-sparkline-size {
+        width: var(--w, 120px);
+        height: var(--h, 40px);
+    }
 }

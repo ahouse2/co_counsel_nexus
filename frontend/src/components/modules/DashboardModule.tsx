@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Activity, Server, Cpu, Database, Shield, Zap, Clock, AlertCircle } from 'lucide-react';
+import { Activity, Server, Cpu, Database, Shield, Zap, AlertCircle } from 'lucide-react';
 
 export const DashboardModule: React.FC = () => {
     // Simulated System Stats
@@ -82,16 +81,16 @@ export const DashboardModule: React.FC = () => {
 
                 {/* Right: Quick Actions & Alerts */}
                 <div className="flex flex-col gap-6">
-                    {/* Alerts */}
-                    <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6">
-                        <h2 className="text-lg font-light text-red-400 mb-4 flex items-center gap-2">
+                    {/* System Status */}
+                    <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-6">
+                        <h2 className="text-lg font-light text-green-400 mb-4 flex items-center gap-2">
                             <AlertCircle size={20} />
-                            Critical Alerts
+                            System Status
                         </h2>
                         <div className="space-y-3">
-                            <div className="flex items-start gap-3 text-sm text-red-200/80">
-                                <div className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5" />
-                                <p>High memory usage detected in Graph Service (Container ID: 8f2a...)</p>
+                            <div className="flex items-start gap-3 text-sm text-green-200/80">
+                                <div className="w-1.5 h-1.5 rounded-full bg-green-500 mt-1.5" />
+                                <p>All systems operating normally</p>
                             </div>
                         </div>
                     </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Command, ArrowRight, LayoutDashboard, FileText, Gavel, Activity, Users, Database } from 'lucide-react';
+import { Search, ArrowRight, LayoutDashboard, FileText, Gavel, Activity, Users, Database } from 'lucide-react';
 import { useHalo } from '../../context/HaloContext';
 
 interface CommandItem {
@@ -18,7 +18,7 @@ export const CommandPalette: React.FC = () => {
     const { setActiveModule } = useHalo();
 
     const commands: CommandItem[] = [
-        { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={18} />, action: () => setActiveModule('dashboard') },
+        { id: 'graph', label: 'Dashboard', icon: <LayoutDashboard size={18} />, action: () => setActiveModule('graph') },
         { id: 'documents', label: 'Document Explorer', icon: <FileText size={18} />, action: () => setActiveModule('documents') },
         { id: 'graph', label: 'Knowledge Graph', icon: <Database size={18} />, action: () => setActiveModule('graph') },
         { id: 'timeline', label: 'Timeline', icon: <Activity size={18} />, action: () => setActiveModule('timeline') },

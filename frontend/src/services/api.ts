@@ -85,6 +85,12 @@ export const endpoints = {
         getOCR: (docId: string) => api.get(`/api/documents/${docId}/ocr`),
         triggerOCR: (docId: string) => api.post(`/api/documents/${docId}/ocr`),
         getClustering: (limit: number = 1000) => api.get('/api/documents/clustering', { params: { limit } }),
+        triggerLocalIngestion: (caseId: string, directoryPath: string = ".") => {
+            const formData = new FormData();
+            formData.append('case_id', caseId);
+            formData.append('directory_path', directoryPath);
+            return api.post('/api/documents/ingestion/local', formData);
+        },
     },
     // Timeline
     timeline: {
@@ -232,6 +238,12 @@ export const endpoints = {
         listRecipients: () => api.get('/api/recipients'),
         createRecipient: (name: string, address: string) => api.post('/api/recipients', { name, address }),
         listDocuments: () => api.get('/api/documents'),
+    },
+    // Settings
+    settings: {
+        get: () => api.get('/api/settings'),
+        update: (data: any) => api.put('/api/settings', data),
+        models: () => api.get('/api/settings/models'),
     }
 };
 

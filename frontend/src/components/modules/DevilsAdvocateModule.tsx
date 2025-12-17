@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldAlert, AlertTriangle, Gavel, RefreshCw, CheckCircle } from 'lucide-react';
-import api from '../../services/api';
+import { endpoints } from '../../services/api';
 
 interface CaseWeakness {
     id: string;
@@ -26,11 +26,27 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
     const [weaknesses, setWeaknesses] = useState<CaseWeakness[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [caseTheory, setCaseTheory] = useState("");
+    const [witnessStatement, setWitnessStatement] = useState("");
+    const [crossExamQuestions, setCrossExamQuestions] = useState<CrossExamQuestion[]>([]);
+    const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+
+    const generateCrossExam = async () => {
+        if (!witnessStatement.trim()) return;
+        setIsGeneratingQuestions(true);
+        try {
+            const res = await endpoints.devilsAdvocate.crossExamine(witnessStatement, '');
+            setCrossExamQuestions(res.data);
+        } catch (error) {
+            console.error("Failed to generate cross-exam questions", error);
+        } finally {
+            setIsGeneratingQuestions(false);
+        }
+    };
 
     const fetchReview = async () => {
         setIsLoading(true);
         try {
-            const res = await api.devilsAdvocate.review(caseId, caseTheory);
+            const res = await endpoints.devilsAdvocate.review(caseId, caseTheory);
             setWeaknesses(res.data);
         } catch (error) {
             console.error("Failed to fetch review", error);
@@ -47,7 +63,7 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
     const generateMotion = async () => {
         setIsLoading(true);
         try {
-            const res = await api.devilsAdvocate.motionToDismiss(caseId, motionGrounds.length ? motionGrounds : ["Lack of Evidence", "Procedural Error"]);
+            const res = await endpoints.devilsAdvocate.motionToDismiss(caseId, motionGrounds.length ? motionGrounds : ["Lack of Evidence", "Procedural Error"]);
             setMotionDraft(res.data);
         } catch (error) {
             console.error("Failed to generate motion", error);

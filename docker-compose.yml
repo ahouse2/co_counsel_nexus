@@ -61,8 +61,10 @@ services:
     networks:
       - backend
     volumes:
-      - ./backend:/src/backend
-      - ./:/src/repo
+      # - ./backend:/src/backend  # Commented out - causes Windows Docker mount path error
+      # - ./:/src/repo  # Commented out - causes Windows Docker mount path error
+      # NOTE: For local file sync, use: docker cp ./local_files/. op_veritas_2-api-1:/data/
+      - ingestion_data:/data # Named volume for local file sync
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
@@ -71,14 +73,7 @@ services:
       retries: 3
       start_period: 40s
     command: [ "tail", "-f", "/dev/null" ]
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 16G
-        reservations:
-          cpus: '1'
-          memory: 4G
+    # Memory limits removed - no resource constraints
 
   frontend:
     build:
@@ -235,6 +230,8 @@ volumes:
   models_huggingface:
   models_whisper:
   models_tts:
+  ingestion_data:
+    # Named volume for local file sync via docker cp
 
 
 networks:

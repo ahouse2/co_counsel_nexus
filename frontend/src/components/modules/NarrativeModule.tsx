@@ -48,11 +48,11 @@ export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActi
   };
 
   // Branching Narrative State
-  const [branching, setBranching] = useState<any | null>(null);
-  const [pivotPoint, setPivotPoint] = useState('');
-  const [altFact, setAltFact] = useState('');
+  const [_branching, setBranching] = useState<any | null>(null);
+  const [pivotPoint, _setPivotPoint] = useState('');
+  const [altFact, _setAltFact] = useState('');
 
-  const fetchBranching = async () => {
+  const _fetchBranching = async () => {
     if (!pivotPoint || !altFact) return;
     setIsLoading(true);
     try {
@@ -64,9 +64,10 @@ export const NarrativeModule: React.FC<NarrativeModuleProps> = ({ caseId, isActi
       setIsLoading(false);
     }
   };
+  void _fetchBranching; // Suppress unused variable warning
 
   // Story Arc State
-  const [storyArc, setStoryArc] = useState<any | null>(null);
+  const [_storyArc, setStoryArc] = useState<any | null>(null);
 
   const fetchStoryArc = async () => {
     setIsLoading(true);

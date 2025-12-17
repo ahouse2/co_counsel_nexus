@@ -17,22 +17,23 @@ import {
     Tag
 } from 'lucide-react';
 
-{ id: 'dashboard', label: 'Command Center', icon: LayoutGrid },
-{ id: 'graph', label: 'Graph Explorer', icon: BrainCircuit },
-{ id: 'theory', label: 'Legal Theory', icon: Scale },
-{ id: 'forensics', label: 'Forensics', icon: Fingerprint },
-{ id: 'drafting', label: 'Drafting', icon: FileText },
-{ id: 'presentation', label: 'Presentation', icon: Presentation },
-{ id: 'research', label: 'Legal Research', icon: Search },
-{ id: 'process', label: 'Service of Process', icon: FileText },
-{ id: 'agents', label: 'Agent Console', icon: Cpu },
-{ id: 'documents', label: 'Documents', icon: FolderOpen },
-{ id: 'timeline', label: 'Timeline', icon: Clock },
-{ id: 'context', label: 'Context Engine', icon: BrainCircuit },
-{ id: 'arena', label: 'Mock Trial', icon: Swords },
-{ id: 'university', label: 'Trial University', icon: GraduationCap },
-{ id: 'binder', label: 'Evidence Binder', icon: FileStack },
-{ id: 'classification', label: 'Classification', icon: Tag },
+const NAV_LINKS = [
+    { id: 'dashboard', label: 'Command Center', icon: LayoutGrid },
+    { id: 'graph', label: 'Graph Explorer', icon: BrainCircuit },
+    { id: 'theory', label: 'Legal Theory', icon: Scale },
+    { id: 'forensics', label: 'Forensics', icon: Fingerprint },
+    { id: 'drafting', label: 'Drafting', icon: FileText },
+    { id: 'presentation', label: 'Presentation', icon: Presentation },
+    { id: 'research', label: 'Legal Research', icon: Search },
+    { id: 'process', label: 'Service of Process', icon: FileText },
+    { id: 'agents', label: 'Agent Console', icon: Cpu },
+    { id: 'documents', label: 'Documents', icon: FolderOpen },
+    { id: 'timeline', label: 'Timeline', icon: Clock },
+    { id: 'context', label: 'Context Engine', icon: BrainCircuit },
+    { id: 'arena', label: 'Mock Trial', icon: Swords },
+    { id: 'university', label: 'Trial University', icon: GraduationCap },
+    { id: 'binder', label: 'Evidence Binder', icon: FileStack },
+    { id: 'classification', label: 'Classification', icon: Tag },
 ];
 
 export function SlideOutMenu() {

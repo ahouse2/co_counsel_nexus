@@ -163,3 +163,17 @@ Implemented Phase 7: Autonomous Legal Research & Docket Watch
 - Confirmed API is running on port 8001 and accessible.
 - Updated `task.md` and `walkthrough.md` to reflect Phase 7 completion.
 - Cleared `HANDOFFS.md`.
+
+/newline
+@2025/12/17 06:05:02 AM
+Settings Panel & Local File Sync Implementation
+- Created comprehensive `SettingsPanel.tsx` component with 4 tabbed sections: API Keys, LLM Config, System Settings, Advanced.
+- Integrated SettingsPanel into `HaloLayout.tsx`, replacing the inline settings modal.
+- Added settings API endpoints (`get`, `update`, `models`) to `frontend/src/services/api.ts`.
+- Added `triggerLocalIngestion` API endpoint for local file sync.
+- Added `./data:/data` named volume (`ingestion_data`) to `docker-compose.yml` for local file sync.
+- Added HardDrive icon button (green) in DocumentModule for triggering local file ingestion.
+- Fixed Windows Docker volume mount error by using named volume instead of bind mount.
+- Frontend build successful (4357 modules). Both API and frontend containers running.
+- Local sync usage: `docker cp ./files/. op_veritas_2-api-1:/data/` then click HardDrive button.
+

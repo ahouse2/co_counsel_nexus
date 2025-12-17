@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Send, MapPin, Check, Clock, AlertCircle, FileText, Plus, Trash2, Eye, Loader2 } from 'lucide-react';
+import { Send, MapPin, Check, Clock, AlertCircle, FileText, Plus, Trash2, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { endpoints } from '../../services/api';
 
@@ -24,7 +24,7 @@ const statusConfig = {
 
 export function ServiceOfProcessModule() {
     const [records, setRecords] = useState<ServiceRecord[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [, setLoading] = useState(true);
     const [selectedRecord, setSelectedRecord] = useState<ServiceRecord | null>(null);
 
     useEffect(() => {

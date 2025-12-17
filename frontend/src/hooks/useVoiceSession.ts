@@ -21,7 +21,7 @@ export function useVoiceSession(caseId: string, personaId: string = 'default') {
     const audioChunks = useRef<Blob[]>([]);
     const animationFrame = useRef<number>();
 
-    const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+    const [, setAudioStream] = useState<MediaStream | null>(null);
     const [audioSource, setAudioSource] = useState<AudioNode | null>(null);
 
     // Initialize Audio Context

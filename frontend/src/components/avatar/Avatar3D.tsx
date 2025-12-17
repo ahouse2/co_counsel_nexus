@@ -64,7 +64,7 @@ export const Avatar3D: React.FC<Avatar3DProps> = ({ url, isSpeaking, analyser })
 
                 // Apply Lip Sync if speaking
                 if (isSpeaking && analyser && dataArrayRef.current) {
-                    analyser.getByteFrequencyData(dataArrayRef.current);
+                    analyser.getByteFrequencyData(dataArrayRef.current as Uint8Array<ArrayBuffer>);
 
                     // Calculate average volume (energy)
                     let sum = 0;

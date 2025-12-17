@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileText, Search, Filter, Upload, Loader2, File, FolderUp, Terminal, Play, Pause, X, Download, Import, RefreshCw, ShieldCheck, List, Trash2 } from 'lucide-react';
+import { FileText, Search, Filter, Upload, Loader2, FolderUp, Terminal, Play, Pause, X, Download, Import, RefreshCw, ShieldCheck, List, Trash2, HardDrive } from 'lucide-react';
 import ForceGraph2D from 'react-force-graph-2d';
-import ForceGraph3D from 'react-force-graph-3d';
 import { endpoints } from '../../services/api';
 import { useHalo } from '../../context/HaloContext';
 import { useUploadManager } from '../../hooks/useUploadManager';
@@ -329,6 +328,20 @@ export function DocumentModule() {
         }
     };
 
+    const handleLocalSync = async () => {
+        try {
+            addLog('[SYSTEM] Triggering local file sync from /data directory...');
+            setActiveSubmodule('logs'); // Show logs
+            const response = await endpoints.documents.triggerLocalIngestion('default_case');
+            addLog(`[SUCCESS] ${response.data.message}`);
+            addLog('[INFO] Files will be processed in background. Refresh document list to see progress.');
+            setTimeout(fetchDocuments, 2000);
+        } catch (error) {
+            console.error('Local sync failed:', error);
+            addLog(`[ERROR] Local sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    };
+
     const handleCaseExport = async () => {
         try {
             addLog("[SYSTEM] Exporting case...");
@@ -427,7 +440,8 @@ export function DocumentModule() {
 
     // Sparkline Component
     const Sparkline = ({ data, width = 120, height = 40, color = "#00f0ff" }: { data: number[], width?: number, height?: number, color?: string }) => {
-        if (data.length < 2) return <div style={{ '--w': `${width}px`, '--h': `${height}px` } as React.CSSProperties} className="w-[var(--w)] h-[var(--h)] bg-halo-card/30 rounded flex items-center justify-center text-[10px] text-halo-muted">WAITING FOR DATA</div>;
+        // eslint-disable-next-line react/forbid-component-props -- CSS custom properties require style prop
+        if (data.length < 2) return <div style={{ '--w': `${width}px`, '--h': `${height}px` } as React.CSSProperties} className="dynamic-sparkline-size bg-halo-card/30 rounded flex items-center justify-center text-[10px] text-halo-muted">WAITING FOR DATA</div>;
 
         const max = Math.max(...data, 0.1); // Avoid div by zero
         const points = data.map((d, i) => {
@@ -616,8 +630,9 @@ export function DocumentModule() {
                                         ({uploadManager.state.totalFiles - uploadManager.state.completedFiles} left)
                                     </span>
                                     <div className="w-full h-1 bg-halo-card rounded-full overflow-hidden mt-1">
+                                        {/* eslint-disable-next-line react/forbid-component-props -- CSS custom properties require style prop */}
                                         <div
-                                            className="h-full bg-halo-cyan transition-all duration-300 ease-out w-[var(--progress)]"
+                                            className="h-full bg-halo-cyan transition-all duration-300 ease-out dynamic-progress"
                                             style={{
                                                 '--progress': `${uploadManager.state.totalFiles > 0
                                                     ? (uploadManager.state.completedFiles / uploadManager.state.totalFiles) * 100
@@ -719,6 +734,14 @@ export function DocumentModule() {
                                     <FolderUp size={18} />
                                     <div className="absolute -bottom-1 -right-1 text-[10px] font-bold">+</div>
                                 </div>
+                            </button>
+                            <button
+                                onClick={handleLocalSync}
+                                disabled={uploading || uploadManager.state.status === 'uploading'}
+                                className="p-2 bg-emerald-500/10 border border-emerald-500/50 rounded hover:bg-emerald-500/20 text-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Sync Local Files (from ./data folder)"
+                            >
+                                <HardDrive size={18} />
                             </button>
 
                             {/* Upload Controls */}
@@ -865,23 +888,45 @@ export function DocumentModule() {
                                         </button>
                                         <button
                                             onClick={() => setActiveTab('entities')}
-                                                <p className="text-halo-text">Preview not available for {selectedDoc.content_type}</p>
-                                        <button
-                                            onClick={() => window.open(`/api/documents/${selectedDoc.id}/download`, '_blank')}
-                                            className="px-4 py-2 border border-halo-cyan text-halo-cyan rounded hover:bg-halo-cyan hover:text-black transition-colors"
+                                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${activeTab === 'entities' ? 'bg-halo-cyan text-black' : 'text-halo-muted hover:text-halo-cyan'}`}
                                         >
-                                            Download to View
+                                            Entities
+                                        </button>
+                                        <button
+                                            onClick={() => setActiveTab('ocr')}
+                                            className={`px-3 py-1 text-xs font-medium rounded transition-colors ${activeTab === 'ocr' ? 'bg-halo-cyan text-black' : 'text-halo-muted hover:text-halo-cyan'}`}
+                                        >
+                                            OCR
                                         </button>
                                     </div>
-                                    )
+                                </div>
+
+                                {/* Tab Content */}
+                                <div className="flex-1 overflow-auto p-4">
+                                    {activeTab === 'preview' ? (
+                                        selectedDoc.content_type.startsWith('image/') ? (
+                                            <img src={`/api/documents/${selectedDoc.id}/download`} alt={selectedDoc.filename} className="max-w-full max-h-full object-contain mx-auto" />
+                                        ) : selectedDoc.content_type === 'application/pdf' ? (
+                                            <iframe src={`/api/documents/${selectedDoc.id}/download`} className="w-full h-full" title={selectedDoc.filename} />
+                                        ) : (
+                                            <div className="h-full flex flex-col items-center justify-center text-halo-muted">
+                                                <p className="text-halo-text">Preview not available for {selectedDoc.content_type}</p>
+                                                <button
+                                                    onClick={() => window.open(`/api/documents/${selectedDoc.id}/download`, '_blank')}
+                                                    className="mt-4 px-4 py-2 border border-halo-cyan text-halo-cyan rounded hover:bg-halo-cyan hover:text-black transition-colors"
+                                                >
+                                                    Download to View
+                                                </button>
+                                            </div>
+                                        )
                                     ) : activeTab === 'graph' ? (
-                                    <div className="w-full h-full bg-black/20 rounded border border-halo-border overflow-hidden">
-                                        <DocumentGraph docId={selectedDoc.id} caseId="default_case" />
-                                    </div>
+                                        <div className="w-full h-full bg-black/20 rounded border border-halo-border overflow-hidden">
+                                            <DocumentGraph docId={selectedDoc.id} caseId="default_case" />
+                                        </div>
                                     ) : activeTab === 'entities' ? (
-                                    <EntitiesView docId={selectedDoc.id} />
+                                        <EntitiesView docId={selectedDoc.id} />
                                     ) : (
-                                    <OCRView docId={selectedDoc.id} />
+                                        <OCRView docId={selectedDoc.id} />
                                     )}
                                 </div>
 

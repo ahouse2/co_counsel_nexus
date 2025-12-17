@@ -28,8 +28,6 @@ export function DashboardHub() {
         switch (activeModule) {
             case 'graph':
                 return null;
-            case 'dashboard':
-                return <DashboardModule />;
             case 'theory':
                 return <LegalTheoryModule />;
             case 'forensics':
