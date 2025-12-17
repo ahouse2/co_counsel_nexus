@@ -123,6 +123,7 @@ export function MootCourtModule() {
                         </div>
                     </div>
                     <div className="h-12 w-1 bg-halo-border/30 rounded-full overflow-hidden relative">
+                        {/* eslint-disable-next-line react/forbid-component-props -- CSS custom properties require style prop */}
                         <div
                             className={`absolute bottom-0 left-0 right-0 transition-all duration-1000 dynamic-height ${riskScore > 0.7 ? 'bg-red-500' :
                                 riskScore > 0.4 ? 'bg-yellow-500' : 'bg-green-500'

@@ -178,6 +178,7 @@ export function JurySentimentModule() {
                                     </span>
                                 </div>
                                 <div className="h-2 bg-black/50 rounded-full overflow-hidden">
+                                    {/* eslint-disable-next-line react/forbid-component-props -- CSS custom properties require style prop */}
                                     <div
                                         className={`h-full transition-all dynamic-width ${analysis.overall_score >= 0.7 ? 'bg-green-500' :
                                             analysis.overall_score >= 0.4 ? 'bg-yellow-500' : 'bg-red-500'

@@ -312,6 +312,7 @@ export function HaloLayout({ children }: { children: React.ReactNode }) {
 
                 {/* Primary Module Nodes (Left Perimeter) */}
                 {primaryNodes.map((node) => (
+                    // eslint-disable-next-line react/forbid-component-props -- CSS custom properties require style prop
                     <div
                         key={node.id}
                         className={`absolute w-4 h-4 -ml-2 -mt-2 rounded-full border cursor-pointer transition-all duration-300 z-50 group halo-node-position
@@ -348,6 +349,7 @@ export function HaloLayout({ children }: { children: React.ReactNode }) {
 
                 {/* Submodule Nodes (Right Perimeter) */}
                 {subNodes.map((node) => (
+                    // eslint-disable-next-line react/forbid-component-props -- CSS custom properties require style prop
                     <div
                         key={node.id}
                         className={`absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full border cursor-pointer transition-all duration-300 z-50 group halo-node-position
