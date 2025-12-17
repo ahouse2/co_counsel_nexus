@@ -314,7 +314,7 @@ export function HaloLayout({ children }: { children: React.ReactNode }) {
                 {primaryNodes.map((node) => (
                     <div
                         key={node.id}
-                        className={`absolute w-4 h-4 -ml-2 -mt-2 rounded-full border cursor-pointer transition-all duration-300 z-50 group left-[calc(50%_+_var(--x))] top-[calc(50%_+_var(--y))]
+                        className={`absolute w-4 h-4 -ml-2 -mt-2 rounded-full border cursor-pointer transition-all duration-300 z-50 group halo-node-position
                             ${activeModule === node.id
                                 ? 'bg-halo-cyan border-halo-cyan shadow-[0_0_15px_rgba(0,240,255,0.7)] scale-125'
                                 : 'bg-halo-bg border-halo-cyan/30 hover:bg-halo-cyan/30 hover:scale-110 hover:shadow-[0_0_10px_rgba(0,240,255,0.5)]'
@@ -350,7 +350,7 @@ export function HaloLayout({ children }: { children: React.ReactNode }) {
                 {subNodes.map((node) => (
                     <div
                         key={node.id}
-                        className={`absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full border cursor-pointer transition-all duration-300 z-50 group left-[calc(50%_+_var(--x))] top-[calc(50%_+_var(--y))]
+                        className={`absolute w-3 h-3 -ml-1.5 -mt-1.5 rounded-full border cursor-pointer transition-all duration-300 z-50 group halo-node-position
                             ${activeSubmodule === node.id
                                 ? 'bg-halo-cyan border-halo-cyan shadow-[0_0_10px_rgba(0,240,255,0.7)] scale-125'
                                 : 'bg-halo-bg border-halo-cyan/30 hover:bg-halo-cyan/30 hover:scale-110 hover:shadow-[0_0_10px_rgba(0,240,255,0.5)]'

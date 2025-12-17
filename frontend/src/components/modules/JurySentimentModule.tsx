@@ -179,7 +179,7 @@ export function JurySentimentModule() {
                                 </div>
                                 <div className="h-2 bg-black/50 rounded-full overflow-hidden">
                                     <div
-                                        className={`h-full transition-all w-[var(--score)] ${analysis.overall_score >= 0.7 ? 'bg-green-500' :
+                                        className={`h-full transition-all dynamic-width ${analysis.overall_score >= 0.7 ? 'bg-green-500' :
                                             analysis.overall_score >= 0.4 ? 'bg-yellow-500' : 'bg-red-500'
                                             }`}
                                         style={{ '--score': `${analysis.overall_score * 100}%` } as React.CSSProperties}

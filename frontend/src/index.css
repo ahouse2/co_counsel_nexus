@@ -42,4 +42,23 @@
     .animate-delay-300 {
         animation-delay: 300ms;
     }
+
+    /* Dynamic positioning using CSS custom properties */
+    .halo-node-position {
+        left: calc(50% + var(--x, 0%));
+        top: calc(50% + var(--y, 0%));
+    }
+
+    /* Dynamic width/height using CSS custom properties */
+    .dynamic-width {
+        width: var(--score, 0%);
+    }
+
+    .dynamic-height {
+        height: var(--risk, 0%);
+    }
+
+    .dynamic-line-width {
+        width: var(--line-width, 100px);
+    }
 }
