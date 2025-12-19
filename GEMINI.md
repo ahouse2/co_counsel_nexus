@@ -273,3 +273,17 @@ Comprehensive System Audit - Phase 1-2 Complete
 - Auth integration reverted due to TypeScript compilation issue (will complete in Phase 5)
 - Verified autonomous pipeline and swarm registry fully operational
 
+/newline
+@2025/12/19 09:10:00 AM
+Timeline & JurySentiment KG Integration
+- Added `sync_from_kg` method to `TimelineService` for synchronizing timeline events from Neo4j Knowledge Graph
+- Added `run_cypher` method to `GraphService` for executing raw Cypher queries
+- Created `POST /timeline/{case_id}/sync` API endpoint for triggering KG synchronization
+- Created `GET /jury-sentiment/{case_id}/parties` API endpoint for fetching parties/witnesses from KG
+- Updated `TimelineModule.tsx` with "Sync Graph" button for KG synchronization
+- Refactored `JurySentimentModule.tsx` with 3-column layout displaying case parties from KG
+- Added `JurySentimentModule` to `DashboardHub.tsx` and `Sidebar.tsx` navigation
+- Added 'jury' to `ModuleId` type in `HaloContext.tsx`
+- Updated `frontend/src/services/api.ts` with new endpoints: `timeline.sync()` and `jurySentiment.getParties()`
+- Pushed all changes to GitHub main branch
+
