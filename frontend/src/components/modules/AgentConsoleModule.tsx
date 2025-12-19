@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Activity, Terminal, Cpu, Network, Tag, GitBranch, FileText, Calendar } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Activity, Terminal, Cpu, Network, Zap, MessageSquare } from 'lucide-react';
 
 interface Agent {
     id: string;
@@ -10,19 +10,106 @@ interface Agent {
     icon?: React.ReactNode;
 }
 
-// Define the core Ingestion Swarm agents
-const INGESTION_SWARM_AGENTS: Agent[] = [
-    { id: 'tagger', name: 'TaggerAgent', role: 'Auto-Tagging', status: 'idle', icon: <Tag size={20} /> },
-    { id: 'relation_miner', name: 'RelationMinerAgent', role: 'Graph Discovery', status: 'idle', icon: <GitBranch size={20} /> },
-    { id: 'summarizer', name: 'SummarizerAgent', role: 'Summarization', status: 'idle', icon: <FileText size={20} /> },
-    { id: 'timeline', name: 'TimelineAgent', role: 'Event Extraction', status: 'idle', icon: <Calendar size={20} /> },
-];
+interface SwarmStatus {
+    name: string;
+    agent_count: number;
+    status: string;
+    pending_messages: number;
+}
+
+interface OrchestratorStats {
+    running: boolean;
+    processed_events: number;
+    pending_events: number;
+    registered_handlers: number;
+}
+
+// No hardcoded agents - all agents fetched from API
 
 export function AgentConsoleModule() {
-    const [agents, setAgents] = useState<Agent[]>(INGESTION_SWARM_AGENTS);
+    const [agents, setAgents] = useState<Agent[]>([]);
     const [logs, setLogs] = useState<string[]>([]);
+    const [swarms, setSwarms] = useState<SwarmStatus[]>([]);
+    const [orchestrator, setOrchestrator] = useState<OrchestratorStats | null>(null);
+    const [pipelineCaseId, setPipelineCaseId] = useState('');
+    const [pipelineTriggering, setPipelineTriggering] = useState(false);
+
+    // Fetch all agents from all swarms
+    const fetchAllAgents = useCallback(async () => {
+        try {
+            const res = await fetch('/api/swarms');
+            if (!res.ok) return;
+
+            const data = await res.json();
+            const swarmNames = Object.keys(data.swarms || {});
+
+            const allAgents: Agent[] = [];
+
+            for (const swarmName of swarmNames) {
+                try {
+                    const agentsRes = await fetch(`/api/swarms/${swarmName}/agents`);
+                    if (agentsRes.ok) {
+                        const swarmData = await agentsRes.json();
+                        const swarmAgents = swarmData.agents || [];
+
+                        for (const agentInfo of swarmAgents) {
+                            allAgents.push({
+                                id: `${swarmName}_${agentInfo.name}`,
+                                name: agentInfo.name,
+                                role: agentInfo.role || swarmName,
+                                status: 'idle'
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.debug(`Failed to fetch agents for ${swarmName}`);
+                }
+            }
+
+            setAgents(allAgents);
+        } catch (e) {
+            console.error('Failed to fetch agents:', e);
+        }
+    }, []);
+
+    // Fetch orchestrator data
+    const fetchOrchestratorData = useCallback(async () => {
+        try {
+            const [swarmsRes, orchRes] = await Promise.all([
+                fetch('/api/agent-console/swarms'),
+                fetch('/api/agent-console/orchestrator')
+            ]);
+            if (swarmsRes.ok) setSwarms(await swarmsRes.json());
+            if (orchRes.ok) setOrchestrator(await orchRes.json());
+        } catch (e) {
+            console.error('Failed to fetch orchestrator data:', e);
+        }
+    }, []);
+
+    // Trigger autonomous pipeline
+    const triggerPipeline = async () => {
+        if (!pipelineCaseId.trim()) return;
+        setPipelineTriggering(true);
+        try {
+            const res = await fetch(`/api/agent-console/trigger-pipeline/${pipelineCaseId}`, { method: 'POST' });
+            if (res.ok) {
+                setLogs(prev => [`[SYSTEM] Pipeline triggered for case ${pipelineCaseId}`, ...prev]);
+            }
+        } catch (e) {
+            console.error('Pipeline trigger failed:', e);
+        } finally {
+            setPipelineTriggering(false);
+        }
+    };
 
     useEffect(() => {
+        // Fetch all agents from all swarms
+        fetchAllAgents();
+
+        // Fetch orchestrator data
+        fetchOrchestratorData();
+        const orchestratorInterval = setInterval(fetchOrchestratorData, 5000);
+
         const eventSource = new EventSource('/api/agents/stream');
 
         eventSource.onmessage = (event) => {
@@ -79,21 +166,76 @@ export function AgentConsoleModule() {
         };
 
         return () => {
+            clearInterval(orchestratorInterval);
             eventSource.close();
         };
-    }, []);
+    }, [fetchOrchestratorData, fetchAllAgents]);
 
     return (
-        <div className="w-full h-full flex flex-col p-8 text-halo-text overflow-hidden">
-            <div className="flex items-center gap-4 mb-8">
-                <div className="p-3 bg-halo-cyan/10 rounded-lg border border-halo-cyan/30 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
-                    <Network className="text-halo-cyan w-8 h-8" />
+        <div className="w-full h-full flex flex-col p-6 text-halo-text overflow-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-halo-cyan/10 rounded-lg border border-halo-cyan/30 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
+                        <Network className="text-halo-cyan w-8 h-8" />
+                    </div>
+                    <div>
+                        <h2 className="text-2xl font-light text-halo-text uppercase tracking-wider">Agent Command Center</h2>
+                        <p className="text-halo-muted text-sm">Swarm orchestration & observability</p>
+                    </div>
                 </div>
-                <div>
-                    <h2 className="text-2xl font-light text-halo-text uppercase tracking-wider">Agent Command Center</h2>
-                    <p className="text-halo-muted text-sm">Network observation and task orchestration</p>
-                </div>
+                {orchestrator && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/30">
+                        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                        <span className="text-green-400 text-sm font-mono">
+                            {orchestrator.processed_events} events | {orchestrator.registered_handlers} handlers
+                        </span>
+                    </div>
+                )}
             </div>
+
+            {/* Pipeline Trigger */}
+            <div className="mb-4 p-4 halo-card border-l-4 border-l-purple-500">
+                <div className="flex items-center gap-4">
+                    <Zap className="text-purple-400" size={20} />
+                    <span className="font-semibold">Trigger Autonomous Pipeline</span>
+                    <input
+                        type="text"
+                        value={pipelineCaseId}
+                        onChange={(e) => setPipelineCaseId(e.target.value)}
+                        placeholder="Enter Case ID..."
+                        className="flex-1 px-3 py-2 bg-gray-800 rounded border border-gray-700 text-sm"
+                    />
+                    <button
+                        onClick={triggerPipeline}
+                        disabled={pipelineTriggering || !pipelineCaseId.trim()}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded font-semibold text-sm"
+                    >
+                        {pipelineTriggering ? 'Triggering...' : 'Run Pipeline'}
+                    </button>
+                </div>
+                <p className="text-xs text-halo-muted mt-2 ml-9">
+                    Narrative → Research → Trial Prep → Forensics → Drafting → Simulation
+                </p>
+            </div>
+
+            {/* Swarm Grid */}
+            {swarms.length > 0 && (
+                <div className="mb-4 grid grid-cols-5 gap-2">
+                    {swarms.map(swarm => (
+                        <div key={swarm.name} className="p-3 halo-card text-center">
+                            <div className="font-mono text-sm capitalize">{swarm.name.replace('_', ' ')}</div>
+                            <div className="text-2xl font-bold text-halo-cyan">{swarm.agent_count}</div>
+                            <div className="text-xs text-halo-muted">agents</div>
+                            {swarm.pending_messages > 0 && (
+                                <div className="mt-1 flex items-center justify-center gap-1 text-yellow-400 text-xs">
+                                    <MessageSquare size={10} /> {swarm.pending_messages}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 overflow-hidden">
                 {/* Agent Grid */}

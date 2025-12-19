@@ -72,7 +72,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    command: [ "tail", "-f", "/dev/null" ]
+    # command: [ "tail", "-f", "/dev/null" ]  # Commented out - was blocking API startup!
     # Memory limits removed - no resource constraints
 
   frontend:

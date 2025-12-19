@@ -1,15 +1,17 @@
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from backend.app.services.llm_service import get_llm_service
+from backend.app.services.knowledge_graph_service import get_knowledge_graph_service, KnowledgeGraphService
 import json
 
 class SimulationService:
     """
     A service for running legal simulations, such as mock court, and checking procedural compliance.
+    Enhanced with KG integration.
     """
-
-    def __init__(self):
+    def __init__(self, kg_service: Optional[KnowledgeGraphService] = None):
         self.llm_service = get_llm_service()
+        self.kg_service = kg_service or get_knowledge_graph_service()
 
     async def run_mock_court_simulation(self, scenario: Dict[str, Any]) -> Dict[str, Any]:
         """

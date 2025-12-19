@@ -5,17 +5,21 @@ from backend.app.config import Settings
 from backend.app.storage.document_store import DocumentStore
 from backend.app.forensics.analyzer import ForensicAnalyzer
 from backend.app.forensics.models import ForensicAnalysisResult
+from backend.app.services.knowledge_graph_service import get_knowledge_graph_service, KnowledgeGraphService
 
 logger = logging.getLogger(__name__)
 
 class ForensicsService:
     """
     Service for handling deep forensic analysis tasks.
+    Enhanced with KG integration to query document metadata and store forensic findings.
     """
-    def __init__(self, settings: Settings, document_store: DocumentStore):
+    def __init__(self, settings: Settings, document_store: DocumentStore, kg_service: Optional[KnowledgeGraphService] = None):
         self.settings = settings
         self.document_store = document_store
         self.analyzer = ForensicAnalyzer()
+        # KG Integration: Query graph for document relationships and store forensic findings
+        self.kg_service = kg_service or get_knowledge_graph_service()
 
     async def run_deep_forensics(self, doc_id: str, case_id: str) -> Optional[ForensicAnalysisResult]:
         """

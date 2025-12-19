@@ -204,3 +204,17 @@ async def get_sentiment_report(
             status_code=500,
             detail=f"Failed to generate sentiment report: {e}"
         )
+
+@router.get("/jury-sentiment/{case_id}/parties")
+async def get_case_parties(
+    case_id: str,
+    _principal: Principal = Depends(authorize_timeline),
+    service: JurySentimentService = Depends(get_jury_sentiment_service),
+):
+    """
+    Get parties, witnesses, and entities involved in the case from the Knowledge Graph.
+    """
+    try:
+        return await service.get_case_parties(case_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get case parties: {e}")

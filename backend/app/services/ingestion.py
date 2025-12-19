@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import atexit
 import logging
 import mimetypes
@@ -913,6 +914,13 @@ class IngestionService:
         
         # Cleanup temporary directories created during ingestion
         self._cleanup_temp_directories(job_id, job_record)
+        
+        # ═══════════════════════════════════════════════════════════════════════════
+        # AUTONOMOUS RESEARCH SWARM TRIGGER (Phase 1 KG Connectivity)
+        # After successful ingestion, trigger the ResearchSwarm to autonomously
+        # search for relevant case law and statutes, then upsert findings to KG
+        # ═══════════════════════════════════════════════════════════════════════════
+        self._trigger_autonomous_research(job_id, all_documents, job_record)
 
     def _ensure_job_defaults(
         self, job_record: Dict[str, object], sources: List[IngestionSource]
@@ -1036,6 +1044,113 @@ class IngestionService:
                     "Failed to cleanup temporary directory",
                     extra={"job_id": job_id, "path": str(temp_dir), "error": str(exc)}
                 )
+
+    def _trigger_autonomous_research(
+        self,
+        job_id: str,
+        documents: List[IngestedDocument],
+        job_record: Dict[str, object],
+    ) -> None:
+        """
+        Trigger the ResearchSwarm to autonomously research relevant case law
+        and statutes for ingested documents. Runs as a background task.
+        
+        This is the key integration point for Phase 1 KG Connectivity:
+        - Each document's content and metadata is passed to the research swarm
+        - The swarm searches CourtListener, CA Codes, and Federal Codes
+        - Findings are automatically upserted into the Knowledge Graph
+        """
+        if not documents:
+            return
+        
+        # Get case_id from job record or first document metadata
+        sources = job_record.get("sources", [])
+        case_id = None
+        if sources and isinstance(sources[0], dict):
+            case_id = sources[0].get("metadata", {}).get("case_id")
+        
+        if not case_id:
+            # Try to extract from first document
+            if documents and documents[0].metadata:
+                case_id = documents[0].metadata.get("case_id")
+        
+        if not case_id:
+            case_id = f"case_{job_id[:8]}"  # Fallback case ID
+        
+        def run_research_in_thread():
+            """Execute async research swarm in a new event loop."""
+            try:
+                from backend.app.agents.swarms.research_swarm import get_research_swarm
+                
+                swarm = get_research_swarm()
+                
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    for doc in documents[:5]:  # Limit to first 5 docs to prevent overload
+                        doc_text = str(doc.metadata.get("text", ""))[:2000]  # Truncate
+                        doc_metadata = {
+                            "doc_id": doc.id,
+                            "doc_type": doc.type,
+                            "title": doc.title,
+                            **{k: v for k, v in doc.metadata.items() if k != "text"}
+                        }
+                        
+                        self.logger.info(
+                            "Triggering autonomous research for document",
+                            extra={"doc_id": doc.id, "case_id": case_id}
+                        )
+                        
+                        loop.run_until_complete(
+                            swarm.research_for_document(
+                                doc_id=doc.id,
+                                doc_text=doc_text,
+                                metadata=doc_metadata,
+                                case_id=case_id
+                            )
+                        )
+                finally:
+                    loop.close()
+                    
+                self.logger.info(
+                    "Autonomous research completed for ingestion job",
+                    extra={"job_id": job_id, "documents_researched": min(len(documents), 5)}
+                )
+                
+                self._audit_job_event(
+                    job_id,
+                    action="ingest.autonomous_research.completed",
+                    outcome="success",
+                    metadata={
+                        "documents_researched": min(len(documents), 5),
+                        "case_id": case_id,
+                    },
+                    actor=self._job_actor(job_record),
+                )
+                
+            except Exception as exc:
+                self.logger.warning(
+                    "Autonomous research failed (non-blocking)",
+                    extra={"job_id": job_id, "error": str(exc)}
+                )
+                self._audit_job_event(
+                    job_id,
+                    action="ingest.autonomous_research.failed",
+                    outcome="error",
+                    metadata={"error": str(exc)},
+                    actor=self._job_actor(job_record),
+                    severity="warning",
+                )
+        
+        # Schedule research in background thread (non-blocking)
+        self.executor.submit(run_research_in_thread)
+        
+        self.logger.info(
+            "Autonomous research swarm triggered",
+            extra={"job_id": job_id, "document_count": len(documents)}
+        )
 
     # endregion
 

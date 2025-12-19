@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { endpoints } from '../../services/api';
 import { format } from 'date-fns';
-import { Calendar, Search, ZoomIn, ZoomOut, RefreshCw, ChevronRight, Download } from 'lucide-react';
+import { Calendar, Search, ZoomIn, ZoomOut, RefreshCw, ChevronRight, Download, Network } from 'lucide-react';
+
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import { motion } from 'framer-motion';
 
@@ -15,7 +16,11 @@ interface TimelineEvent {
     source_id?: string;
 }
 
-export function TimelineModule() {
+interface TimelineModuleProps {
+    caseId: string;
+}
+
+export function TimelineModule({ caseId }: TimelineModuleProps) {
     const [events, setEvents] = useState<TimelineEvent[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -40,13 +45,13 @@ export function TimelineModule() {
 
     useEffect(() => {
         fetchTimeline();
-    }, []);
+    }, [caseId]);
 
     const fetchTimeline = async () => {
         setLoading(true);
         try {
             // Try fetch real data
-            const response = await endpoints.timeline.generate(searchQuery || "key events", 'default_case');
+            const response = await endpoints.timeline.generate(searchQuery || "key events", caseId);
             if (response.data && Array.isArray(response.data.events)) {
                 const mappedEvents = response.data.events.map((e: any) => ({
                     id: e.id,
@@ -64,6 +69,18 @@ export function TimelineModule() {
         } catch (error) {
             console.error("Failed to fetch timeline, using mock data:", error);
             setEvents(generateMockEvents());
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSync = async () => {
+        setLoading(true);
+        try {
+            await endpoints.timeline.sync(caseId);
+            await fetchTimeline();
+        } catch (error) {
+            console.error("Failed to sync timeline:", error);
         } finally {
             setLoading(false);
         }
@@ -145,6 +162,10 @@ export function TimelineModule() {
                             aria-label="Filter events"
                         />
                     </div>
+                    <button onClick={handleSync} className="p-2 bg-halo-card border border-halo-border rounded hover:bg-halo-cyan/10 hover:border-halo-cyan transition-colors flex items-center gap-2" title="Sync from Graph">
+                        <Network size={20} className={loading ? "animate-pulse" : ""} />
+                        <span className="hidden xl:inline text-xs font-bold">SYNC GRAPH</span>
+                    </button>
                     <button onClick={fetchTimeline} className="p-2 bg-halo-card border border-halo-border rounded hover:bg-halo-cyan/10 hover:border-halo-cyan transition-colors" title="Refresh">
                         <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
                     </button>

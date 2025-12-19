@@ -1,16 +1,19 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 from backend.app.config import get_settings
 from backend.ingestion.llama_index_factory import create_llm_service
 from backend.ingestion.settings import build_runtime_config
 from backend.app.services.timeline import get_timeline_service
+from backend.app.services.knowledge_graph_service import get_knowledge_graph_service, KnowledgeGraphService
 
 class EvidenceMapService:
-    def __init__(self):
+    """Enhanced with KG integration for location entity queries."""
+    def __init__(self, kg_service: Optional[KnowledgeGraphService] = None):
         settings = get_settings()
         runtime_config = build_runtime_config(settings)
         self.llm_service = create_llm_service(runtime_config.llm)
         self.timeline_service = get_timeline_service()
+        self.kg_service = kg_service or get_knowledge_graph_service()
 
     def analyze_locations(self, case_id: str) -> List[Dict[str, Any]]:
         """

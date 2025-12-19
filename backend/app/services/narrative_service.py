@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.services.llm_service import get_llm_service
 from backend.app.services.timeline_service import TimelineService
+from backend.app.services.knowledge_graph_service import get_knowledge_graph_service, KnowledgeGraphService
 from backend.app.storage.document_store import DocumentStore
 from backend.app.config import get_settings
 
@@ -21,12 +22,15 @@ class Contradiction(BaseModel):
 class NarrativeService:
     """
     Service for generating case narratives and detecting contradictions using LLM.
+    Enhanced with KnowledgeGraphService integration for richer context.
     """
-    def __init__(self, timeline_service: TimelineService, document_store: DocumentStore):
+    def __init__(self, timeline_service: TimelineService, document_store: DocumentStore, kg_service: Optional[KnowledgeGraphService] = None):
         self.timeline_service = timeline_service
         self.document_store = document_store
         self.llm_service = get_llm_service()
         self.settings = get_settings()
+        # KG Integration: Query graph for entities, relationships, and case context
+        self.kg_service = kg_service or get_knowledge_graph_service()
 
     async def generate_narrative(self, case_id: str) -> str:
         """
@@ -45,6 +49,14 @@ class NarrativeService:
         context_lines = ["TIMELINE EVENTS:"]
         for event in sorted_events:
             context_lines.append(f"- {event.event_date}: {event.title} - {event.description}")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # KG INTEGRATION: Query graph for entities, relationships, and insights
+        # ═══════════════════════════════════════════════════════════════════
+        kg_context = await self._get_kg_context(case_id)
+        if kg_context:
+            context_lines.append("\nKNOWLEDGE GRAPH INSIGHTS:")
+            context_lines.extend(kg_context)
             
         context_lines.append("\nKEY DOCUMENTS:")
         # Limit to top 20 documents to avoid context window issues for now
@@ -317,4 +329,74 @@ class NarrativeService:
         except Exception as e:
             logger.error(f"Failed to generate story arc: {e}")
             return []
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # KNOWLEDGE GRAPH INTEGRATION METHODS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    async def _get_kg_context(self, case_id: str) -> List[str]:
+        """
+        Query the Knowledge Graph component for entities, relationships, and insights
+        related to the case. This enriches narrative generation with graph-derived context.
+        """
+        context_lines = []
+        
+        try:
+            # 1. Get case context from KG (entities, relationships, and their connections)
+            case_context = await self.kg_service.get_case_context(case_id)
+            
+            if case_context:
+                # Extract key entities
+                entities = case_context.get("entities", [])
+                if entities:
+                    context_lines.append("KEY ENTITIES:")
+                    for entity in entities[:10]:  # Limit to top 10
+                        entity_type = entity.get("type", "Unknown")
+                        entity_name = entity.get("name") or entity.get("label", "Unknown")
+                        context_lines.append(f"  - [{entity_type}] {entity_name}")
+                
+                # Extract relationships
+                relationships = case_context.get("relationships", [])
+                if relationships:
+                    context_lines.append("KEY RELATIONSHIPS:")
+                    for rel in relationships[:10]:
+                        source = rel.get("source", "?")
+                        target = rel.get("target", "?")
+                        rel_type = rel.get("type", "RELATED_TO")
+                        context_lines.append(f"  - {source} --[{rel_type}]--> {target}")
+            
+            # 2. Query for legal research findings (from ResearchSwarm)
+            research_query = f"""
+            MATCH (c:Case {{id: $case_id}})-[:HAS_RESEARCH]->(r:ResearchFinding)
+            RETURN r.source as source, r.summary as summary
+            LIMIT 5
+            """
+            try:
+                research_results = await self.kg_service.run_cypher_query(
+                    research_query, 
+                    {"case_id": case_id}
+                )
+                if research_results:
+                    context_lines.append("LEGAL RESEARCH FINDINGS:")
+                    for result in research_results:
+                        source = result.get("source", "Unknown Source")
+                        summary = result.get("summary", "")[:200]
+                        if summary:
+                            context_lines.append(f"  - [{source}] {summary}...")
+            except Exception as e:
+                logger.debug(f"No research findings in graph: {e}")
+            
+            # 3. Query for cause of action support scores
+            cause_scores = await self.kg_service.cause_support_scores(case_id)
+            if cause_scores:
+                context_lines.append("CAUSE OF ACTION SUPPORT:")
+                for cause, score in sorted(cause_scores.items(), key=lambda x: -x[1])[:5]:
+                    context_lines.append(f"  - {cause}: {score:.1%} confidence")
+            
+        except Exception as e:
+            logger.warning(f"Failed to get KG context: {e}")
+            # Non-blocking - return empty context if KG unavailable
+        
+        return context_lines
+
 

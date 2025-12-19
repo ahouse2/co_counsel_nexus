@@ -39,7 +39,11 @@ const JuryHeatmap = ({ reactions }: { reactions: any[] }) => {
     );
 };
 
-export function MockTrialArenaModule() {
+interface MockTrialArenaModuleProps {
+    caseId: string;
+}
+
+export function MockTrialArenaModule({ caseId }: MockTrialArenaModuleProps) {
     const [activeSimulation, setActiveSimulation] = useState(false);
     const [simulationSteps, setSimulationSteps] = useState<SimulationStep[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -58,7 +62,7 @@ export function MockTrialArenaModule() {
         // Fetch case context on mount
         const fetchContext = async () => {
             try {
-                const res = await endpoints.context.query("Provide a detailed factual summary and list of contested issues for a mock trial debate.", "default_case");
+                const res = await endpoints.context.query("Provide a detailed factual summary and list of contested issues for a mock trial debate.", caseId);
                 setCaseContext(res.data?.response || "Standard mock trial scenario.");
             } catch (e) {
                 console.error("Failed to fetch context", e);

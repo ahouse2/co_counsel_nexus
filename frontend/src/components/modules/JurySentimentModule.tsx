@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { endpoints } from '../../services/api';
 import { motion } from 'framer-motion';
 import { Scale, Users, TrendingUp, AlertTriangle, ThumbsUp, ThumbsDown } from 'lucide-react';
 
-export function JurySentimentModule() {
+export function JurySentimentModule({ caseId }: { caseId?: string }) {
     const [argumentText, setArgumentText] = useState('');
     const [analysis, setAnalysis] = useState<any>(null);
     const [juryProfile, setJuryProfile] = useState({
@@ -13,6 +13,25 @@ export function JurySentimentModule() {
     });
     const [simulation, setSimulation] = useState<any>(null);
     const [loading, setLoading] = useState(false);
+    const [parties, setParties] = useState<any[]>([]);
+    const [witnesses, setWitnesses] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (caseId) {
+            fetchParties();
+        }
+    }, [caseId]);
+
+    const fetchParties = async () => {
+        if (!caseId) return;
+        try {
+            const res = await endpoints.jurySentiment.getParties(caseId);
+            setParties(res.data.parties || []);
+            setWitnesses(res.data.witnesses || []);
+        } catch (error) {
+            console.error("Failed to fetch parties:", error);
+        }
+    };
 
     const analyzeArgument = async () => {
         if (!argumentText.trim()) return;
@@ -65,9 +84,50 @@ export function JurySentimentModule() {
                 </div>
             </div>
 
-            <div className="flex-1 grid grid-cols-2 gap-8 overflow-hidden">
-                {/* Input Panel */}
-                <div className="flex flex-col gap-4">
+            <div className="flex-1 grid grid-cols-12 gap-8 overflow-hidden">
+                {/* Left Sidebar: Parties & Context */}
+                <div className="col-span-3 flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2">
+                    <div className="bg-black/40 border border-halo-border/50 rounded-lg p-4">
+                        <h3 className="text-sm font-mono text-halo-muted uppercase mb-4 flex items-center gap-2">
+                            <Users size={16} /> Case Parties
+                        </h3>
+                        {parties.length === 0 && witnesses.length === 0 ? (
+                            <p className="text-xs text-halo-muted italic">No parties found in Knowledge Graph.</p>
+                        ) : (
+                            <div className="space-y-4">
+                                {parties.length > 0 && (
+                                    <div>
+                                        <h4 className="text-xs font-bold text-halo-cyan mb-2 uppercase">Parties</h4>
+                                        <ul className="space-y-2">
+                                            {parties.map((p, i) => (
+                                                <li key={i} className="text-xs bg-white/5 p-2 rounded border border-white/10">
+                                                    <div className="font-bold text-white">{p.name}</div>
+                                                    <div className="text-halo-muted truncate">{p.description}</div>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                                {witnesses.length > 0 && (
+                                    <div>
+                                        <h4 className="text-xs font-bold text-yellow-500 mb-2 uppercase">Witnesses</h4>
+                                        <ul className="space-y-2">
+                                            {witnesses.map((w, i) => (
+                                                <li key={i} className="text-xs bg-white/5 p-2 rounded border border-white/10">
+                                                    <div className="font-bold text-white">{w.name}</div>
+                                                    <div className="text-halo-muted truncate">{w.description}</div>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Center: Input Panel */}
+                <div className="col-span-5 flex flex-col gap-4">
                     <div className="flex-1 flex flex-col">
                         <label className="text-sm font-mono text-halo-muted uppercase mb-2">Argument Text</label>
                         <textarea
@@ -143,8 +203,8 @@ export function JurySentimentModule() {
                     </div>
                 </div>
 
-                {/* Results Panel */}
-                <div className="overflow-y-auto custom-scrollbar space-y-6">
+                {/* Right: Results Panel */}
+                <div className="col-span-4 overflow-y-auto custom-scrollbar space-y-6">
                     {!loading && !analysis && !simulation && (
                         <div className="flex flex-col items-center justify-center h-full text-halo-muted">
                             <Scale size={64} className="mb-4 opacity-20" />
@@ -178,12 +238,11 @@ export function JurySentimentModule() {
                                     </span>
                                 </div>
                                 <div className="h-2 bg-black/50 rounded-full overflow-hidden">
-                                    {/* eslint-disable-next-line react/forbid-component-props -- CSS custom properties require style prop */}
                                     <div
-                                        className={`h-full transition-all dynamic-width ${analysis.overall_score >= 0.7 ? 'bg-green-500' :
+                                        className={`h-full transition-all ${analysis.overall_score >= 0.7 ? 'bg-green-500' :
                                             analysis.overall_score >= 0.4 ? 'bg-yellow-500' : 'bg-red-500'
                                             }`}
-                                        style={{ '--score': `${analysis.overall_score * 100}%` } as React.CSSProperties}
+                                        style={{ width: `${analysis.overall_score * 100}%` }}
                                     />
                                 </div>
                             </div>
@@ -199,7 +258,7 @@ export function JurySentimentModule() {
                                         <ThumbsUp size={14} /> Strengths
                                     </h4>
                                     <ul className="space-y-1">
-                                        {analysis.strengths.map((strength: string, i: number) => (
+                                        {analysis.strengths?.map((strength: string, i: number) => (
                                             <li key={i} className="text-sm text-gray-300 pl-4 border-l-2 border-green-500/30">
                                                 {strength}
                                             </li>
@@ -211,7 +270,7 @@ export function JurySentimentModule() {
                                         <ThumbsDown size={14} /> Weaknesses
                                     </h4>
                                     <ul className="space-y-1">
-                                        {analysis.weaknesses.map((weakness: string, i: number) => (
+                                        {analysis.weaknesses?.map((weakness: string, i: number) => (
                                             <li key={i} className="text-sm text-gray-300 pl-4 border-l-2 border-red-500/30">
                                                 {weakness}
                                             </li>
@@ -223,7 +282,7 @@ export function JurySentimentModule() {
                                         <AlertTriangle size={14} /> Recommendations
                                     </h4>
                                     <ul className="space-y-1">
-                                        {analysis.recommendations.map((rec: string, i: number) => (
+                                        {analysis.recommendations?.map((rec: string, i: number) => (
                                             <li key={i} className="text-sm text-gray-300 pl-4 border-l-2 border-blue-500/30">
                                                 {rec}
                                             </li>
@@ -258,14 +317,14 @@ export function JurySentimentModule() {
                                 <div>
                                     <h4 className="text-sm font-mono text-purple-400 uppercase mb-2">Predicted Reactions</h4>
                                     <ul className="space-y-1">
-                                        {simulation.predicted_reactions.map((reaction: string, i: number) => (
+                                        {simulation.predicted_reactions?.map((reaction: string, i: number) => (
                                             <li key={i} className="text-sm text-gray-300 pl-4 border-l-2 border-purple-500/30">
                                                 {reaction}
                                             </li>
                                         ))}
                                     </ul>
                                 </div>
-                                {simulation.concerns.length > 0 && (
+                                {simulation.concerns?.length > 0 && (
                                     <div>
                                         <h4 className="text-sm font-mono text-yellow-400 uppercase mb-2">Concerns</h4>
                                         <ul className="space-y-1">

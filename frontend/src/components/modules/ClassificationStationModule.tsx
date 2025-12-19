@@ -17,7 +17,11 @@ interface ClassifiedDoc {
     status: 'pending_review' | 'reviewed';
 }
 
-export function ClassificationStationModule() {
+interface ClassificationStationModuleProps {
+    caseId: string;
+}
+
+export function ClassificationStationModule({ caseId }: ClassificationStationModuleProps) {
     const [docs, setDocs] = useState<ClassifiedDoc[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -57,7 +61,7 @@ export function ClassificationStationModule() {
         setLoading(true);
         setError(null);
         try {
-            const response = await endpoints.documents.pendingReview('default_case');
+            const response = await endpoints.documents.pendingReview(caseId);
             if (response.data && Array.isArray(response.data) && response.data.length > 0) {
                 const transformed: ClassifiedDoc[] = response.data.map((doc: any) => ({
                     id: doc.id,

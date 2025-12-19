@@ -798,6 +798,15 @@ class GraphService:
                 mapping.setdefault(record["doc_id"], []).append(graph_node)
             return mapping
 
+    def run_cypher(self, query: str, params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """Executes a raw Cypher query and returns a list of dictionaries."""
+        if self.mode != "neo4j":
+            return []
+        
+        with self.driver.session() as session:
+            result = session.execute_read(lambda tx: list(tx.run(query, **(params or {}))))
+            return [dict(record) for record in result]
+
         for edge in self._edges.values():
             if edge.type != "MENTIONS":
                 continue

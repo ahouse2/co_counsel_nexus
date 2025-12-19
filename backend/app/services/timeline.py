@@ -173,6 +173,95 @@ class TimelineService:
         self.store.append([event])
         return event
 
+    def sync_from_kg(self, case_id: str) -> int:
+        """
+        Queries the Knowledge Graph for events and merges them into the timeline.
+        Returns the number of new events added.
+        """
+        # Query for nodes with dates or explicit Event nodes
+        query = """
+        MATCH (c:Case {id: $case_id})
+        MATCH (n)-[:MENTIONS|HAS_DATE]->(d:Date)
+        WHERE n:Document OR n:Event
+        RETURN n, d.date as date, labels(n) as labels
+        UNION
+        MATCH (c:Case {id: $case_id})-[:HAS_EVENT]->(e:Event)
+        RETURN e as n, e.date as date, labels(e) as labels
+        """
+        
+        try:
+            results = self.graph_service.run_cypher(query, {"case_id": case_id})
+            if not results:
+                return 0
+                
+            current_events = self.store.read_all()
+            # Create a set of existing event signatures to avoid duplicates
+            # Signature: date + title (first 50 chars)
+            existing_signatures = {
+                (e.ts.strftime("%Y-%m-%d"), e.title[:50]) 
+                for e in current_events
+                if e.case_id == case_id or e.case_id is None # Handle legacy events
+            }
+            
+            new_events = []
+            from uuid import uuid4
+            
+            for row in results:
+                node = row.get("n", {})
+                date_str = row.get("date")
+                labels = row.get("labels", [])
+                
+                if not date_str:
+                    continue
+                    
+                try:
+                    # Handle various date formats if needed, assuming ISO for now
+                    # Ensure UTC
+                    event_date = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
+                    if event_date.tzinfo is None:
+                        event_date = event_date.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+                    
+                # Determine title and description
+                props = dict(node) # node is a neo4j Node object or dict
+                if "Document" in labels:
+                    title = f"Document: {props.get('filename', 'Unknown Document')}"
+                    summary = props.get('summary', 'No summary available')
+                else:
+                    title = props.get('name') or props.get('title') or "Untitled Event"
+                    summary = props.get('description') or props.get('summary') or "No description"
+                
+                # Check for duplicate
+                signature = (event_date.strftime("%Y-%m-%d"), title[:50])
+                if signature in existing_signatures:
+                    continue
+                    
+                new_event = TimelineEvent(
+                    id=str(uuid4()),
+                    case_id=case_id,
+                    ts=event_date,
+                    title=title,
+                    summary=summary,
+                    citations=[],
+                    risk_score=0.0,
+                    risk_band="low",
+                    event_type="graph_event",
+                    related_event_ids=[]
+                )
+                new_events.append(new_event)
+                existing_signatures.add(signature)
+            
+            if new_events:
+                self.store.append(new_events)
+                return len(new_events)
+                
+            return 0
+            
+        except Exception as e:
+            print(f"Failed to sync timeline from KG: {e}")
+            return 0
+
     @staticmethod
     def _filter_by_case_id(events: Iterable[TimelineEvent], case_id: str) -> List[TimelineEvent]:
         return [e for e in events if e.case_id == case_id]

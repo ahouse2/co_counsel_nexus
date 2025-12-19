@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ..services.llm_service import LLMService, get_llm_service
+from ..services.knowledge_graph_service import get_knowledge_graph_service, KnowledgeGraphService
 
 
 @dataclass
@@ -58,10 +59,15 @@ class IndividualJurorReaction:
     internal_thought: str
 
 class JurySentimentService:
-    """Service for analyzing jury sentiment and predicting reactions."""
+    """
+    Service for analyzing jury sentiment and predicting reactions.
+    Enhanced with KG integration to query party/witness data and store analysis results.
+    """
 
-    def __init__(self, llm_service: Optional[LLMService] = None) -> None:
+    def __init__(self, llm_service: Optional[LLMService] = None, kg_service: Optional[KnowledgeGraphService] = None) -> None:
         self.llm_service = llm_service or get_llm_service()
+        # KG Integration: Query graph for parties, witnesses, and prior testimony
+        self.kg_service = kg_service or get_knowledge_graph_service()
 
     async def simulate_individual_jurors(
         self, argument: str, jurors: List[JurorPersona]
@@ -319,6 +325,54 @@ class JurySentimentService:
             red_flags=["Analysis failed"],
             strengths=[],
         )
+
+    async def get_case_parties(self, case_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Query the Knowledge Graph for parties and witnesses involved in the case.
+        Returns a dictionary with 'parties' and 'witnesses' lists.
+        """
+        query = """
+        MATCH (c:Case {id: $case_id})-[:INVOLVES]->(p:Party)
+        RETURN p, labels(p) as labels, 'party' as role
+        UNION
+        MATCH (c:Case {id: $case_id})-[:HAS_WITNESS]->(w:Witness)
+        RETURN w as p, labels(w) as labels, 'witness' as role
+        UNION
+        MATCH (c:Case {id: $case_id})-[:MENTIONS]->(e:Entity)
+        WHERE e.type IN ['PERSON', 'ORGANIZATION']
+        RETURN e as p, labels(e) as labels, 'entity' as role
+        """
+        
+        result_data = {"parties": [], "witnesses": [], "entities": []}
+        
+        try:
+            results = await self.kg_service.run_cypher_query(query, {"case_id": case_id})
+            if not results:
+                return result_data
+                
+            for row in results:
+                node = row.get("p", {})
+                role = row.get("role")
+                
+                person_data = {
+                    "id": node.get("elementId"),
+                    "name": node.get("name") or node.get("label") or "Unknown",
+                    "description": node.get("description", ""),
+                    "type": node.get("type", "Unknown")
+                }
+                
+                if role == 'party':
+                    result_data["parties"].append(person_data)
+                elif role == 'witness':
+                    result_data["witnesses"].append(person_data)
+                else:
+                    result_data["entities"].append(person_data)
+                    
+            return result_data
+            
+        except Exception as e:
+            print(f"Failed to get case parties from KG: {e}")
+            return result_data
 
 
 def get_jury_sentiment_service() -> JurySentimentService:

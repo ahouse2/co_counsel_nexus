@@ -10,10 +10,27 @@ const api = axios.create({
     },
 });
 
+// Request interceptor to add auth token
+api.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('co_counsel_token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
 // Response interceptor for error handling
 api.interceptors.response.use(
     (response) => response,
     (error) => {
+        // Handle 401 - redirect to login if needed
+        if (error.response?.status === 401) {
+            // Could dispatch to auth context here if needed
+            console.warn('Unauthorized - token may be expired');
+        }
         console.error('API Error:', error);
         return Promise.reject(error);
     }
@@ -103,6 +120,7 @@ export const endpoints = {
             branching: (caseId: string, pivot: string, fact: string) => api.post(`/api/narrative/${caseId}/branching`, { pivot_point: pivot, alternative_fact: fact }),
             storyArc: (caseId: string) => api.get(`/api/narrative/${caseId}/story_arc`),
         },
+        sync: (caseId: string) => api.post(`/api/timeline/${caseId}/sync`),
     },
     // Context
     context: {
@@ -151,6 +169,7 @@ export const endpoints = {
         analyzeArgument: (data: any) => api.post('/api/jury-sentiment/analyze-argument', data),
         simulateJury: (data: any) => api.post('/api/jury-sentiment/simulate-jury', data),
         getReport: (caseId: string) => api.get(`/api/jury-sentiment/${caseId}/report`),
+        getParties: (caseId: string) => api.get(`/api/jury-sentiment/${caseId}/parties`),
     },
     // Adversarial
     adversarial: {
@@ -239,11 +258,42 @@ export const endpoints = {
         createRecipient: (name: string, address: string) => api.post('/api/recipients', { name, address }),
         listDocuments: () => api.get('/api/documents'),
     },
+    // Swarms - Agent Swarm Control
+    swarms: {
+        list: () => api.get('/api/swarms'),
+        trigger: (swarmName: string, caseId: string, params: Record<string, any> = {}) =>
+            api.post('/api/swarms/trigger', { swarm_name: swarmName, case_id: caseId, params }),
+        agents: (swarmName: string) => api.get(`/api/swarms/${swarmName}/agents`),
+    },
     // Settings
     settings: {
         get: () => api.get('/api/settings'),
         update: (data: any) => api.put('/api/settings', data),
         models: () => api.get('/api/settings/models'),
+    },
+    // Authentication
+    auth: {
+        login: (email: string, password: string) => {
+            const formData = new URLSearchParams();
+            formData.append('username', email);
+            formData.append('password', password);
+            return api.post('/api/token', formData, {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            });
+        },
+        register: (email: string, password: string) => {
+            const formData = new URLSearchParams();
+            formData.append('username', email);
+            formData.append('password', password);
+            return api.post('/api/register', formData, {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            });
+        },
+        logout: () => api.post('/api/logout'),
+        me: () => api.get('/api/users/me/'),
+        refresh: (refreshToken: string) => api.post('/api/token/refresh', { refresh_token: refreshToken }),
+        forgotPassword: (email: string) => api.post('/api/forgot-password', { email }),
+        resetPassword: (token: string, newPassword: string) => api.post('/api/reset-password', { token, new_password: newPassword }),
     }
 };
 

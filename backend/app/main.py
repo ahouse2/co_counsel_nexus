@@ -6,7 +6,7 @@ from .telemetry import setup_telemetry
 from .events import register_events
 
 # Routers
-from .api import retrieval, graph, agents, scenarios, auth, evidence_binder, predictive_analytics, settings as settings_api, graphql, health, billing, onboarding, legal_research, legal_theory, argument_mapping, strategic_recommendations, timeline, voice, ingestion, knowledge, dev_agent, sandbox, cost, documents, document_drafting, binder_preparation, feedback, mock_trial, forensics, knowledge_graph, service_of_process, users, cases, trial_university, halo, agents_status, agents_stream, memory, autonomous_scraping, autonomous_courtlistener, video_generation, narrative, adversarial, evidence_map, simulation, jury_sentiment, metrics, context, intelligence, devils_advocate, financial_forensics
+from .api import retrieval, graph, agents, scenarios, auth, evidence_binder, predictive_analytics, settings as settings_api, graphql, health, billing, onboarding, legal_research, legal_theory, argument_mapping, strategic_recommendations, timeline, voice, ingestion, knowledge, dev_agent, sandbox, cost, documents, document_drafting, binder_preparation, feedback, mock_trial, forensics, knowledge_graph, service_of_process, users, cases, trial_university, halo, agents_status, agents_stream, memory, autonomous_scraping, autonomous_courtlistener, video_generation, narrative, adversarial, evidence_map, simulation, jury_sentiment, metrics, context, intelligence, devils_advocate, financial_forensics, swarms, agent_console
 from .memory_store import CaseMemoryStore
 from .api import memory
 
@@ -171,9 +171,37 @@ app.include_router(financial_forensics.router, prefix="/api/financial", tags=["F
 app.include_router(jury_sentiment.router, prefix="/api", tags=["Jury Sentiment"])
 app.include_router(metrics.router, prefix="/api", tags=["Metrics"])
 app.include_router(intelligence.router, prefix="/api/intelligence", tags=["Intelligence"])
-
+app.include_router(swarms.router, prefix="/api", tags=["Swarms"])
+app.include_router(agent_console.router, prefix="/api", tags=["Agent Console"])
 
 # DB init
 from .database import engine, Base
 from .models import service_of_process, document, recipient, role, user_role, permission, role_permission, case
 Base.metadata.create_all(bind=engine)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AUTONOMOUS ORCHESTRATOR LIFECYCLE
+# ═══════════════════════════════════════════════════════════════════════════
+from contextlib import asynccontextmanager
+import asyncio
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan context manager for startup/shutdown."""
+    # Startup
+    logger.info("Starting AutonomousOrchestrator...")
+    from .services.autonomous_orchestrator import startup_orchestrator
+    await startup_orchestrator()
+    logger.info("AutonomousOrchestrator started successfully")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Stopping AutonomousOrchestrator...")
+    from .services.autonomous_orchestrator import shutdown_orchestrator
+    await shutdown_orchestrator()
+    logger.info("AutonomousOrchestrator stopped")
+
+# Apply lifespan to app
+app.router.lifespan_context = lifespan
+

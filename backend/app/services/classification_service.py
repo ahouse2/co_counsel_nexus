@@ -1,12 +1,19 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
-from llama_index.core.selectors import LLMMultiSelector, SelectorResult
+from llama_index.core.selectors import LLMMultiSelector
+try:
+    from llama_index.core.selectors.types import SelectorResult
+except ImportError:
+    try:
+        from llama_index.core.selectors import SelectorResult
+    except ImportError:
+        # Define a stub if not available
+        SelectorResult = Any
 from llama_index.core.schema import TextNode
 from llama_index.core.tools import ToolMetadata
 
-from backend.app.services.llm_service import BaseLlmService
 from backend.ingestion.llama_index_factory import create_llm_service
 from backend.app.config import get_settings
 
@@ -21,7 +28,7 @@ class ClassificationService:
     """
     Service for classifying documents using LlamaIndex's LLMMultiSelector.
     """
-    def __init__(self, llm_service: BaseLlmService = None):
+    def __init__(self):
         settings = get_settings()
         # We need the underlying LlamaIndex LLM, but our factory returns a wrapper.
         # However, LLMMultiSelector expects a LlamaIndex LLM.

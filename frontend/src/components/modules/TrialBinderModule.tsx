@@ -11,7 +11,11 @@ interface BinderDoc {
     type: string;
 }
 
-export function TrialBinderModule() {
+interface TrialBinderModuleProps {
+    caseId: string;
+}
+
+export function TrialBinderModule({ caseId }: TrialBinderModuleProps) {
     const [binderDocs, setBinderDocs] = useState<BinderDoc[]>([]);
     const [allDocs, setAllDocs] = useState<BinderDoc[]>([]);
     const [loading, setLoading] = useState(false);
@@ -26,7 +30,7 @@ export function TrialBinderModule() {
     const fetchDocuments = async () => {
         setLoading(true);
         try {
-            const response = await endpoints.documents.list('1');
+            const response = await endpoints.documents.list(caseId);
             const docs = response.data.map((d: any) => ({
                 id: d.id,
                 filename: d.filename,

@@ -37,7 +37,11 @@ interface ApiDocResponse {
   };
 }
 
-export function ForensicsModule() {
+interface ForensicsModuleProps {
+  caseId: string;
+}
+
+export function ForensicsModule({ caseId }: ForensicsModuleProps) {
   const [documents, setDocuments] = useState<ForensicDoc[]>([]);
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
@@ -49,8 +53,7 @@ export function ForensicsModule() {
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
     try {
-      // @ts-ignore - explicitly ignoring if type definition is lagging
-      const response = await endpoints.documents.list('default_case');
+      const response = await endpoints.documents.list(caseId);
 
       const docs = response.data.map((d: ApiDocResponse) => ({
         id: d.id,
@@ -77,8 +80,7 @@ export function ForensicsModule() {
   const handleDeepAnalysis = async (id: string) => {
     setAnalyzing(id);
     try {
-      // @ts-ignore
-      const response = await endpoints.forensics.analyze(id, 'default_case');
+      const response = await endpoints.forensics.analyze(id, caseId);
       setAnalysisResult(response.data); // Now returns ForensicAnalysisResult dict
     } catch (error) {
       console.error("Failed to run deep analysis:", error);

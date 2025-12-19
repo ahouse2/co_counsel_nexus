@@ -157,7 +157,11 @@ const OCRView = ({ docId }: { docId: string }) => {
     );
 };
 
-export function DocumentModule() {
+interface DocumentModuleProps {
+    caseId: string;
+}
+
+export function DocumentModule({ caseId }: DocumentModuleProps) {
     const { activeSubmodule, setActiveSubmodule } = useHalo();
 
     // Upload function for chunked uploads
@@ -169,7 +173,7 @@ export function DocumentModule() {
         formData.append('chunk_index', chunkIndex.toString());
         formData.append('total_chunks', totalChunks.toString());
 
-        return await endpoints.documents.uploadChunk('default_case', formData, (progressEvent) => {
+        return await endpoints.documents.uploadChunk(caseId, formData, (progressEvent) => {
             if (onProgress && progressEvent.total) {
                 onProgress(progressEvent.loaded / progressEvent.total);
             }
@@ -306,7 +310,7 @@ export function DocumentModule() {
     const fetchDocuments = async () => {
         setLoading(true);
         try {
-            const response = await endpoints.documents.list('default_case');
+            const response = await endpoints.documents.list(caseId);
             const docs = Array.isArray(response.data) ? response.data : (response.data.documents || []);
             setDocuments(docs);
         } catch (error) {
@@ -332,7 +336,7 @@ export function DocumentModule() {
         try {
             addLog('[SYSTEM] Triggering local file sync from /data directory...');
             setActiveSubmodule('logs'); // Show logs
-            const response = await endpoints.documents.triggerLocalIngestion('default_case');
+            const response = await endpoints.documents.triggerLocalIngestion(caseId);
             addLog(`[SUCCESS] ${response.data.message}`);
             addLog('[INFO] Files will be processed in background. Refresh document list to see progress.');
             setTimeout(fetchDocuments, 2000);
@@ -345,7 +349,7 @@ export function DocumentModule() {
     const handleCaseExport = async () => {
         try {
             addLog("[SYSTEM] Exporting case...");
-            const response = await endpoints.cases.export('default_case');
+            const response = await endpoints.cases.export(caseId);
             const url = window.URL.createObjectURL(new Blob([response.data]));
             const link = document.createElement('a');
             link.href = url;
@@ -539,7 +543,7 @@ export function DocumentModule() {
                 if (!query.trim()) return;
                 setSearching(true);
                 try {
-                    const response = await endpoints.context.query(query, 'default_case');
+                    const response = await endpoints.context.query(query, caseId);
                     setResults(response.data.results);
                 } catch (error) {
                     console.error("Context query failed:", error);

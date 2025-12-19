@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional
 from backend.app.config import Settings
 from backend.ingestion.settings import build_runtime_config
+from backend.app.services.knowledge_graph_service import get_knowledge_graph_service, KnowledgeGraphService
 from llama_index.core import VectorStoreIndex, StorageContext
 from llama_index.vector_stores.qdrant import QdrantVectorStore
 import qdrant_client
@@ -10,11 +11,13 @@ logger = logging.getLogger(__name__)
 
 class ContextService:
     """
-    Service for querying document context using LlamaIndex.
+    Service for querying document context using LlamaIndex + KG.
+    Enhanced with Knowledge Graph integration for hybrid retrieval.
     """
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, kg_service: Optional[KnowledgeGraphService] = None):
         self.settings = settings
         self.runtime_config = build_runtime_config(settings)
+        self.kg_service = kg_service or get_knowledge_graph_service()
         
         # Initialize Qdrant Client
         self.client = qdrant_client.QdrantClient(

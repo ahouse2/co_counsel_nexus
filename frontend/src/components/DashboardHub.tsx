@@ -19,10 +19,11 @@ import { ClassificationStationModule } from './modules/ClassificationStationModu
 import { NarrativeModule } from './modules/NarrativeModule';
 import { DevilsAdvocateModule } from './modules/DevilsAdvocateModule';
 import { DashboardModule } from './modules/DashboardModule';
+import { JurySentimentModule } from './modules/JurySentimentModule';
 import { CommandPalette } from './ui/CommandPalette';
 
 export function DashboardHub() {
-    const { activeModule } = useHalo();
+    const { activeModule, caseId } = useHalo();
 
     const renderModule = () => {
         switch (activeModule) {
@@ -31,35 +32,37 @@ export function DashboardHub() {
             case 'theory':
                 return <LegalTheoryModule />;
             case 'forensics':
-                return <ForensicsModule />;
+                return <ForensicsModule caseId={caseId} />;
             case 'drafting':
                 return <DocumentDraftingModule />;
             case 'presentation':
                 return <InCourtPresentationModule />;
             case 'research':
-                return <LegalResearchModule />;
+                return <LegalResearchModule caseId={caseId} />;
             case 'process':
                 return <ServiceOfProcessModule />;
             case 'agents':
                 return <AgentConsoleModule />;
             case 'documents':
-                return <DocumentModule />;
+                return <DocumentModule caseId={caseId} />;
             case 'timeline':
-                return <TimelineModule />;
+                return <TimelineModule caseId={caseId} />;
             case 'context':
-                return <ContextEngineModule />;
+                return <ContextEngineModule caseId={caseId} />;
             case 'arena':
-                return <MockTrialArenaModule />;
+                return <MockTrialArenaModule caseId={caseId} />;
             case 'university':
                 return <TrialUniversityModule />;
             case 'binder':
-                return <TrialBinderModule />;
+                return <TrialBinderModule caseId={caseId} />;
             case 'classification':
-                return <ClassificationStationModule />;
+                return <ClassificationStationModule caseId={caseId} />;
             case 'narrative':
-                return <NarrativeModule caseId="default_case" isActive={activeModule === 'narrative'} />;
+                return <NarrativeModule caseId={caseId} isActive={activeModule === 'narrative'} />;
             case 'devils_advocate':
-                return <DevilsAdvocateModule caseId="default_case" isActive={activeModule === 'devils_advocate'} />;
+                return <DevilsAdvocateModule caseId={caseId} isActive={activeModule === 'devils_advocate'} />;
+            case 'jury':
+                return <JurySentimentModule caseId={caseId} />;
             default:
                 return <DashboardModule />;
         }

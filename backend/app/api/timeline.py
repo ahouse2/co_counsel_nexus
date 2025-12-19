@@ -193,3 +193,18 @@ async def detect_contradictions(
         return service.detect_contradictions(case_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to detect contradictions: {e}")
+
+@router.post("/timeline/{case_id}/sync")
+async def sync_timeline(
+    case_id: str,
+    _principal: Principal = Depends(authorize_timeline),
+    service: TimelineService = Depends(get_timeline_service),
+):
+    """
+    Synchronizes the timeline with events from the Knowledge Graph.
+    """
+    try:
+        count = service.sync_from_kg(case_id)
+        return {"added": count, "message": f"Successfully synced {count} events from Knowledge Graph"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to sync timeline: {e}")

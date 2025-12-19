@@ -31,7 +31,11 @@ interface Trigger {
     enabled: boolean;
 }
 
-export function LegalResearchModule() {
+interface LegalResearchModuleProps {
+    caseId: string;
+}
+
+export function LegalResearchModule({ caseId }: LegalResearchModuleProps) {
     const [activeTab, setActiveTab] = useState<'research' | 'docket' | 'scraper' | 'advanced'>('research');
 
     // Legacy Research State
@@ -83,7 +87,7 @@ export function LegalResearchModule() {
         if (!query.trim()) return;
         setSearching(true);
         try {
-            const response = await endpoints.agents.run(`Research: ${query}`, 'default_case');
+            const response = await endpoints.agents.run(`Research: ${query}`, caseId);
             setResults([{
                 id: 'res-1',
                 citation: 'Agent Research Report',
@@ -100,8 +104,7 @@ export function LegalResearchModule() {
     const handleGenerateTheories = async () => {
         setGenerating(true);
         try {
-            // @ts-ignore
-            const response = await endpoints.legalTheory.suggestions('default_case');
+            const response = await endpoints.legalTheory.suggestions(caseId);
             setTheories(response.data);
         } catch (error) {
             console.error("Failed to generate theories:", error);
