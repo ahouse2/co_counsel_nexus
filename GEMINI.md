@@ -296,3 +296,12 @@ DevilsAdvocate Evidence Graph Integration
 - Added "Evidence Graph" tab to `DevilsAdvocateModule.tsx` with KG-sourced visualization
 - Shows causes of action, supporting evidence with strength scores, and contradiction warnings
 - Pushed all changes to GitHub main branch
+
+/newline
+@2025/12/20 03:55:00 AM
+KnowledgeGraph API & LegalTheory Cause Strength
+- Added `knowledgeGraph` endpoints to frontend `api.ts` (causeSupportScores, causeSubgraph, subgraph, searchLegal, node, nodeRelationships)
+- Added "Cause Support Strength" submodule view to `LegalTheoryModule.tsx`
+- Displays KG-sourced cause-of-action support scores with visual progress bars
+- Shows satisfied/total elements and missing elements per cause
+- Pushed all changes to GitHub main branch
