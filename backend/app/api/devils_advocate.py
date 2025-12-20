@@ -67,3 +67,15 @@ async def generate_motion_to_dismiss(
         motion_text=f"COMES NOW the Defendant, by and through undersigned counsel, and moves this Court to dismiss... based on {', '.join(request.grounds)}...",
         likelihood_of_success=0.45
     )
+
+@router.get("/{case_id}/evidence_graph")
+async def get_evidence_graph(
+    case_id: str,
+    service: DevilsAdvocateService = Depends(get_devils_advocate_service)
+):
+    """
+    Returns evidence support graph from Knowledge Graph for visualization.
+    Includes nodes (causes, evidence) and edges (support/contradiction relationships).
+    """
+    return await service.get_evidence_graph(case_id)
+

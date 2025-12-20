@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ShieldAlert, AlertTriangle, Gavel, RefreshCw, CheckCircle } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Gavel, RefreshCw, CheckCircle, Network } from 'lucide-react';
 import { endpoints } from '../../services/api';
 
 interface CaseWeakness {
@@ -17,6 +17,22 @@ interface CrossExamQuestion {
     difficulty: string;
 }
 
+interface GraphNode {
+    id: string;
+    label: string;
+    type: 'cause' | 'evidence';
+    group: string;
+    score?: number;
+}
+
+interface GraphEdge {
+    from: string;
+    to: string;
+    label: string;
+    strength?: number;
+    color?: string;
+}
+
 interface DevilsAdvocateModuleProps {
     caseId: string;
     isActive: boolean;
@@ -29,6 +45,11 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
     const [witnessStatement, setWitnessStatement] = useState("");
     const [crossExamQuestions, setCrossExamQuestions] = useState<CrossExamQuestion[]>([]);
     const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
+    const [activeTab, setActiveTab] = useState<'review' | 'crossexam' | 'motion' | 'graph'>('review');
+    const [motionGrounds, setMotionGrounds] = useState<string[]>([]);
+    const [motionDraft, setMotionDraft] = useState<any | null>(null);
+    const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
+    const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
 
     const generateCrossExam = async () => {
         if (!witnessStatement.trim()) return;
@@ -55,10 +76,18 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
         }
     };
 
-    // ... (generateCrossExam remains same)
-    const [activeTab, setActiveTab] = useState<'review' | 'crossexam' | 'motion'>('review');
-    const [motionGrounds, setMotionGrounds] = useState<string[]>([]);
-    const [motionDraft, setMotionDraft] = useState<any | null>(null);
+    const fetchEvidenceGraph = async () => {
+        setIsLoading(true);
+        try {
+            const res = await endpoints.devilsAdvocate.evidenceGraph(caseId);
+            setGraphNodes(res.data.nodes || []);
+            setGraphEdges(res.data.edges || []);
+        } catch (error) {
+            console.error("Failed to fetch evidence graph", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const generateMotion = async () => {
         setIsLoading(true);
@@ -75,6 +104,7 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
     useEffect(() => {
         // Don't auto-fetch on mount anymore, let user trigger it with their theory
     }, [isActive, caseId]);
+
 
     return (
         <div className="h-full w-full flex flex-col bg-slate-950 text-slate-200 p-6 overflow-hidden">
@@ -117,7 +147,18 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
                     <CheckCircle className="w-4 h-4" />
                     Motion to Dismiss
                 </button>
+                <button
+                    onClick={() => { setActiveTab('graph'); fetchEvidenceGraph(); }}
+                    className={`px-4 py-2 rounded-lg transition-all flex items-center gap-2 ${activeTab === 'graph'
+                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50'
+                        : 'hover:bg-slate-800 text-slate-400'
+                        }`}
+                >
+                    <Network className="w-4 h-4" />
+                    Evidence Graph
+                </button>
             </div>
+
 
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <AnimatePresence mode="wait">
@@ -285,8 +326,86 @@ export const DevilsAdvocateModule: React.FC<DevilsAdvocateModuleProps> = ({ case
                                 </div>
                             )}
                         </motion.div>
-                    )}
+                    ) : activeTab === 'graph' ? (
+                    <motion.div
+                        key="graph"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className="flex flex-col h-full"
+                    >
+                        <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mb-6">
+
+                            <h3 className="font-semibold text-purple-300 mb-2 flex items-center gap-2">
+                                <Network className="w-5 h-5" />
+                                Evidence Support Graph
+                            </h3>
+                            <p className="text-xs text-slate-500">
+                                Visual representation of causes of action and their supporting evidence from the Knowledge Graph.
+                            </p>
+                        </div>
+
+                        {isLoading ? (
+                            <div className="flex flex-col items-center justify-center h-64 text-slate-500">
+                                <RefreshCw className="w-8 h-8 animate-spin mb-4" />
+                                <p>Loading evidence graph...</p>
+                            </div>
+                        ) : graphNodes.length === 0 ? (
+                            <div className="text-center text-slate-500 py-12">
+                                <Network className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                                <p>No evidence graph data available.</p>
+                                <p className="text-xs mt-2">Ingest documents and run analysis to populate the knowledge graph.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-6">
+                                {/* Causes of Action */}
+                                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+                                    <h4 className="text-sm font-bold text-purple-400 uppercase mb-4">Causes of Action</h4>
+                                    <div className="space-y-3">
+                                        {graphNodes.filter(n => n.type === 'cause').map(node => (
+                                            <div key={node.id} className="bg-purple-500/10 border border-purple-500/30 p-3 rounded-lg">
+                                                <div className="font-semibold text-purple-200">{node.label}</div>
+                                                <div className="text-xs text-slate-500 mt-1">
+                                                    {graphEdges.filter(e => e.to === node.id && e.label === 'SUPPORTS').length} supporting evidence
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Evidence Items */}
+                                <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+                                    <h4 className="text-sm font-bold text-blue-400 uppercase mb-4">Evidence Items</h4>
+                                    <div className="space-y-3 max-h-96 overflow-y-auto custom-scrollbar">
+                                        {graphNodes.filter(n => n.type === 'evidence').map(node => {
+                                            const supportEdge = graphEdges.find(e => e.from === node.id && e.label === 'SUPPORTS');
+                                            const hasContradiction = graphEdges.some(e => (e.from === node.id || e.to === node.id) && e.label === 'CONTRADICTS');
+                                            return (
+                                                <div key={node.id} className={`p-3 rounded-lg border ${hasContradiction ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}`}>
+                                                    <div className="font-medium text-slate-200 text-sm">{node.label}</div>
+                                                    <div className="flex items-center gap-2 mt-2">
+                                                        {supportEdge && (
+                                                            <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full">
+                                                                Strength: {((supportEdge.strength || 0.5) * 100).toFixed(0)}%
+                                                            </span>
+                                                        )}
+                                                        {hasContradiction && (
+                                                            <span className="text-xs px-2 py-0.5 bg-red-500/20 text-red-400 rounded-full">
+                                                                ⚠ Contradiction
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </motion.div>
+                    ) : null}
                 </AnimatePresence>
+
             </div>
         </div>
     );

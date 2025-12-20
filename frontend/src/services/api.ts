@@ -180,7 +180,9 @@ export const endpoints = {
         review: (caseId: string, caseTheory: string = "") => api.post(`/api/devils-advocate/${caseId}/review`, { case_theory: caseTheory }),
         crossExamine: (statement: string, profile: string = "") => api.post('/api/devils-advocate/cross-examine', { witness_statement: statement, witness_profile: profile }),
         motionToDismiss: (caseId: string, grounds: string[]) => api.post(`/api/devils-advocate/${caseId}/motion_to_dismiss`, { grounds }),
+        evidenceGraph: (caseId: string) => api.get(`/api/devils-advocate/${caseId}/evidence_graph`),
     },
+
     // Document Drafting
     drafting: {
         autocomplete: (currentText: string, cursorPosition: number, context: string = "") => api.post('/api/drafting/autocomplete', { current_text: currentText, cursor_position: cursorPosition, context }),

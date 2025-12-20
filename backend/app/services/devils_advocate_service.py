@@ -239,3 +239,74 @@ class DevilsAdvocateService:
         
         return analysis_lines
 
+    async def get_evidence_graph(self, case_id: str) -> Dict[str, Any]:
+        """
+        Fetches evidence support graph from Knowledge Graph for visualization.
+        Returns nodes (causes, evidence) and edges (support relationships).
+        """
+        nodes = []
+        edges = []
+        
+        try:
+            # Query for causes of action and their supporting evidence
+            query = """
+            MATCH (c:CauseOfAction {case_id: $case_id})
+            OPTIONAL MATCH (e:Evidence)-[:SUPPORTS]->(c)
+            RETURN c.name as cause, c.id as cause_id, 
+                   collect({id: e.id, summary: e.summary, score: e.support_score}) as evidence
+            """
+            results = await self.kg_service.run_cypher_query(query, {"case_id": case_id})
+            
+            for row in results:
+                cause_id = row.get("cause_id", row.get("cause", "unknown"))
+                cause_name = row.get("cause", "Unknown Cause")
+                
+                # Add cause node
+                nodes.append({
+                    "id": cause_id,
+                    "label": cause_name,
+                    "type": "cause",
+                    "group": "cause"
+                })
+                
+                # Add evidence nodes and edges
+                for ev in (row.get("evidence") or []):
+                    if ev.get("id"):
+                        nodes.append({
+                            "id": ev["id"],
+                            "label": (ev.get("summary") or "Evidence")[:50],
+                            "type": "evidence",
+                            "group": "evidence",
+                            "score": ev.get("score", 0.5)
+                        })
+                        edges.append({
+                            "from": ev["id"],
+                            "to": cause_id,
+                            "label": "SUPPORTS",
+                            "strength": ev.get("score", 0.5)
+                        })
+            
+            # Also query for contradictions
+            contradiction_query = """
+            MATCH (e1:Evidence)-[:CONTRADICTS]->(e2:Evidence)
+            WHERE e1.case_id = $case_id OR e2.case_id = $case_id
+            RETURN e1.id as from_id, e1.summary as from_label, 
+                   e2.id as to_id, e2.summary as to_label
+            """
+            contradictions = await self.kg_service.run_cypher_query(
+                contradiction_query, {"case_id": case_id}
+            )
+            
+            for c in contradictions:
+                edges.append({
+                    "from": c.get("from_id"),
+                    "to": c.get("to_id"),
+                    "label": "CONTRADICTS",
+                    "color": "red"
+                })
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch evidence graph: {e}")
+        
+        return {"nodes": nodes, "edges": edges, "case_id": case_id}
+
