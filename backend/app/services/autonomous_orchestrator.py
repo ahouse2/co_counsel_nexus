@@ -510,6 +510,18 @@ class AutonomousOrchestrator:
             except Exception as e:
                 logger.warning(f"[AUTO] Stage 6 (Simulation) failed: {e}")
             
+            # STAGE 7: Intelligence Synthesis - Generate actionable intelligence report
+            logger.info(f"[AUTO] Stage 7: Generating Intelligence Report...")
+            try:
+                from backend.app.services.intelligence_service import IntelligenceService
+                intel_service = IntelligenceService()
+                intel_result = await intel_service.synthesize_case_intelligence(case_id)
+                logger.info(f"[AUTO] Stage 7 Complete: Intelligence report ready")
+                self._log_activity("intelligence_report_complete", str(intel_result)[:100])
+            except Exception as e:
+                logger.warning(f"[AUTO] Stage 7 (Intelligence Synthesis) failed: {e}")
+
+            
             logger.info(f"[AUTO] ═══════════════════════════════════════════════════════")
             logger.info(f"[AUTO] AUTONOMOUS PIPELINE COMPLETE for case {case_id}")
             logger.info(f"[AUTO] User can now review: Timeline, Research, Briefs, Predictions")

@@ -254,3 +254,130 @@ class IntelligenceService:
             # In reality, might need to read from file.
             # For now, skipping full text fetch implementation details.
             pass
+
+    async def synthesize_case_intelligence(self, case_id: str) -> Dict[str, Any]:
+        """
+        Synthesizes all analysis into an actionable intelligence report.
+        Called automatically after batch ingestion completes.
+        
+        Returns:
+            Dict containing:
+            - theories: Ranked legal theories with evidence support
+            - fact_patterns: Key patterns identified across documents
+            - weaknesses: Critical gaps in the case
+            - next_steps: Recommended actions
+            - report_summary: Human-readable summary
+        """
+        logger.info(f"[INTELLIGENCE] Starting case intelligence synthesis for {case_id}")
+        
+        result = {
+            "case_id": case_id,
+            "status": "completed",
+            "theories": [],
+            "fact_patterns": [],
+            "weaknesses": [],
+            "next_steps": [],
+            "report_summary": "",
+            "generated_at": datetime.now().isoformat(),
+        }
+        
+        try:
+            # Step 1: Get legal theories from the theory engine
+            logger.info(f"[INTELLIGENCE] Fetching legal theories for {case_id}")
+            theories = await self.legal_theory_engine.suggest_theories(case_id)
+            result["theories"] = theories
+            
+            # Step 2: Get timeline events for pattern detection
+            logger.info(f"[INTELLIGENCE] Analyzing timeline patterns for {case_id}")
+            timeline_events = []
+            try:
+                timeline_events = await self.timeline_service.get_case_timeline(case_id)
+            except Exception as e:
+                logger.warning(f"Timeline fetch failed: {e}")
+            
+            # Step 3: Query KG for document relationships and entities
+            logger.info(f"[INTELLIGENCE] Querying knowledge graph for {case_id}")
+            kg_context = {}
+            try:
+                from backend.app.services.knowledge_graph_service import get_knowledge_graph_service
+                kg_service = get_knowledge_graph_service()
+                kg_context = await kg_service.get_case_context(case_id)
+            except Exception as e:
+                logger.warning(f"KG context fetch failed: {e}")
+            
+            # Step 4: Use LLM to synthesize actionable intelligence
+            logger.info(f"[INTELLIGENCE] Generating synthesis with LLM for {case_id}")
+            
+            synthesis_prompt = f"""
+You are a legal intelligence analyst. Analyze the following case data and generate actionable intelligence.
+
+CASE ID: {case_id}
+
+IDENTIFIED LEGAL THEORIES:
+{theories[:3] if theories else "No theories generated yet"}
+
+TIMELINE EVENTS:
+{len(timeline_events)} events found
+
+KNOWLEDGE GRAPH CONTEXT:
+{str(kg_context)[:1500] if kg_context else "No graph context available"}
+
+Generate a concise intelligence report with:
+1. STRONGEST THEORY: Which legal theory has the best support and why?
+2. KEY FACT PATTERNS: Top 3 patterns that emerge from the evidence
+3. CRITICAL WEAKNESSES: Top 3 gaps or vulnerabilities in the case
+4. RECOMMENDED NEXT STEPS: Top 3 immediate actions to strengthen the case
+5. SUMMARY: 2-3 sentence executive summary
+
+Return as JSON with keys: strongest_theory, fact_patterns, weaknesses, next_steps, summary
+"""
+            
+            llm_response = await self.llm_service.generate_text(synthesis_prompt)
+            
+            # Parse LLM response
+            try:
+                import json
+                # Clean markdown if present
+                if "```json" in llm_response:
+                    llm_response = llm_response.split("```json")[1].split("```")[0]
+                elif "```" in llm_response:
+                    llm_response = llm_response.split("```")[1].split("```")[0]
+                
+                synthesis = json.loads(llm_response.strip())
+                result["fact_patterns"] = synthesis.get("fact_patterns", [])
+                result["weaknesses"] = synthesis.get("weaknesses", [])
+                result["next_steps"] = synthesis.get("next_steps", [])
+                result["report_summary"] = synthesis.get("summary", "")
+                result["strongest_theory"] = synthesis.get("strongest_theory", "")
+                
+            except json.JSONDecodeError:
+                # Fallback: store raw response as summary
+                result["report_summary"] = llm_response[:1000]
+            
+            # Step 5: Store intelligence report in KG for future reference
+            try:
+                from backend.app.services.knowledge_graph_service import get_knowledge_graph_service
+                kg_service = get_knowledge_graph_service()
+                await kg_service.add_entity("IntelligenceReport", {
+                    "id": f"intel_{case_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    "case_id": case_id,
+                    "theories": str(result["theories"][:3]),
+                    "fact_patterns": str(result["fact_patterns"]),
+                    "weaknesses": str(result["weaknesses"]),
+                    "next_steps": str(result["next_steps"]),
+                    "summary": result["report_summary"],
+                    "created_at": datetime.now().isoformat(),
+                })
+                logger.info(f"[INTELLIGENCE] Report stored in KG for {case_id}")
+            except Exception as e:
+                logger.warning(f"Failed to store report in KG: {e}")
+            
+            logger.info(f"[INTELLIGENCE] Case intelligence synthesis complete for {case_id}")
+            
+        except Exception as e:
+            logger.error(f"[INTELLIGENCE] Synthesis failed for {case_id}: {e}", exc_info=True)
+            result["status"] = "partial"
+            result["error"] = str(e)
+        
+        return result
+

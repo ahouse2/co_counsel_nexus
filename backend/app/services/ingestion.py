@@ -48,6 +48,7 @@ from backend.ingestion.metrics import record_job_transition, record_queue_event
 from backend.ingestion.loader_registry import LoaderRegistry
 from backend.ingestion.ocr import OcrEngine
 from backend.ingestion.pipeline import run_ingestion_pipeline
+from backend.app.services.autonomous_orchestrator import get_orchestrator, SystemEvent, EventType
 from backend.ingestion.settings import build_runtime_config
 
 _TEXT_EXTENSIONS = {".txt", ".md", ".json", ".log", ".rtf", ".html", ".htm"}
@@ -921,6 +922,13 @@ class IngestionService:
         # search for relevant case law and statutes, then upsert findings to KG
         # ═══════════════════════════════════════════════════════════════════════════
         self._trigger_autonomous_research(job_id, all_documents, job_record)
+        
+        # ═══════════════════════════════════════════════════════════════════════════
+        # AUTONOMOUS ORCHESTRATOR TRIGGER (Full Intelligence Pipeline)
+        # Dispatch BATCH_INGESTION_COMPLETE event to trigger the 6-stage autonomous
+        # pipeline: Narrative → Research → Trial Prep → Forensics → Drafting → Simulation
+        # ═══════════════════════════════════════════════════════════════════════════
+        self._trigger_autonomous_pipeline(job_id, all_documents, job_record)
 
     def _ensure_job_defaults(
         self, job_record: Dict[str, object], sources: List[IngestionSource]
@@ -1152,7 +1160,113 @@ class IngestionService:
             extra={"job_id": job_id, "document_count": len(documents)}
         )
 
+    def _trigger_autonomous_pipeline(
+        self,
+        job_id: str,
+        documents: List[IngestedDocument],
+        job_record: Dict[str, object],
+    ) -> None:
+        """
+        Trigger the full autonomous intelligence pipeline via the Orchestrator.
+        
+        This dispatches the BATCH_INGESTION_COMPLETE event which triggers:
+        Stage 1: NarrativeSwarm - Build timeline & detect contradictions
+        Stage 2: LegalResearchSwarm - Find relevant precedents
+        Stage 3: TrialPrepSwarm - Prepare trial materials
+        Stage 4: ForensicsSwarm - Scan evidence integrity
+        Stage 5: DraftingSwarm - Generate initial briefs
+        Stage 6: SimulationSwarm - Predict outcomes
+        """
+        if not documents:
+            return
+        
+        # Get case_id from job record or first document metadata
+        sources = job_record.get("sources", [])
+        case_id = None
+        if sources and isinstance(sources[0], dict):
+            case_id = sources[0].get("metadata", {}).get("case_id")
+        
+        if not case_id:
+            if documents and documents[0].metadata:
+                case_id = documents[0].metadata.get("case_id")
+        
+        if not case_id:
+            case_id = f"case_{job_id[:8]}"
+        
+        def run_pipeline_in_thread():
+            """Execute autonomous pipeline in a new event loop."""
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    orchestrator = get_orchestrator()
+                    
+                    # Publish the batch completion event
+                    event = SystemEvent(
+                        event_type=EventType.BATCH_INGESTION_COMPLETE,
+                        case_id=case_id,
+                        source_service="IngestionService",
+                        payload={
+                            "job_id": job_id,
+                            "doc_count": len(documents),
+                            "document_ids": [doc.id for doc in documents],
+                            "case_id": case_id,
+                        }
+                    )
+                    
+                    # Start orchestrator if not already running
+                    loop.run_until_complete(orchestrator.start())
+                    loop.run_until_complete(orchestrator.publish(event))
+                    
+                    self.logger.info(
+                        "[AUTONOMOUS] BATCH_INGESTION_COMPLETE event dispatched",
+                        extra={
+                            "job_id": job_id,
+                            "case_id": case_id,
+                            "doc_count": len(documents)
+                        }
+                    )
+                    
+                finally:
+                    loop.close()
+                    
+                self._audit_job_event(
+                    job_id,
+                    action="ingest.autonomous_pipeline.triggered",
+                    outcome="success",
+                    metadata={
+                        "documents": len(documents),
+                        "case_id": case_id,
+                        "pipeline_stages": 6,
+                    },
+                    actor=self._job_actor(job_record),
+                )
+                
+            except Exception as exc:
+                self.logger.warning(
+                    "Autonomous pipeline trigger failed (non-blocking)",
+                    extra={"job_id": job_id, "error": str(exc)}
+                )
+                self._audit_job_event(
+                    job_id,
+                    action="ingest.autonomous_pipeline.failed",
+                    outcome="error",
+                    metadata={"error": str(exc)},
+                    actor=self._job_actor(job_record),
+                    severity="warning",
+                )
+        
+        # Schedule pipeline in background thread (non-blocking)
+        self.executor.submit(run_pipeline_in_thread)
+        
+        self.logger.info(
+            "[AUTONOMOUS] Intelligence pipeline triggered",
+            extra={"job_id": job_id, "document_count": len(documents), "case_id": case_id}
+        )
+
     # endregion
+
 
     # region ingestion helpers
 
