@@ -5,6 +5,7 @@ import ForceGraph2D from 'react-force-graph-2d';
 import { Sankey, Tooltip, ResponsiveContainer } from 'recharts';
 import { Search, DollarSign, AlertTriangle, Wallet, Globe, Briefcase, FileText, ExternalLink, ArrowRight, Activity } from 'lucide-react';
 import { endpoints } from '../../services/api';
+import { useHalo } from '../../context/HaloContext';
 
 interface CryptoResult {
     address: string;
@@ -42,6 +43,7 @@ const MOCK_SANKEY_DATA = {
 };
 
 export function AssetHunterModule() {
+    const { caseId } = useHalo();
     const [mode, setMode] = useState<'crypto' | 'assets' | 'flow'>('crypto');
     const [address, setAddress] = useState('');
     const [chain, setChain] = useState('BTC');
@@ -75,7 +77,7 @@ export function AssetHunterModule() {
     const handleScan = async () => {
         setLoading(true);
         try {
-            const response = await endpoints.financial.scanAssets('default_case');
+            const response = await endpoints.financial.scanAssets(caseId);
             setAssetResult(response.data);
         } catch (error) {
             console.error("Scan failed:", error);

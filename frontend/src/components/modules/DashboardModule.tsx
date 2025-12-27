@@ -24,7 +24,7 @@ interface PipelineStatus {
 }
 
 export const DashboardModule: React.FC = () => {
-    const { caseId, setActiveModule, createCase, cases } = useHalo();
+    const { caseId, setActiveModule, createCase } = useHalo();
     const [activities, setActivities] = useState<ActivityEntry[]>([]);
     const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
     const [loading, _setLoading] = useState(false);

@@ -18,9 +18,10 @@ export function CaseSelector() {
     const [newCaseName, setNewCaseName] = useState('');
 
     const currentCase = cases.find(c => c.id === caseId);
+    const noCase = !currentCase && caseId === 'default_case';
     const displayName = currentCase
         ? `${currentCase.case_number || ''} ${currentCase.name}`.trim()
-        : caseId === 'default_case'
+        : noCase
             ? '⚠️ No Case Selected'
             : 'Select Case';
 
@@ -36,15 +37,20 @@ export function CaseSelector() {
 
     return (
         <div className="relative">
-            {/* Trigger Button */}
+            {/* Trigger Button - with warning state when no case */}
             <button
                 onClick={() => { setIsOpen(!isOpen); refreshCases(); }}
-                className="w-full flex items-center justify-between gap-2 p-3 rounded-lg bg-halo-cyan/10 border border-halo-cyan/30 hover:border-halo-cyan/50 transition-all"
+                className={`w-full flex items-center justify-between gap-2 p-3 rounded-lg transition-all ${noCase
+                        ? 'bg-amber-500/20 border-2 border-amber-500 animate-pulse shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                        : 'bg-halo-cyan/10 border border-halo-cyan/30 hover:border-halo-cyan/50'
+                    }`}
                 title="Select Case"
             >
                 <div className="flex items-center gap-2 min-w-0">
-                    <Briefcase size={16} className="text-halo-cyan flex-shrink-0" />
-                    <span className="text-sm text-halo-text truncate">{displayName}</span>
+                    <Briefcase size={16} className={noCase ? 'text-amber-500' : 'text-halo-cyan'} />
+                    <span className={`text-sm truncate ${noCase ? 'text-amber-400 font-medium' : 'text-halo-text'}`}>
+                        {displayName}
+                    </span>
                 </div>
                 <ChevronDown size={14} className={`text-halo-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} />
             </button>

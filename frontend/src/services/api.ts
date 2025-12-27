@@ -46,7 +46,7 @@ export const endpoints = {
     // Chat / Agents
     agents: {
         list: () => api.get('/agents/'),
-        chat: (message: string) => api.post('/agents/chat', { message }),
+        chat: (message: string, caseId: string = 'default_case') => api.post('/agents/chat', { message, case_id: caseId }),
         run: (task: string, caseId: string) => api.post('/api/agents/run', { task, case_id: caseId }),
     },
     // Documents

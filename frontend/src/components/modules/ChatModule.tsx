@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Loader2 } from 'lucide-react';
 import { endpoints } from '../../services/api';
+import { useHalo } from '../../context/HaloContext';
 
 interface Message {
     id: number;
@@ -10,6 +11,7 @@ interface Message {
 }
 
 export function ChatModule() {
+    const { caseId } = useHalo();
     const [messages, setMessages] = useState<Message[]>([
         { id: 1, role: 'system', content: 'Neuro-SAN Agent System Online. How can I assist with the discovery process?' }
     ]);
@@ -34,8 +36,8 @@ export function ChatModule() {
         setIsLoading(true);
 
         try {
-            // Call API
-            const response = await endpoints.agents.chat(userMsg.content);
+            // Call API with caseId for context
+            const response = await endpoints.agents.chat(userMsg.content, caseId);
             const botResponse = response.data.response || "I processed your request but received no specific output.";
 
             // Add bot message with typing effect placeholder
