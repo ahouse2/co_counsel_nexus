@@ -201,7 +201,7 @@ export const endpoints = {
     // Case Management
     cases: {
         list: (skip = 0, limit = 100) => api.get(`/api/cases/?skip=${skip}&limit=${limit}`),
-        create: (data: { name: string; description?: string }) => api.post('/api/cases/', data),
+        create: (data: { name: string; description?: string }) => api.post('/api/cases', data),
         get: (caseId: string) => api.get(`/api/cases/${caseId}`),
         update: (caseId: string, data: { name?: string; description?: string }) => api.put(`/api/cases/${caseId}`, data),
         delete: (caseId: string) => api.delete(`/api/cases/${caseId}`),
